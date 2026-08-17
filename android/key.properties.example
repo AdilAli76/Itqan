@@ -1,0 +1,9 @@
+# انسخ هذا الملف إلى android/key.properties واملأ القيم الحقيقية.
+# key.properties و ملف الـ .jks مستثنيان في android/.gitignore — لا تُرفع أبداً.
+# فقدان هذا المفتاح = عدم القدرة على نشر تحديث للتطبيق نفسه إلى الأبد.
+
+storePassword=<كلمة مرور المخزن>
+keyPassword=<كلمة مرور المفتاح>
+keyAlias=kinetic
+# مسار مطلق أفضل، أو نسبي إلى مجلد android/app
+storeFile=C:\\keys\\kinetic-release.jks

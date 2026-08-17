@@ -1,0 +1,19 @@
+# توحيد نهايات الأسطر: تُخزَّن في المستودع بـ LF دائماً، ويتكيّف Git مع
+# نظام كل مطوّر عند السحب. بدون هذا يظهر المشروع كله "معدَّلاً" عند فتحه
+# على نظام آخر لمجرد اختلاف CRLF/LF.
+* text=auto eol=lf
+
+# ملفات ويندوز التي يجب أن تبقى CRLF
+*.ps1   text eol=crlf
+*.bat   text eol=crlf
+*.cmd   text eol=crlf
+
+# ملفات ثنائية — لا تُمسّ نهاياتها
+*.png   binary
+*.jpg   binary
+*.ico   binary
+*.jks   binary
+*.keystore binary
+*.ttf   binary
+*.otf   binary
+*.pdf   binary

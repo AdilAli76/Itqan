@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  سياسة الشبكة لنسخة الإنتاج: HTTPS فقط، تماشياً مع DEPLOYMENT.md
+  ("لا تشغّل نظاماً مالياً على HTTP").
+  إن كان سيرفر العميل داخل الشبكة المحلية بشهادة موقّعة داخلياً، أضف
+  الشهادة الجذر إلى res/raw وأدرجها في <trust-anchors> لنطاق ذلك السيرفر
+  بدلاً من السماح بـ cleartext.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system"/>
+        </trust-anchors>
+    </base-config>
+</network-security-config>

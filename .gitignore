@@ -1,0 +1,74 @@
+# Miscellaneous
+*.class
+*.log
+*.pyc
+*.swp
+.DS_Store
+.atom/
+.build/
+.buildlog/
+.history
+.svn/
+.swiftpm/
+migrate_working_dir/
+
+# IntelliJ related
+*.iml
+*.ipr
+*.iws
+.idea/
+
+# The .vscode folder contains launch configuration and tasks you configure in
+# VS Code which you may wish to be included in version control, so this line
+# is commented out by default.
+#.vscode/
+
+# Flutter/Dart/Pub related
+**/doc/api/
+**/ios/Flutter/.last_build_id
+.dart_tool/
+.flutter-plugins-dependencies
+.pub-cache/
+.pub/
+/build/
+/coverage/
+
+# Symbolication related
+app.*.symbols
+
+# Obfuscation related
+app.*.map.json
+
+# Android Studio will place build artifacts here
+/android/app/debug
+/android/app/profile
+/android/app/release
+
+# إعدادات أدوات محلية — تحوي مسارات مطلقة على جهاز المطوّر (مسار Flutter SDK)
+# لا تصلح لجهاز آخر
+.claude/
+
+# ---------------------------------------------------------------------------
+# .NET Backend — مخرجات البناء (عشرات الميغابايت، تُبنى من المصدر)
+# ---------------------------------------------------------------------------
+[Bb]in/
+[Oo]bj/
+*.user
+
+# ---------------------------------------------------------------------------
+# الأسرار — لا تُرفع أبداً
+#
+# appsettings.json المُرفوع يحوي قيماً فارغة فقط؛ القيم الحقيقية (سلسلة
+# الاتصال ومفتاح توقيع JWT) تعيش هنا وحدها أو في متغيّرات البيئة.
+# مفتاح JWT مسرَّب = إمكانية تزوير توكن لأي مستخدم في أي منظمة على السيرفر.
+# ---------------------------------------------------------------------------
+appsettings.Production.json
+appsettings.Development.json
+appsettings.Local.json
+*.pfx
+*.snk
+
+# نسخ قاعدة البيانات الاحتياطية
+*.bak
+*.mdf
+*.ldf

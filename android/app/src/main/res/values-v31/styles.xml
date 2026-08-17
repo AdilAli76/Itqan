@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  أندرويد 12+ (API 31) يتجاهل windowBackground كشاشة إقلاع ويرسم شاشته
+  الخاصة عبر SplashScreen API: لون خلفية + أيقونة موسّطة يقصّها النظام
+  في دائرة. بدون هذا الملف كانت شاشة الإقلاع تظهر بالأبيض الافتراضي على
+  معظم الأجهزة الحديثة مهما عدّلنا launch_background.
+-->
+<resources>
+    <style name="LaunchTheme" parent="@android:style/Theme.Light.NoTitleBar">
+        <item name="android:windowBackground">@drawable/launch_background</item>
+        <item name="android:windowSplashScreenBackground">@color/splash_background</item>
+        <!-- الطبقة الأمامية للأيقونة التكيّفية: مصمَّمة أصلاً بهامش آمن
+             يتحمّل القص الدائري الذي يطبّقه النظام. -->
+        <item name="android:windowSplashScreenAnimatedIcon">@mipmap/ic_launcher_foreground</item>
+    </style>
+
+    <style name="NormalTheme" parent="@android:style/Theme.Light.NoTitleBar">
+        <item name="android:windowBackground">@color/window_background</item>
+    </style>
+</resources>

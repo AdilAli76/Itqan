@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- كحلي "Ink" — AppColors.primary. خلفية شاشة الإقلاع. -->
+    <color name="splash_background">#0B2540</color>
+
+    <!-- AppColors.paper — خلفية نافذة أندرويد بعد انتهاء الإقلاع وقبل رسم
+         Flutter لأول إطار. مطابقتها لخلفية التطبيق تمنع وميضة بيضاء (أو
+         سوداء في الوضع الليلي) بين الشاشتين. -->
+    <color name="window_background">#F6F7F9</color>
+</resources>

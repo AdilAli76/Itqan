@@ -1,0 +1,177 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../core/auth/current_user.dart';
+import '../../core/shell/open_tabs_provider.dart';
+import '../../core/theme/app_colors.dart';
+import '../../core/theme/app_text_styles.dart';
+import '../../core/theme/branding_provider.dart';
+import 'nav_items.dart';
+
+/// الشريط الجانبي الموحّد — أي موديول جديد يُضاف مستقبلاً (حسب
+/// ARCHITECTURE.md) يُسجَّل في nav_items.dart بسطر واحد فقط ويظهر تلقائياً
+/// على كل الشاشات. النقر يفتح تبويباً في AppShell (أو يُنشِّط الموجود منه)،
+/// لا يستبدل الصفحة كلها.
+///
+/// العناصر مجمَّعة في مجموعات قابلة للطي بدل قائمة واحدة من 18 عنصراً —
+/// وعلى الموبايل هذا هو الفرق بين درج قابل للاستخدام ودرج يحتاج تمريراً
+/// طويلاً للوصول لأي شيء.
+class AppSidebar extends ConsumerStatefulWidget {
+  const AppSidebar({super.key, required this.activeRoute});
+  final String activeRoute;
+
+  @override
+  ConsumerState<AppSidebar> createState() => _AppSidebarState();
+}
+
+class _AppSidebarState extends ConsumerState<AppSidebar> {
+  bool _isPlatformAdmin = false;
+
+  @override
+  void initState() {
+    super.initState();
+    readJwtClaims().then((claims) {
+      if (mounted) {
+        setState(() => _isPlatformAdmin = claims?['is_platform_admin'] == 'True');
+      }
+    });
+  }
+
+  void _open(NavItem item) {
+    ref.read(openTabsProvider.notifier).open(item.route, title: item.label, icon: item.icon);
+    // على الموبايل هذا الشريط داخل Drawer قابل للسحب — يجب إغلاقه يدوياً
+    // لأن فتح تبويب لم يعد يُغيّر المسار (go_router) فلا يُغلَق تلقائياً.
+    Scaffold.maybeOf(context)?.closeDrawer();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final groups = navGroupsFor(isPlatformAdmin: _isPlatformAdmin);
+    final branding = ref.watch(brandingProvider).valueOrNull;
+    final color = Theme.of(context).colorScheme.primary;
+
+    return Container(
+      color: AppColors.surface,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Container(
+            height: 64,
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            alignment: Alignment.centerRight,
+            decoration: const BoxDecoration(
+              border: Border(bottom: BorderSide(color: AppColors.border)),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                Flexible(
+                  child: Text(
+                    branding?.displayName ?? 'Kinetic Enterprise',
+                    style: AppTextStyles.headlineMd(),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                if (branding?.logoUrl != null) ...[
+                  const SizedBox(width: 10),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(6),
+                    child: Image.network(
+                      branding!.logoUrl!,
+                      width: 28,
+                      height: 28,
+                      fit: BoxFit.cover,
+                      errorBuilder: (context, error, stack) => const Icon(Icons.hub_outlined, size: 24),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          Expanded(
+            child: ListView(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              children: groups.map((group) {
+                if (group.isSingle) {
+                  return _SidebarTile(
+                    item: group.single,
+                    active: widget.activeRoute == group.single.route,
+                    onTap: () => _open(group.single),
+                  );
+                }
+
+                final hasActive = group.containsRoute(widget.activeRoute);
+                return Theme(
+                  // ExpansionTile يرسم خطَّي فاصل افتراضيين يشوّشان القائمة.
+                  data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+                  child: ExpansionTile(
+                    key: PageStorageKey(group.label),
+                    initiallyExpanded: hasActive,
+                    tilePadding: const EdgeInsets.symmetric(horizontal: 20),
+                    childrenPadding: EdgeInsets.zero,
+                    leading: Icon(group.icon, size: 20, color: hasActive ? color : AppColors.textSecondary),
+                    title: Text(
+                      group.label,
+                      style: AppTextStyles.bodyMd(color: hasActive ? color : AppColors.textPrimary)
+                          .copyWith(fontWeight: hasActive ? FontWeight.w600 : FontWeight.w400),
+                    ),
+                    children: group.items
+                        .map((item) => _SidebarTile(
+                              item: item,
+                              active: widget.activeRoute == item.route,
+                              indented: true,
+                              onTap: () => _open(item),
+                            ))
+                        .toList(),
+                  ),
+                );
+              }).toList(),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SidebarTile extends StatelessWidget {
+  const _SidebarTile({
+    required this.item,
+    required this.active,
+    required this.onTap,
+    this.indented = false,
+  });
+
+  final NavItem item;
+  final bool active;
+  final VoidCallback onTap;
+  final bool indented;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = Theme.of(context).colorScheme.primary;
+    return Material(
+      color: active ? color.withValues(alpha: 0.08) : Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        child: Container(
+          padding: EdgeInsets.only(right: indented ? 44 : 20, left: 20, top: 12, bottom: 12),
+          child: Row(
+            children: [
+              Icon(item.icon, size: indented ? 18 : 20, color: active ? color : AppColors.textSecondary),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  item.label,
+                  style: AppTextStyles.bodyMd(
+                    color: active ? color : AppColors.textPrimary,
+                  ).copyWith(fontWeight: active ? FontWeight.w600 : FontWeight.w400),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}

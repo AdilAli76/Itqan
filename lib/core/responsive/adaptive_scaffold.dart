@@ -1,0 +1,188 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+import '../auth/current_user.dart';
+import '../shell/open_tabs_provider.dart';
+import '../shell/shell_scope.dart';
+import '../theme/app_colors.dart';
+import '../theme/app_text_styles.dart';
+import '../theme/branding_provider.dart';
+import 'breakpoints.dart';
+import '../../shared/widgets/app_navbar.dart';
+import '../../shared/widgets/app_sidebar.dart';
+
+const _roleLabels = {
+  'super_admin': 'مدير عام',
+  'branch_manager': 'مدير فرع',
+  'cashier': 'كاشير',
+  'inventory_officer': 'مسؤول مخزون',
+  'accountant': 'محاسب',
+  'custom': 'دور مخصّص',
+};
+
+/// غلاف كل شاشة في النظام. عندما تُفتَح داخل AppShell (نظام النوافذ/
+/// التبويبات — الحالة الطبيعية دائماً بعد تسجيل الدخول) يكتفي برسم عنوان
+/// الشاشة ومحتواها فقط، فـ AppShell يرسم الـ Scaffold والشريط الجانبي/
+/// العلوي وشريط التبويبات مرة واحدة لكل الشاشات معاً. خارج AppShell (شبكة
+/// أمان نظرية فقط) يرسم نفسه بشكل مستقل كما كانت الحال قبل AppShell.
+///
+/// شارة الدور وزر تسجيل الخروج (كانا شريطاً منفصلاً 48px شبه فارغ في
+/// AppShell._TopBar سابقاً) أصبحا الآن جزءاً من نفس شريط العنوان — يزيلان
+/// شريطاً كاملاً من الفراغ بدل إضافة شريط جديد.
+class AdaptiveScaffold extends ConsumerWidget {
+  const AdaptiveScaffold({
+    super.key,
+    required this.title,
+    required this.body,
+    this.activeRoute = '',
+    this.actions,
+    this.floatingActionButton,
+  });
+
+  final String title;
+  final Widget body;
+  final String activeRoute;
+  final List<Widget>? actions;
+  final Widget? floatingActionButton;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final isDesktop = Breakpoints.isDesktop(context);
+    final insideShell = ShellScope.isActive(context);
+
+    final header = Container(
+      height: 64,
+      padding: const EdgeInsets.symmetric(horizontal: 24),
+      decoration: const BoxDecoration(
+        color: AppColors.surface,
+        border: Border(bottom: BorderSide(color: AppColors.border)),
+      ),
+      child: Row(
+        children: [
+          Text(title, style: Theme.of(context).textTheme.headlineMedium),
+          const Spacer(),
+          if (actions != null) ...actions!,
+          if (insideShell && isDesktop) ...[
+            if (actions != null && actions!.isNotEmpty) ...[
+              const SizedBox(width: 16),
+              const SizedBox(height: 24, child: VerticalDivider(width: 1, color: AppColors.border)),
+              const SizedBox(width: 16),
+            ] else
+              const SizedBox(width: 16),
+            const _HeaderAccountArea(),
+          ],
+        ],
+      ),
+    );
+
+    final content = Expanded(
+      child: LayoutBuilder(
+        builder: (context, constraints) => SingleChildScrollView(
+          padding: const EdgeInsets.all(24),
+          child: ConstrainedBox(
+            // يُوسِّط المحتوى القصير رأسياً بدل تركه ملتصقاً بالأعلى فوق فراغ
+            // رمادي طويل (شكوى "الشريط الفارغ") — وبلا أي أثر على الشاشات
+            // التي محتواها أطول من الشاشة أصلاً (الجداول تتجاوز الحد فتُمرَّر
+            // عادياً من الأعلى كما كانت دائماً).
+            constraints: BoxConstraints(minHeight: (constraints.maxHeight - 48).clamp(0, double.infinity)),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                ConstrainedBox(constraints: const BoxConstraints(maxWidth: 1440), child: body),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+
+    if (insideShell) {
+      // header يحمل أزرار actions (مثل "إضافة فاتورة"/"أمر شراء جديد") —
+      // AppShell لا يعرف عنها إطلاقاً (هي خاصة بكل شاشة على حدة)، فلا بد
+      // من رسمها هنا دائماً بصرف النظر عن حجم الشاشة، وإلا اختفت أزرار
+      // الإجراءات كلياً على أي نافذة تُصنَّف "غير ديسكتوب" — وهذا بالضبط
+      // ما كان يمنع إنشاء فاتورة شراء/بيع قبل هذا التصحيح.
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [header, content],
+      );
+    }
+
+    // شبكة أمان: شاشة تُفتَح خارج AppShell (لا يُفترض أن يحدث فعلياً).
+    final navLayout = ref.watch(brandingProvider).valueOrNull?.navLayout ?? 'sidebar';
+    final useNavbar = isDesktop && navLayout == 'navbar';
+    final useSidebar = isDesktop && !useNavbar;
+
+    return Scaffold(
+      backgroundColor: AppColors.paper,
+      appBar: isDesktop
+          ? null
+          : AppBar(
+              title: Text(title),
+              actions: actions,
+            ),
+      drawer: isDesktop ? null : Drawer(child: AppSidebar(activeRoute: activeRoute)),
+      floatingActionButton: floatingActionButton,
+      body: useSidebar
+          ? Row(
+              children: [
+                SizedBox(
+                  width: 264,
+                  child: AppSidebar(activeRoute: activeRoute),
+                ),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [header, content],
+                  ),
+                ),
+              ],
+            )
+          : useNavbar
+              ? Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    AppNavbar(activeRoute: activeRoute),
+                    header,
+                    content,
+                  ],
+                )
+              : SingleChildScrollView(
+                  padding: const EdgeInsets.all(16),
+                  child: body,
+                ),
+    );
+  }
+}
+
+class _HeaderAccountArea extends ConsumerWidget {
+  const _HeaderAccountArea();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return FutureBuilder<Map<String, dynamic>?>(
+      future: readJwtClaims(),
+      builder: (context, snapshot) {
+        final role = snapshot.data?['role'] as String?;
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (role != null) ...[
+              Text(_roleLabels[role] ?? role, style: AppTextStyles.bodyMd(color: AppColors.textSecondary)),
+              const SizedBox(width: 8),
+            ],
+            IconButton(
+              onPressed: () async {
+                await performLogout(ref);
+                if (context.mounted) context.go('/login');
+              },
+              icon: const Icon(Icons.logout, size: 20),
+              tooltip: 'تسجيل الخروج',
+            ),
+          ],
+        );
+      },
+    );
+  }
+}

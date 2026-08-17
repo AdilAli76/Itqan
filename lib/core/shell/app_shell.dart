@@ -1,0 +1,184 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+import '../responsive/breakpoints.dart';
+import '../theme/app_colors.dart';
+import '../theme/app_text_styles.dart';
+import '../theme/branding_provider.dart';
+import '../../shared/widgets/app_navbar.dart';
+import '../../shared/widgets/app_sidebar.dart';
+import '../../shared/widgets/nav_items.dart';
+import 'open_tabs_provider.dart';
+import 'screen_registry.dart';
+import 'shell_scope.dart';
+
+/// الحاوية الدائمة لكل شاشات النظام بعد تسجيل الدخول — تُبنى مرة واحدة فقط
+/// وتبقى حيّة طوال الجلسة. فتح شاشة جديدة = تبويب جديد في IndexedStack
+/// (يبقى حيّاً بكل حالته: تمرير، فلاتر، نماذج مفتوحة)، لا استبدال الصفحة
+/// كلها من الصفر كما كان الحال سابقاً — هذا تحديداً ما يحلّ شكوى "فتح شاشة
+/// وحدة يشعرك وكأنك فتحت النظام من أول مرة".
+///
+/// شريط الحالة العلوي (الدور/تسجيل الخروج) لم يعد شريطاً مستقلاً هنا —
+/// دُمج داخل AdaptiveScaffold.header نفسه (راجع تعليقه) لأن وجوده كشريط
+/// منفصل كان يضيف ~48px من فراغ شبه فارغ فوق كل شاشة، إضافة لتكرار عنوان
+/// الشاشة مع شريط التبويبات أدناه.
+class AppShell extends ConsumerStatefulWidget {
+  const AppShell({super.key, this.initialRoute = '/dashboard'});
+  final String initialRoute;
+
+  @override
+  ConsumerState<AppShell> createState() => _AppShellState();
+}
+
+class _AppShellState extends ConsumerState<AppShell> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final tabs = ref.read(openTabsProvider);
+      if (tabs.tabs.isEmpty) {
+        final item = kNavItems.firstWhere(
+          (i) => i.route == widget.initialRoute,
+          orElse: () => kNavItems.first,
+        );
+        ref.read(openTabsProvider.notifier).open(item.route, title: item.label, icon: item.icon);
+      }
+    });
+  }
+
+  Future<void> _logout() async {
+    await performLogout(ref);
+    if (mounted) context.go('/login');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final tabsState = ref.watch(openTabsProvider);
+    final isDesktop = Breakpoints.isDesktop(context);
+    final navLayout = ref.watch(brandingProvider).valueOrNull?.navLayout ?? 'sidebar';
+    final useNavbar = isDesktop && navLayout == 'navbar';
+    final useSidebar = isDesktop && !useNavbar;
+    final activeIndex = tabsState.tabs.indexWhere((t) => t.route == tabsState.activeRoute);
+
+    // شريط التبويبات يُخفى تلقائياً عند وجود تبويب واحد فقط (الحالة
+    // الشائعة) — عندها يصبح عنوانه مطابقاً حرفياً لعنوان الشاشة في
+    // AdaptiveScaffold.header فيكون تكراراً بحتاً بلا فائدة إضافية.
+    final tabBar = isDesktop && tabsState.tabs.length > 1 ? _TabBar(tabsState: tabsState) : null;
+
+    final content = ShellScope(
+      child: tabsState.tabs.isEmpty
+          ? const SizedBox.shrink()
+          : IndexedStack(
+              index: activeIndex < 0 ? 0 : activeIndex,
+              children: tabsState.tabs
+                  .map((t) => KeyedSubtree(key: ValueKey(t.route), child: buildScreenForRoute(t.route)))
+                  .toList(),
+            ),
+    );
+
+    return Scaffold(
+      backgroundColor: AppColors.paper,
+      appBar: isDesktop
+          ? null
+          : AppBar(
+              title: Text(tabsState.tabs.isEmpty ? '' : (tabsState.tabs.firstWhere((t) => t.route == tabsState.activeRoute, orElse: () => tabsState.tabs.first)).title),
+              actions: [
+                IconButton(onPressed: _logout, icon: const Icon(Icons.logout), tooltip: 'تسجيل الخروج'),
+              ],
+            ),
+      drawer: isDesktop ? null : Drawer(child: AppSidebar(activeRoute: tabsState.activeRoute ?? '')),
+      body: useSidebar
+          ? Row(
+              children: [
+                SizedBox(
+                  width: 264,
+                  child: AppSidebar(activeRoute: tabsState.activeRoute ?? ''),
+                ),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      if (tabBar != null) tabBar,
+                      Expanded(child: content),
+                    ],
+                  ),
+                ),
+              ],
+            )
+          : useNavbar
+              ? Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    AppNavbar(activeRoute: tabsState.activeRoute ?? ''),
+                    if (tabBar != null) tabBar,
+                    Expanded(child: content),
+                  ],
+                )
+              : content,
+    );
+  }
+}
+
+/// شريط التبويبات المفتوحة — نفس فكرة تبويبات المتصفح: نقرة تُنشِّط، زر ×
+/// يُغلق. هذا هو "التصغير/الإخفاء" الذي طُلب: إغلاق تبويب لا يخسر باقي
+/// التبويبات المفتوحة، وإعادة فتح نفس الشاشة لاحقاً يفتح تبويباً جديداً
+/// نظيفاً (وليس استرجاعاً لحالة قديمة، بعكس التبديل بين تبويبات موجودة).
+class _TabBar extends ConsumerWidget {
+  const _TabBar({required this.tabsState});
+  final TabsState tabsState;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final color = Theme.of(context).colorScheme.primary;
+    return Container(
+      height: 40,
+      color: AppColors.paper,
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        child: Row(
+          children: tabsState.tabs.map((tab) {
+            final active = tab.route == tabsState.activeRoute;
+            return Padding(
+              padding: const EdgeInsets.only(left: 4),
+              child: Material(
+                color: active ? AppColors.surface : Colors.transparent,
+                borderRadius: BorderRadius.circular(8),
+                child: InkWell(
+                  onTap: () => ref.read(openTabsProvider.notifier).activate(tab.route),
+                  borderRadius: BorderRadius.circular(8),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: active ? color : Colors.transparent),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(tab.icon, size: 14, color: active ? color : AppColors.textSecondary),
+                        const SizedBox(width: 6),
+                        Text(
+                          tab.title,
+                          style: AppTextStyles.bodyMd(color: active ? color : AppColors.textSecondary)
+                              .copyWith(fontSize: 12, fontWeight: active ? FontWeight.w600 : FontWeight.w400),
+                        ),
+                        const SizedBox(width: 6),
+                        InkWell(
+                          onTap: () => ref.read(openTabsProvider.notifier).close(tab.route),
+                          borderRadius: BorderRadius.circular(10),
+                          child: const Icon(Icons.close, size: 14),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            );
+          }).toList(),
+        ),
+      ),
+    );
+  }
+}
