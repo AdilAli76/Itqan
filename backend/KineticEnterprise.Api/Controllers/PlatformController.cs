@@ -85,7 +85,20 @@ public class PlatformController : ControllerBase
         ("inventory_officer", "suppliers.manage"), ("inventory_officer", "stock_transfer.manage"),
         ("inventory_officer", "stock_count.manage"), ("inventory_officer", "purchasing.manage"),
         ("branch_manager", "purchasing.manage"),
-        ("cashier", "customers.manage"), ("cashier", "customers.wallet_adjust"), ("cashier", "invoices.refund"),
+        // إصدار البطاقات وضبط أرقامها السرية: مدير الفرع فما فوق فقط.
+        ("branch_manager", "cards.issue"),
+
+        // الكاشير: بيع واسترجاع وتعديل بيانات العملاء — لا أكثر.
+        //
+        // سُحبت منه customers.wallet_adjust و(ضمناً) إصدار البطاقات، لأن
+        // اجتماعهما كان يفتح باب خلق نقود: إنشاء عميل وهمي ← إصدار بطاقة له
+        // ← شحنها بمبلغ لم يدخل الصندوق ← ضبط رقمها السري ← إنفاقها على
+        // بضاعة حقيقية. المخزون ينقص والإيراد لا يزيد، ولا يكشفه إلا جرد.
+        //
+        // البيع من محفظة العميل لا يتأثر: حركة الخصم تُكتب داخل
+        // InvoicesController بعد التحقق من الرقم السري، لا عبر نقطة
+        // wallet-adjustments المحروسة بهذه الصلاحية.
+        ("cashier", "customers.manage"), ("cashier", "invoices.refund"),
     };
 
     [HttpPost]
@@ -109,6 +122,15 @@ public class PlatformController : ControllerBase
         if (!ValidTiers.Contains(request.PlanTier))
         {
             return BadRequest(new { message = "باقة ترخيص غير معروفة" });
+        }
+
+        // من هنا جاء التكرار الذي وُجد على قاعدة التطوير: إنشاء منظمة جديدة
+        // بنفس بريد مدير منظمة قائمة. تسجيل الدخول يبحث بالبريد بلا منظمة،
+        // فيصبح الدخول بهذا البريد غير محدَّد النتيجة بين المنظمتين.
+        var adminEmail = request.AdminEmail.Trim();
+        if (await _db.AppUsers.AnyAsync(u => u.IsActive && u.Email == adminEmail))
+        {
+            return Conflict(new { message = "بريد المدير العام مستخدَم بالفعل على حساب نشط في منظمة أخرى — استخدم بريداً مختلفاً" });
         }
 
         var orgId = Guid.NewGuid();
@@ -171,7 +193,7 @@ public class PlatformController : ControllerBase
                 OrganizationId = orgId,
                 BranchId = null,
                 FullName = request.AdminFullName,
-                Email = request.AdminEmail,
+                Email = adminEmail,
                 PasswordHash = BCrypt.Net.BCrypt.HashPassword(request.AdminPassword),
                 Role = "super_admin",
                 IsActive = true,

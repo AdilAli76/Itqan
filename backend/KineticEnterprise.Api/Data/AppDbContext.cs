@@ -61,6 +61,16 @@ public class AppDbContext : DbContext
         modelBuilder.Entity<CustomerCardIndex>().ToTable("customer_card_index").HasKey(c => c.CardCode);
         modelBuilder.Entity<CustomerPinAttempt>().ToTable("customer_pin_attempts");
         modelBuilder.Entity<Invoice>().ToTable("invoices");
+        // فهرس فريد على مفتاح العميل: هو الضمانة النهائية ضد الازدواج.
+        // الفحص في الـController يمنع الحالة الشائعة، لكن طلبين متزامنين
+        // بالمفتاح نفسه (إعادة محاولة تلقائية مع بطء الشبكة) قد يمرّان معاً
+        // من الفحص قبل أن يُحفظ أيّهما. القيد في قاعدة البيانات يمنع ذلك
+        // مهما كان التزامن — والفلتر يسمح بتعدّد NULL للفواتير المُنشأة
+        // مباشرةً بلا مفتاح.
+        modelBuilder.Entity<Invoice>()
+            .HasIndex(i => i.ClientRequestId)
+            .IsUnique()
+            .HasFilter("[ClientRequestId] IS NOT NULL");
         modelBuilder.Entity<InvoiceItem>().ToTable("invoice_items");
         modelBuilder.Entity<InvoicePayment>().ToTable("invoice_payments");
         modelBuilder.Entity<NotificationItem>().ToTable("notifications");

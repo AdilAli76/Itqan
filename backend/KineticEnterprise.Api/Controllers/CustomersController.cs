@@ -14,6 +14,11 @@ public record WalletAdjustmentRequest(decimal AmountDelta, string? Note);
 public record IssueCardRequest(string Pin);
 public record IssuedCardDto(string CardCode);
 
+/// صفحة عملاء: العناصر مع العدد الكلي المطابق للفلتر — الواجهة تحتاج
+/// العدد الكلي لا عدد الصفحة، وإلا تعذّر عليها رسم "عرض 1–50 من 1,240"
+/// ولا معرفة ما إذا كانت هناك صفحة تالية أصلاً.
+public record CustomerPageDto(List<CustomerDto> Items, int TotalCount, int Page, int PageSize);
+
 public record CustomerDto(
     Guid Id, Guid OrganizationId, Guid? BranchId, string FullName, string? Phone,
     string? Email, string? Notes, string? CardBarcode,
@@ -42,9 +47,27 @@ public class CustomersController : ControllerBase
     private readonly AppDbContext _db;
     public CustomersController(AppDbContext db) => _db = db;
 
+    /// <summary>
+    /// قائمة العملاء مقسَّمة صفحات. كانت تُعيد كل العملاء دفعة واحدة، ومعهم
+    /// استعلام أرصدة محفظة لكل واحد — أي أن تكلفة فتح الشاشة كانت تنمو خطياً
+    /// مع عدد عملاء المنظمة بلا سقف. مع خمسة آلاف عميل يعني ذلك تجميد
+    /// الواجهة ثوانيَ في كل فتح، وهو أشهر ما يُشتكى منه بوصف "النظام بطيء".
+    ///
+    /// الشكل المُعاد صار مغلَّفاً {items, totalCount, page, pageSize} على غرار
+    /// AuditLogsController — وهو تغيير كاسر للعقد، حُدِّث معه كل مستهلك في
+    /// التطبيق (شاشة العملاء، بحث الزبون في نقطة البيع، شاشة بطاقات المحفظة).
+    /// </summary>
     [HttpGet]
-    public async Task<ActionResult<List<CustomerDto>>> GetAll([FromQuery] string? search)
+    public async Task<ActionResult<CustomerPageDto>> GetAll(
+        [FromQuery] string? search,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 50)
     {
+        page = Math.Max(1, page);
+        // السقف 200 يمنع عميلاً (أو خطأً برمجياً) من طلب الجدول كله بحجّة
+        // أنه "صفحة واحدة كبيرة"، فتعود المشكلة نفسها من الباب الخلفي.
+        pageSize = Math.Clamp(pageSize, 1, 200);
+
         var query = _db.Customers.Where(c => !c.IsDeleted);
         if (!string.IsNullOrWhiteSpace(search))
         {
@@ -54,7 +77,12 @@ public class CustomersController : ControllerBase
                 (c.Email != null && c.Email.Contains(search)) ||
                 (c.CardBarcode != null && c.CardBarcode.Contains(search)));
         }
-        var customers = await query.OrderBy(c => c.FullName).ToListAsync();
+
+        var totalCount = await query.CountAsync();
+        var customers = await query.OrderBy(c => c.FullName)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToListAsync();
 
         // استعلام تجميع واحد لكل العملاء المعروضين بدل استعلام لكل صف.
         var ids = customers.Select(c => c.Id).ToList();
@@ -70,10 +98,12 @@ public class CustomersController : ControllerBase
                 .Select(s => new { s.Id, s.Name })
                 .ToDictionaryAsync(s => s.Id, s => s.Name);
 
-        return customers
+        var items = customers
             .Select(c => ToDto(c, balances.GetValueOrDefault(c.Id),
                 c.SponsorId is null ? null : sponsorNames.GetValueOrDefault(c.SponsorId.Value)))
             .ToList();
+
+        return new CustomerPageDto(items, totalCount, page, pageSize);
     }
 
     /// <summary>
@@ -263,7 +293,9 @@ public class CustomersController : ControllerBase
     /// الرقم السري لا يُخزَّن ولا يُعرض نصاً أبداً بعدها.
     /// </summary>
     [HttpPost("{id:guid}/issue-card")]
-    [RequirePermission("customers.manage")]
+    // إصدار البطاقة ليس تعديل بيانات عميل: البطاقة أداة دفع، ومن يصدرها
+    // ويضبط رقمها السري يستطيع إنفاق رصيدها. صلاحية منفصلة عمداً.
+    [RequirePermission("cards.issue")]
     public async Task<ActionResult<IssuedCardDto>> IssueCard(Guid id, IssueCardRequest request)
     {
         var customer = await _db.Customers.FirstOrDefaultAsync(c => c.Id == id && !c.IsDeleted);

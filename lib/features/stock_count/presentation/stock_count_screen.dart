@@ -9,6 +9,13 @@ import '../../../core/theme/app_text_styles.dart';
 import '../../../shared/widgets/data_table_widget.dart';
 import '../../branches/data/branches_providers.dart';
 import '../data/stock_count_providers.dart';
+import '../../../shared/widgets/filter_chip_button.dart';
+import '../../../shared/widgets/skeleton.dart';
+import '../../../core/auth/permissions.dart';
+
+// ux-audit: ignore UX-03 — أسطر جلسة جرد واحدة، محدودة بما يجرده الموظف
+// فعلياً في الجلسة، ويجب أن تبقى كلها مرئية أمامه دفعةً واحدة: تقسيمها
+// صفحات يُخفي أصنافاً لم تُعدّ بعد فتُنسى.
 
 const _statusLabels = {
   'open': 'قيد العد',
@@ -61,22 +68,32 @@ class StockCountScreen extends ConsumerWidget {
       title: 'الجرد الدوري',
       activeRoute: '/stock-count',
       actions: [
-        ElevatedButton.icon(
-          onPressed: () => _startNewCount(context, ref),
-          icon: const Icon(Icons.add, size: 18),
-          label: const Text('بدء جرد جديد'),
+        Can(
+          permission: Perm.stockCountManage,
+          child: ElevatedButton.icon(
+            onPressed: () => _startNewCount(context, ref),
+            icon: const Icon(Icons.add, size: 18),
+            label: const Text('بدء جرد جديد'),
+          ),
         ),
       ],
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Row(
+          // Wrap لا Row: شرائح الفلاتر تفيض على عرض الهاتف (قياس الفحص
+          // البصري: حتى 233 بكسل). الالتفاف يبقيها كلها ظاهرة وقابلة
+          // للنقر بدل قصّ آخرها بصمت.
+          Wrap(
+            runSpacing: 8,
             children: [
-              _FilterChip(label: 'الكل', selected: statusFilter == null, onTap: () => ref.read(stockCountStatusFilterProvider.notifier).state = null),
+              FilterChipButton(
+                  label: 'الكل',
+                  selected: statusFilter == null,
+                  onTap: () => ref.read(stockCountStatusFilterProvider.notifier).state = null),
               const SizedBox(width: 8),
               ..._statusLabels.entries.map((e) => Padding(
-                    padding: const EdgeInsets.only(left: 8),
-                    child: _FilterChip(
+                    padding: const EdgeInsetsDirectional.only(end: 8),
+                    child: FilterChipButton(
                       label: e.value,
                       selected: statusFilter == e.key,
                       onTap: () => ref.read(stockCountStatusFilterProvider.notifier).state = e.key,
@@ -86,10 +103,7 @@ class StockCountScreen extends ConsumerWidget {
           ),
           const SizedBox(height: 16),
           countsAsync.when(
-            loading: () => const Padding(
-              padding: EdgeInsets.all(48),
-              child: Center(child: CircularProgressIndicator()),
-            ),
+            loading: () => const TableSkeleton(),
             error: (err, _) => Container(
               padding: const EdgeInsets.all(32),
               decoration: BoxDecoration(
@@ -101,7 +115,9 @@ class StockCountScreen extends ConsumerWidget {
                 children: [
                   Text('تعذّر تحميل عمليات الجرد', style: AppTextStyles.bodyMd(color: AppColors.danger)),
                   const SizedBox(height: 12),
-                  OutlinedButton(onPressed: () => ref.invalidate(stockCountsProvider), child: const Text('إعادة المحاولة')),
+                  OutlinedButton(
+                      onPressed: () => ref.invalidate(stockCountsProvider),
+                      child: const Text('إعادة المحاولة')),
                 ],
               ),
             ),
@@ -124,7 +140,8 @@ class StockCountScreen extends ConsumerWidget {
                   Text('${c['itemCount'] ?? 0}'),
                   Text(
                     '$varianceCount',
-                    style: AppTextStyles.bodyMd(color: varianceCount > 0 ? AppColors.warning : AppColors.textSecondary),
+                    style: AppTextStyles.bodyMd(
+                        color: varianceCount > 0 ? AppColors.warning : AppColors.textSecondary),
                   ),
                   Text(createdAt != null ? DateFormat('yyyy-MM-dd HH:mm').format(createdAt) : '-'),
                   IconButton(
@@ -166,38 +183,10 @@ class StockCountScreen extends ConsumerWidget {
       }
     } catch (e) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(_dioErrorMessage(e, 'تعذّر بدء الجرد'))));
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(_dioErrorMessage(e, 'تعذّر بدء الجرد'))));
       }
     }
-  }
-}
-
-class _FilterChip extends StatelessWidget {
-  const _FilterChip({required this.label, required this.selected, required this.onTap});
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final color = Theme.of(context).colorScheme.primary;
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(8),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-        decoration: BoxDecoration(
-          color: selected ? color.withValues(alpha: 0.1) : Colors.transparent,
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: selected ? color : AppColors.border),
-        ),
-        child: Text(
-          label,
-          style: AppTextStyles.labelMd(color: selected ? color : AppColors.textSecondary)
-              .copyWith(fontWeight: selected ? FontWeight.w600 : FontWeight.w500),
-        ),
-      ),
-    );
   }
 }
 
@@ -269,7 +258,8 @@ class _StockCountDetailDialogState extends ConsumerState<_StockCountDetailDialog
 
   TextEditingController _controllerFor(Map<String, dynamic> item) {
     final id = item['id'] as String;
-    return _controllers.putIfAbsent(id, () => TextEditingController(text: _formatQty(item['countedQuantity'])));
+    return _controllers.putIfAbsent(
+        id, () => TextEditingController(text: _formatQty(item['countedQuantity'])));
   }
 
   String _formatQty(dynamic value) => NumberFormat('#,##0.###', 'en').format((value as num?) ?? 0);
@@ -300,7 +290,9 @@ class _StockCountDetailDialogState extends ConsumerState<_StockCountDetailDialog
     final items = List<Map<String, dynamic>>.from(count['items'] as List? ?? []);
     final visibleItems = _search.isEmpty
         ? items
-        : items.where((i) => (i['productName'] as String? ?? '').toLowerCase().contains(_search.toLowerCase())).toList();
+        : items
+            .where((i) => (i['productName'] as String? ?? '').toLowerCase().contains(_search.toLowerCase()))
+            .toList();
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -315,7 +307,8 @@ class _StockCountDetailDialogState extends ConsumerState<_StockCountDetailDialog
         TextField(
           controller: _searchController,
           onChanged: (v) => setState(() => _search = v),
-          decoration: const InputDecoration(hintText: 'بحث عن صنف...', prefixIcon: Icon(Icons.search, size: 18)),
+          decoration:
+              const InputDecoration(hintText: 'بحث عن صنف...', prefixIcon: Icon(Icons.search, size: 18)),
         ),
         const SizedBox(height: 8),
         Expanded(
@@ -335,11 +328,13 @@ class _StockCountDetailDialogState extends ConsumerState<_StockCountDetailDialog
                   children: [
                     Expanded(
                       flex: 3,
-                      child: Text(item['productName'] as String? ?? '', style: AppTextStyles.bodyMd(color: AppColors.textPrimary)),
+                      child: Text(item['productName'] as String? ?? '',
+                          style: AppTextStyles.bodyMd(color: AppColors.textPrimary)),
                     ),
                     Expanded(
                       flex: 2,
-                      child: Text('نظامي: ${_formatQty(systemQty)}', style: AppTextStyles.labelMd(color: AppColors.textMuted)),
+                      child: Text('نظامي: ${_formatQty(systemQty)}',
+                          style: AppTextStyles.labelMd(color: AppColors.textMuted)),
                     ),
                     Expanded(
                       flex: 2,
@@ -361,9 +356,16 @@ class _StockCountDetailDialogState extends ConsumerState<_StockCountDetailDialog
                     SizedBox(
                       width: 60,
                       child: Text(
-                        currentVariance == 0 ? '-' : (currentVariance > 0 ? '+${_formatQty(currentVariance)}' : _formatQty(currentVariance)),
+                        currentVariance == 0
+                            ? '-'
+                            : (currentVariance > 0
+                                ? '+${_formatQty(currentVariance)}'
+                                : _formatQty(currentVariance)),
                         textAlign: TextAlign.end,
-                        style: AppTextStyles.labelMd(color: currentVariance == 0 ? AppColors.textMuted : (currentVariance > 0 ? AppColors.success : AppColors.danger)),
+                        style: AppTextStyles.labelMd(
+                            color: currentVariance == 0
+                                ? AppColors.textMuted
+                                : (currentVariance > 0 ? AppColors.success : AppColors.danger)),
                       ),
                     ),
                   ],
@@ -391,7 +393,8 @@ class _StockCountDetailDialogState extends ConsumerState<_StockCountDetailDialog
                 child: FilledButton(
                   onPressed: _working ? null : () => _finish('reconcile', 'تم اعتماد الجرد وتحديث المخزون'),
                   child: _working
-                      ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                      ? const SizedBox(
+                          width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
                       : const Text('اعتماد الجرد'),
                 ),
               ),

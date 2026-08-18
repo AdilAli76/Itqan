@@ -16,7 +16,16 @@ public record CreateInvoiceRequest(
     Guid BranchId, Guid? CustomerId, string PaymentMethod, List<InvoiceLineRequest> Lines,
     // يُطلَب فقط عند الدفع من محفظة العميل — البطاقة وحدها لا تكفي للصرف،
     // وإلا كان من يجدها ينفقها.
-    string? CustomerPin = null);
+    string? CustomerPin = null,
+    // مفتاح يولّده العميل مرّة واحدة لكل عملية بيع، ويُعيد إرساله مع كل
+    // محاولة مزامنة. هو ما يجعل إعادة الإرسال آمنة: انقطاع الشبكة بعد وصول
+    // الطلب وقبل وصول الرد حالة شائعة جداً في متجر، وبدون هذا المفتاح تُنشأ
+    // الفاتورة مرّتين ويُخصَم المخزون مرّتين — وهو أسوأ ما يمكن أن ينتج عن
+    // ميزة «العمل دون اتصال».
+    string? ClientRequestId = null);
+
+/// صفحة فواتير — نفس شكل CustomerPageDto وAuditLogPageDto.
+public record InvoicePageDto(List<InvoiceListItemDto> Items, int TotalCount, int Page, int PageSize);
 
 public record InvoiceListItemDto(
     Guid Id, string InvoiceNumber, string InvoiceType, string Status,
@@ -52,14 +61,28 @@ public class InvoicesController : ControllerBase
     /// بعلاقة EF مباشرة (تعمّدنا عدم إضافة Navigation Property لعميل حتى لا
     /// نحمّل بيانات العميل الكاملة مع كل استعلام فواتير غير ضروري).
     /// </summary>
+    /// <summary>
+    /// قائمة الفواتير مقسَّمة صفحات.
+    ///
+    /// كانت هذه أخطر نقطة في النظام كله: الاستعلام يجلب كل فاتورة أُنشئت
+    /// منذ بداية التشغيل، ومعها كل بنودها وكل دفعاتها عبر Include مزدوج.
+    /// متجرٌ بعشرين ألف فاتورة كان يحمّل مئات آلاف الصفوف في كل فتح لشاشة
+    /// الفواتير — وهي شاشة تُفتح عشرات المرات يومياً. الترقيم هنا ليس تحسين
+    /// تجربة، بل شرط بقاء النظام صالحاً للعمل بعد سنته الأولى.
+    /// </summary>
     [HttpGet]
-    public async Task<ActionResult<List<InvoiceListItemDto>>> GetAll(
+    public async Task<ActionResult<InvoicePageDto>> GetAll(
         [FromQuery] string? search,
         [FromQuery] string? status,
         [FromQuery] string? invoiceType,
         [FromQuery] DateTime? from,
-        [FromQuery] DateTime? to)
+        [FromQuery] DateTime? to,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 50)
     {
+        page = Math.Max(1, page);
+        pageSize = Math.Clamp(pageSize, 1, 200);
+
         var query = _db.Invoices.Include(i => i.Items).Include(i => i.Payments).AsQueryable();
 
         if (!string.IsNullOrWhiteSpace(status)) query = query.Where(i => i.Status == status);
@@ -67,30 +90,42 @@ public class InvoicesController : ControllerBase
         if (from.HasValue) query = query.Where(i => i.CreatedAt >= from.Value);
         if (to.HasValue) query = query.Where(i => i.CreatedAt < to.Value.AddDays(1));
 
-        var invoices = await query.OrderByDescending(i => i.CreatedAt).ToListAsync();
+        // البحث كان يُطبَّق في الذاكرة بعد جلب كل الفواتير. مع الترقيم كان
+        // ذلك سيصبح خطأً صريحاً: الفلترة تقع على الصفحة الحالية وحدها، فيبحث
+        // المستخدم عن رقم فاتورة موجود فلا يجده لأنه في صفحة أخرى. البحث
+        // ينتقل هنا إلى الاستعلام قبل العدّ والتقطيع.
+        //
+        // بلا StringComparison: الترجمة إلى SQL لا تدعمها، وحساسية الأحرف
+        // تحسمها لغة ترتيب قاعدة البيانات (غير حسّاسة افتراضياً).
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            query = query.Where(i =>
+                i.InvoiceNumber.Contains(search) ||
+                _db.Customers.Any(c => c.Id == i.CustomerId && c.FullName.Contains(search)));
+        }
+
+        // العدّ قبل التقطيع ليعكس كل النتائج المطابقة للفلتر لا الصفحة وحدها.
+        var totalCount = await query.CountAsync();
+        var invoices = await query.OrderByDescending(i => i.CreatedAt)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToListAsync();
 
         var customerIds = invoices.Where(i => i.CustomerId.HasValue).Select(i => i.CustomerId!.Value).Distinct().ToList();
         var customerNames = await _db.Customers
             .Where(c => customerIds.Contains(c.Id))
             .ToDictionaryAsync(c => c.Id, c => c.FullName);
 
-        var result = invoices.Select(i =>
+        var items = invoices.Select(i =>
         {
             customerNames.TryGetValue(i.CustomerId ?? Guid.Empty, out var customerName);
             var paymentMethod = i.Payments.Count == 0 ? "-" : i.Payments.Count == 1 ? i.Payments[0].Method : "متعدد";
             return new InvoiceListItemDto(
                 i.Id, i.InvoiceNumber, i.InvoiceType, i.Status,
                 i.CustomerId, customerName, i.Items.Count, i.TotalAmount, paymentMethod, i.CreatedAt);
-        });
+        }).ToList();
 
-        if (!string.IsNullOrWhiteSpace(search))
-        {
-            result = result.Where(r =>
-                r.InvoiceNumber.Contains(search, StringComparison.OrdinalIgnoreCase) ||
-                (r.CustomerName != null && r.CustomerName.Contains(search, StringComparison.OrdinalIgnoreCase)));
-        }
-
-        return result.ToList();
+        return new InvoicePageDto(items, totalCount, page, pageSize);
     }
 
     [HttpGet("{id:guid}")]
@@ -133,6 +168,17 @@ public class InvoicesController : ControllerBase
     [HttpPost]
     public async Task<ActionResult<Invoice>> Create(CreateInvoiceRequest request)
     {
+        // تعطيل التكرار: إن سبق أن وصلت عملية بهذا المفتاح تُعاد فاتورتها
+        // كما هي بدل إنشاء ثانية. يُفحَص قبل كل شيء — قبل الرقم السري وقبل
+        // المخزون — لأن إعادة الإرسال يجب ألّا تستهلك محاولة رقم سري ولا
+        // تلمس رصيداً.
+        if (!string.IsNullOrWhiteSpace(request.ClientRequestId))
+        {
+            var existing = await _db.Invoices
+                .FirstOrDefaultAsync(i => i.ClientRequestId == request.ClientRequestId);
+            if (existing is not null) return existing;
+        }
+
         var payingFromWallet = request.PaymentMethod == "customer_wallet" && request.CustomerId.HasValue;
         Customer? walletCustomer = null;
 
@@ -159,6 +205,78 @@ public class InvoicesController : ControllerBase
             }
         }
 
+        // ------------------------------------------------------------------
+        // تسعير من جانب السيرفر — لا يُقبل سعر العميل كما هو.
+        //
+        // كان السطر يُحسَب من request.UnitPrice مباشرة بلا أي مقارنة بسعر
+        // الكتالوج، أي أن أي حامل توكن كاشير يستطيع بيع صنف بـ500 دينار
+        // مقابل نصف دينار عبر طلب HTTP مباشر. الفاتورة تُسجَّل "سليمة"
+        // والمخزون يُخصم صحيحاً فلا يكشفها شيء إلا جرد يقارن الإيراد
+        // بالبضاعة المنصرفة. هذه أولى طرق السرقة عبر نقاط البيع.
+        //
+        // القاعدة الآن: السعر من الكتالوج دائماً، إلا في حالتين صريحتين:
+        //   1) صنف مفتوح القيمة (TracksStock = false) وإعداد المنظمة يسمح.
+        //   2) حامل صلاحية pos.price_override — ويُسجَّل التجاوز في التدقيق.
+        // ------------------------------------------------------------------
+        var org = await _db.Organizations.FirstOrDefaultAsync();
+        if (org is null) return BadRequest(new { message = "تعذّر تحديد المنظمة" });
+
+        var canOverridePrice = await HasPriceOverrideAsync();
+        var resolvedLines = new List<(Product Product, decimal Quantity, decimal UnitPrice, bool Overridden)>();
+
+        foreach (var line in request.Lines)
+        {
+            if (line.Quantity <= 0)
+            {
+                return BadRequest(new { message = "الكمية يجب أن تكون أكبر من صفر" });
+            }
+
+            // RLS تحصر البحث في منظمة المستخدم، فمعرّف صنف من منظمة أخرى
+            // يعود null هنا ولا يتسرّب إلى الفاتورة.
+            var product = await _db.Products.FirstOrDefaultAsync(p => p.Id == line.ProductId && !p.IsDeleted);
+            if (product is null)
+            {
+                return BadRequest(new { message = "صنف غير موجود أو محذوف" });
+            }
+
+            decimal unitPrice;
+            var overridden = false;
+
+            if (!product.TracksStock)
+            {
+                // البوابة الحقيقية للصنف المفتوح: كانت في واجهة Flutter وحدها،
+                // فمن يتجاوز الواجهة كان يبيع بقيمة حرة والإعداد مطفأ.
+                if (!org.PosAllowOpenProduct)
+                {
+                    return BadRequest(new { message = "بيع الأصناف مفتوحة القيمة غير مفعَّل في هذه المنظمة" });
+                }
+                if (line.UnitPrice <= 0)
+                {
+                    return BadRequest(new { message = "قيمة الصنف المفتوح يجب أن تكون أكبر من صفر" });
+                }
+                unitPrice = line.UnitPrice;
+            }
+            else if (line.UnitPrice == product.SalePrice)
+            {
+                unitPrice = product.SalePrice;
+            }
+            else if (canOverridePrice)
+            {
+                if (line.UnitPrice < 0)
+                {
+                    return BadRequest(new { message = "السعر لا يمكن أن يكون سالباً" });
+                }
+                unitPrice = line.UnitPrice;
+                overridden = true;
+            }
+            else
+            {
+                return BadRequest(new { message = $"سعر «{product.Name}» لا يطابق سعر الكتالوج، وتعديل السعر غير مسموح لك" });
+            }
+
+            resolvedLines.Add((product, line.Quantity, unitPrice, overridden));
+        }
+
         await using var transaction = await _db.Database.BeginTransactionAsync();
 
         var invoice = new Invoice
@@ -170,43 +288,62 @@ public class InvoicesController : ControllerBase
             BranchId = request.BranchId,
             CustomerId = request.CustomerId,
             InvoiceNumber = $"INV-{DateTime.UtcNow:yyyyMMddHHmmssfff}",
-            Subtotal = request.Lines.Sum(l => l.Quantity * l.UnitPrice),
+            // من الأسعار المُثبَّتة في السيرفر لا من الطلب.
+            Subtotal = resolvedLines.Sum(l => l.Quantity * l.UnitPrice),
             // لم تكن تُضبَط أصلاً — بلا هذا الحقل تعرض "أداء الكاشير" في
             // شاشة التقارير كل الفواتير كـ"غير محدَّد" دائماً.
             CreatedBy = CurrentUserId(),
         };
         invoice.TotalAmount = invoice.Subtotal - invoice.DiscountAmount + invoice.TaxAmount;
 
-        foreach (var line in request.Lines)
+        foreach (var (product, quantity, unitPrice, overridden) in resolvedLines)
         {
             invoice.Items.Add(new InvoiceItem
             {
-                ProductId = line.ProductId,
-                Quantity = line.Quantity,
-                UnitPrice = line.UnitPrice,
-                LineTotal = line.Quantity * line.UnitPrice,
+                ProductId = product.Id,
+                Quantity = quantity,
+                UnitPrice = unitPrice,
+                LineTotal = quantity * unitPrice,
             });
 
-            var product = await _db.Products.FindAsync(line.ProductId);
+            if (overridden)
+            {
+                // تجاوز السعر يُسجَّل دائماً: صلاحية مشروعة (مساومة، خصم لزبون
+                // دائم) لكنها يجب أن تترك أثراً يُراجَع.
+                _db.LogAudit(invoice.OrganizationId, CurrentUserId(), "invoice.price_overridden",
+                    "invoice_items", product.Id,
+                    newValues: new { product.Name, CatalogPrice = product.SalePrice, SoldPrice = unitPrice });
+            }
 
             // الأصناف غير المتتبَّعة مخزنياً (خدمات / قيمة مفتوحة) تُباع بلا
             // رصيد ولا خصم — راجع Product.TracksStock. الفاتورة وسطرها يُسجَّلان
             // كاملين، والمتخطَّى هو حركة المخزون وحدها.
-            if (product is not null && !product.TracksStock) continue;
+            if (!product.TracksStock) continue;
 
-            var stock = await _db.StockLevels.FirstOrDefaultAsync(
-                s => s.BranchId == request.BranchId && s.ProductId == line.ProductId);
-            if (stock is null || stock.Quantity < line.Quantity)
+            // WITH (UPDLOCK) — قفل تحديث على صف الرصيد حتى نهاية المعاملة.
+            //
+            // بدونه: قراءة ثم فحص ثم كتابة بلا قفل. كاشيران يبيعان آخر قطعة
+            // في نفس اللحظة يقرآن كلاهما 1، ويمرّان الفحص كلاهما، فتُباع
+            // قطعتان موجودة منهما واحدة ويصبح الرصيد سالباً. لا يظهر هذا في
+            // اختبار بمستخدم واحد إطلاقاً — يظهر بعد التسليم عند فرعين
+            // نشطين وثلاثة كاشيرات.
+            var stock = await _db.StockLevels
+                .FromSqlInterpolated($@"
+                    SELECT * FROM stock_levels WITH (UPDLOCK, ROWLOCK)
+                    WHERE branch_id = {request.BranchId} AND product_id = {product.Id}")
+                .FirstOrDefaultAsync();
+
+            if (stock is null || stock.Quantity < quantity)
             {
-                return BadRequest(new { message = "الكمية غير متوفرة في المخزون" });
+                return BadRequest(new { message = $"الكمية غير متوفرة في المخزون: {product.Name}" });
             }
-            stock.Quantity -= line.Quantity;
+            stock.Quantity -= quantity;
 
             // موديول التنبيهات: دفعة SignalR اللحظية للمتصلين الآن، بالإضافة
             // إلى صف دائم في notifications حتى تظهر لاحقاً في "غرفة
             // الإشعارات" لمن لم يكن متصلاً وقت الحدث (الدفعة وحدها كانت
             // تُفقَد فوراً بلا أي أثر دائم قبل هذا الإصلاح).
-            if (product is not null && stock.Quantity <= product.ReorderLevel)
+            if (stock.Quantity <= product.ReorderLevel)
             {
                 await _hub.Clients.Group(invoice.OrganizationId.ToString())
                     .SendAsync("LowStockAlert", new { product.Name, stock.Quantity });
@@ -225,7 +362,12 @@ public class InvoicesController : ControllerBase
         if (payingFromWallet)
         {
             // الرصيد مجموع الدفتر لا عمود مخزَّن — راجع WalletBalances.
-            var balance = await WalletBalances.ComputeAsync(_db, walletCustomer!.Id);
+            //
+            // القفل ضروري هنا كضرورته على المخزون: الجمع ثم المقارنة ثم
+            // الإضافة بلا قفل نطاق يسمح لعمليتَي بيع متزامنتين بأن تمرّا
+            // كلتاهما على نفس الرصيد، فيُنفَق مرتين. HOLDLOCK يمنع إدراج
+            // حركات جديدة لهذا العميل حتى نهاية المعاملة.
+            var balance = await WalletBalances.ComputeLockedAsync(_db, walletCustomer!.Id);
             if (balance < invoice.TotalAmount)
             {
                 return BadRequest(new { message = "رصيد العميل غير كافٍ" });
@@ -281,13 +423,24 @@ public class InvoicesController : ControllerBase
         {
             return BadRequest(new { message = "لا يمكن استرجاع فاتورة مرتجعة أصلاً" });
         }
-        var alreadyReturned = await _db.Invoices.AnyAsync(i => i.OriginalInvoiceId == id);
+        await using var transaction = await _db.Database.BeginTransactionAsync();
+
+        // فحص الاسترجاع المسبق **داخل** المعاملة وبقفل نطاق.
+        //
+        // كان قبلها بلا معاملة ولا قفل: نقرتان متزامنتان على "استرجاع" (أو
+        // نقرة مكرَّرة على شبكة بطيئة) تمرّان كلتاهما، فتُنشأ فاتورتا مرتجع
+        // للفاتورة نفسها وتعود البضاعة للمخزون مرتين ويُردّ المبلغ مرتين.
+        // HOLDLOCK يمنع إدراج مرتجع ثانٍ لنفس الأصل حتى نهاية هذه المعاملة.
+        var alreadyReturned = await _db.Invoices
+            .FromSqlInterpolated($@"
+                SELECT * FROM invoices WITH (UPDLOCK, HOLDLOCK)
+                WHERE original_invoice_id = {id}")
+            .AnyAsync();
+
         if (alreadyReturned)
         {
             return BadRequest(new { message = "تم استرجاع هذه الفاتورة مسبقاً" });
         }
-
-        await using var transaction = await _db.Database.BeginTransactionAsync();
 
         var refund = new Invoice
         {
@@ -382,5 +535,25 @@ public class InvoicesController : ControllerBase
     {
         var raw = User.FindFirstValue(JwtRegisteredClaimNames.Sub) ?? User.FindFirstValue(ClaimTypes.NameIdentifier);
         return Guid.TryParse(raw, out var id) ? id : null;
+    }
+
+    /// <summary>
+    /// صلاحية بيع بسعر مخالف لسعر الكتالوج.
+    ///
+    /// نفس منطق RequirePermissionAttribute (صلاحية من role_permissions،
+    /// و super_admin يتجاوز دائماً) — لكنها فحص داخل الإجراء لا سمة عليه،
+    /// لأن الأمر ليس منع الوصول إلى نقطة النهاية بل تحديد أي سعر يُقبل.
+    /// </summary>
+    private async Task<bool> HasPriceOverrideAsync()
+    {
+        var role = User.FindFirstValue(ClaimTypes.Role);
+        if (role is null) return false;
+        if (role == "super_admin") return true;
+
+        var orgIdRaw = User.FindFirstValue("organization_id");
+        if (!Guid.TryParse(orgIdRaw, out var orgId)) return false;
+
+        return await _db.RolePermissions.AnyAsync(rp =>
+            rp.OrganizationId == orgId && rp.Role == role && rp.PermissionCode == "pos.price_override");
     }
 }

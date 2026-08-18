@@ -98,6 +98,24 @@ List<NavGroup> navGroupsFor({required bool isPlatformAdmin}) => [
       ),
     ];
 
+/// يُسقط من القائمة الوحدات التي يحجبها الخادم كلياً عن هذا المستخدم.
+///
+/// الترشيح هنا لا في كل من AppSidebar وAppNavbar ولوحة الأوامر: ثلاثة
+/// مواضع تعرض القائمة نفسها، وأي ترشيح يُنفَّذ في اثنين منها فقط يترك
+/// الوحدة المحجوبة قابلة للفتح من الثالث.
+///
+/// المجموعة التي تفرغ عناصرها تُحذف بأكملها — عنوان مجموعة بلا محتوى
+/// يُوحي بعطل لا بقيد صلاحيات.
+List<NavGroup> filterByPermissions(List<NavGroup> groups, bool Function(String route) canOpen) {
+  final result = <NavGroup>[];
+  for (final group in groups) {
+    final items = group.items.where((i) => canOpen(i.route)).toList();
+    if (items.isEmpty) continue;
+    result.add(NavGroup(icon: group.icon, label: group.label, items: items));
+  }
+  return result;
+}
+
 /// قائمة مسطّحة لكل الشاشات — يستخدمها AppShell للبحث عن شاشة البداية
 /// بمسارها، ولا علاقة لها بالعرض.
 final kNavItems = <NavItem>[

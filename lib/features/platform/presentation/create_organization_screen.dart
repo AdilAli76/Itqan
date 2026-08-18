@@ -9,6 +9,11 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_text_styles.dart';
 import '../../../shared/widgets/data_table_widget.dart';
 import '../data/platform_organizations_providers.dart';
+import '../../../shared/widgets/skeleton.dart';
+import '../../../core/auth/permissions.dart';
+
+// ux-audit: ignore UX-03 — قائمة المنظمات على الخادم، يراها مالك المنصة
+// وحده وعددها بعشرات على الأكثر في نشر داخلي.
 
 String _dioErrorMessage(Object error, String fallback) {
   if (error is DioException) {
@@ -56,19 +61,10 @@ class _CreateOrganizationScreenState extends State<CreateOrganizationScreen> {
       activeRoute: '/platform/organizations/new',
       body: _isPlatformAdmin == null
           ? const Padding(padding: EdgeInsets.all(48), child: Center(child: CircularProgressIndicator()))
+          // رسالة الرفض الموحَّدة بدل نصّ خاص بهذه الشاشة: المستخدم يجب أن
+          // يتعرّف على «ليست لك صلاحية» بشكلها نفسه أينما وقعت في النظام.
           : _isPlatformAdmin == false
-              ? Container(
-                  padding: const EdgeInsets.all(32),
-                  decoration: BoxDecoration(
-                    color: AppColors.surface,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: AppColors.border),
-                  ),
-                  child: Text(
-                    'هذه الصفحة مخصَّصة لمالك المنصة فقط.',
-                    style: AppTextStyles.bodyMd(color: AppColors.danger),
-                  ),
-                )
+              ? const NoPermissionView(moduleName: 'إدارة المنصّة')
               : const Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
@@ -89,7 +85,7 @@ class _OrganizationsList extends ConsumerWidget {
     final orgsAsync = ref.watch(platformOrganizationsProvider);
 
     return orgsAsync.when(
-      loading: () => const Padding(padding: EdgeInsets.all(24), child: Center(child: CircularProgressIndicator())),
+      loading: () => const TableSkeleton(),
       error: (_, __) => Container(
         padding: const EdgeInsets.all(24),
         decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(12), border: Border.all(color: AppColors.border)),
@@ -293,7 +289,7 @@ class _CreateOrganizationFormState extends ConsumerState<_CreateOrganizationForm
             ],
             const SizedBox(height: 24),
             Align(
-              alignment: Alignment.centerLeft,
+              alignment: AlignmentDirectional.centerEnd,
               child: ElevatedButton(
                 onPressed: _saving ? null : _submit,
                 child: _saving

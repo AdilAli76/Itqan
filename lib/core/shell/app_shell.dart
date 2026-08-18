@@ -1,16 +1,22 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import '../auth/current_user.dart';
+import '../network/realtime_listener.dart';
+import '../network/realtime_service.dart';
 import '../responsive/breakpoints.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_text_styles.dart';
 import '../theme/branding_provider.dart';
 import '../../shared/widgets/app_navbar.dart';
 import '../../shared/widgets/app_sidebar.dart';
+import '../../shared/widgets/command_palette.dart';
 import '../../shared/widgets/nav_items.dart';
 import 'open_tabs_provider.dart';
 import 'screen_registry.dart';
 import 'shell_scope.dart';
+import '../../shared/widgets/icon_action.dart';
 
 /// الحاوية الدائمة لكل شاشات النظام بعد تسجيل الدخول — تُبنى مرة واحدة فقط
 /// وتبقى حيّة طوال الجلسة. فتح شاشة جديدة = تبويب جديد في IndexedStack
@@ -31,9 +37,14 @@ class AppShell extends ConsumerStatefulWidget {
 }
 
 class _AppShellState extends ConsumerState<AppShell> {
+  bool _isPlatformAdmin = false;
+
   @override
   void initState() {
     super.initState();
+    readJwtClaims().then((claims) {
+      if (mounted) setState(() => _isPlatformAdmin = claims?['is_platform_admin'] == 'True');
+    });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       final tabs = ref.read(openTabsProvider);
@@ -47,7 +58,14 @@ class _AppShellState extends ConsumerState<AppShell> {
     });
   }
 
+  void _openPalette() {
+    CommandPalette.show(context, isPlatformAdmin: _isPlatformAdmin);
+  }
+
   Future<void> _logout() async {
+    // إغلاق الاتصال اللحظي قبل مسح التوكن — تركه مفتوحاً يعني بقاء قناة
+    // مصرَّح لها بعد خروج المستخدم حتى تنتهي مهلة الخادم.
+    await ref.read(realtimeServiceProvider).disconnect();
     await performLogout(ref);
     if (mounted) context.go('/login');
   }
@@ -77,6 +95,36 @@ class _AppShellState extends ConsumerState<AppShell> {
             ),
     );
 
+    // اختصار لوحة الأوامر مُسجَّل هنا لا داخل كل شاشة: AppShell هو الأب
+    // المشترك لكل التبويبات، فيلتقط Ctrl+K أياً كانت الشاشة النشطة —
+    // بشرط ألّا يكون الفوكس داخل حقل نصّي يستهلك الضغطة أولاً، وهو ما
+    // يضمنه Shortcuts تلقائياً.
+    return CallbackShortcuts(
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.keyK, control: true): _openPalette,
+        // Cmd+K على macOS — نفس الاختصار الذي اعتاده المستخدم هناك.
+        const SingleActivator(LogicalKeyboardKey.keyK, meta: true): _openPalette,
+      },
+      child: Focus(
+        autofocus: true,
+        // RealtimeListener هنا لا داخل كل شاشة: التبويب الخلفي يجب أن يتحدّث
+        // أيضاً، وإلا عاد المستخدم إليه ليجد بيانات قديمة بلا أي إشارة.
+        child: RealtimeListener(
+          child: _buildScaffold(context, tabsState, isDesktop, useSidebar, useNavbar, tabBar, content),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildScaffold(
+    BuildContext context,
+    TabsState tabsState,
+    bool isDesktop,
+    bool useSidebar,
+    bool useNavbar,
+    Widget? tabBar,
+    Widget content,
+  ) {
     return Scaffold(
       backgroundColor: AppColors.paper,
       appBar: isDesktop
@@ -84,6 +132,11 @@ class _AppShellState extends ConsumerState<AppShell> {
           : AppBar(
               title: Text(tabsState.tabs.isEmpty ? '' : (tabsState.tabs.firstWhere((t) => t.route == tabsState.activeRoute, orElse: () => tabsState.tabs.first)).title),
               actions: [
+                IconButton(
+                  onPressed: _openPalette,
+                  icon: const Icon(Icons.search),
+                  tooltip: 'بحث شامل عن شاشة (Ctrl+K)',
+                ),
                 IconButton(onPressed: _logout, icon: const Icon(Icons.logout), tooltip: 'تسجيل الخروج'),
               ],
             ),
@@ -141,7 +194,7 @@ class _TabBar extends ConsumerWidget {
           children: tabsState.tabs.map((tab) {
             final active = tab.route == tabsState.activeRoute;
             return Padding(
-              padding: const EdgeInsets.only(left: 4),
+              padding: const EdgeInsetsDirectional.only(end: 4),
               child: Material(
                 color: active ? AppColors.surface : Colors.transparent,
                 borderRadius: BorderRadius.circular(8),
@@ -157,18 +210,20 @@ class _TabBar extends ConsumerWidget {
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(tab.icon, size: 14, color: active ? color : AppColors.textSecondary),
+                        Icon(tab.icon, size: 16, color: active ? color : AppColors.textSecondary),
                         const SizedBox(width: 6),
                         Text(
                           tab.title,
-                          style: AppTextStyles.bodyMd(color: active ? color : AppColors.textSecondary)
-                              .copyWith(fontSize: 12, fontWeight: active ? FontWeight.w600 : FontWeight.w400),
+                          style: AppTextStyles.caption(color: active ? color : AppColors.textSecondary)
+                              .copyWith(fontWeight: active ? FontWeight.w600 : FontWeight.w400),
                         ),
                         const SizedBox(width: 6),
-                        InkWell(
-                          onTap: () => ref.read(openTabsProvider.notifier).close(tab.route),
-                          borderRadius: BorderRadius.circular(10),
-                          child: const Icon(Icons.close, size: 14),
+                        IconAction(
+                          icon: Icons.close,
+                          iconSize: 16,
+                          dense: true,
+                          tooltip: 'إغلاق تبويب ${tab.title}',
+                          onPressed: () => ref.read(openTabsProvider.notifier).close(tab.route),
                         ),
                       ],
                     ),

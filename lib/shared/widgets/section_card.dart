@@ -26,42 +26,52 @@ class SectionCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final color = Theme.of(context).colorScheme.primary;
 
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
+    // Material لا Container ملوَّن: البطاقة تحتضن مفاتيح SwitchListTile
+    // (الإعدادات، مصمّم الباركود)، وهذه ترسم خلفيتها وأثر نقرها على أقرب
+    // Material أعلاها. خلفية ملوّنة تعترض الطريق تُخفي الأثر تماماً، فيبدو
+    // المفتاح غير مستجيب للنقر رغم أنه يعمل.
+    //
+    // Material يوفّر اللون والحدّ ونصف القطر معاً عبر shape، فيؤدي دور
+    // الزخرفة السابقة بلا اعتراض.
+    return Material(
+      color: AppColors.surface,
+      shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppColors.border),
+        side: BorderSide(color: AppColors.border),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              if (icon != null) ...[
-                Container(
-                  width: 32,
-                  height: 32,
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(color: color.withValues(alpha: 0.08), borderRadius: BorderRadius.circular(8)),
-                  child: Icon(icon, size: 18, color: color),
-                ),
-                const SizedBox(width: 10),
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                if (icon != null) ...[
+                  Container(
+                    width: 32,
+                    height: 32,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                        color: color.withValues(alpha: 0.08), borderRadius: BorderRadius.circular(8)),
+                    child: Icon(icon, size: 18, color: color),
+                  ),
+                  const SizedBox(width: 10),
+                ],
+                Expanded(child: Text(title, style: AppTextStyles.headlineMd())),
+                if (trailing != null) trailing!,
               ],
-              Expanded(child: Text(title, style: AppTextStyles.headlineMd())),
-              if (trailing != null) trailing!,
-            ],
-          ),
-          if (subtitle != null) ...[
-            const SizedBox(height: 4),
-            Padding(
-              padding: EdgeInsets.only(right: icon != null ? 42 : 0),
-              child: Text(subtitle!, style: AppTextStyles.bodyMd()),
             ),
+            if (subtitle != null) ...[
+              const SizedBox(height: 4),
+              Padding(
+                padding: EdgeInsetsDirectional.only(start: icon != null ? 42 : 0),
+                child: Text(subtitle!, style: AppTextStyles.bodyMd()),
+              ),
+            ],
+            const Divider(height: 24),
+            ...children,
           ],
-          const Divider(height: 24),
-          ...children,
-        ],
+        ),
       ),
     );
   }

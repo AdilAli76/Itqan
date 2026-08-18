@@ -9,6 +9,14 @@ import '../../../shared/widgets/stat_card.dart';
 import '../../../shared/widgets/currency_badge.dart';
 import '../../../shared/widgets/data_table_widget.dart';
 import '../data/dashboard_providers.dart';
+import '../../../shared/widgets/skeleton.dart';
+import '../../../core/auth/permissions.dart';
+import 'insights_panel.dart';
+
+// ux-audit: ignore UX-03 — لوحة التحكم تعرض مؤشّرات مجمَّعة وأعلى عناصر
+// فقط، لا أرشيف سجلات. حجم كل جدول فيها ثابت بحكم الاستعلام نفسه.
+// ux-audit: ignore UX-02 — الفلاتر هنا هي الفترة الزمنية، وهي مطبَّقة على
+// مستوى اللوحة كلها لا داخل كل جدول.
 
 final _currencyFormat = NumberFormat('#,##0.00', 'en');
 final _integerFormat = NumberFormat('#,##0', 'en');
@@ -18,6 +26,21 @@ class SuperAdminDashboardScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    // لوحة التحكم تُبنى من /reports/sales-summary و/reports/inventory-summary،
+    // وكلاهما داخل ReportsController المحروس بـ reports.view على مستوى
+    // الـController كله. من لا يملك الصلاحية كان يرى «تعذّر تحميل بيانات
+    // اللوحة» — رسالة عطل عن قيدٍ مقصود، على الشاشة الأولى التي تُفتح كل
+    // صباح. هذا أسوأ انطباع أول ممكن عن النظام.
+    //
+    // الفحص هنا قبل أي طلب: لا نُرسل طلباً نعرف أنه سيُرفض بـ403.
+    if (!ref.perms.can(Perm.reportsView)) {
+      return const AdaptiveScaffold(
+        title: 'لوحة التحكم',
+        activeRoute: '/dashboard',
+        body: NoPermissionView(moduleName: 'لوحة التحكم والتقارير'),
+      );
+    }
+
     final crossAxisCount = Breakpoints.isDesktop(context) ? 4 : (Breakpoints.isTablet(context) ? 2 : 1);
     final salesAsync = ref.watch(dashboardSalesProvider);
     final inventoryAsync = ref.watch(dashboardInventoryProvider);
@@ -29,37 +52,49 @@ class SuperAdminDashboardScreen extends ConsumerWidget {
     return AdaptiveScaffold(
       title: 'لوحة تحكم المدير العام',
       activeRoute: '/dashboard',
-      body: loading
-          ? const Padding(padding: EdgeInsets.all(48), child: Center(child: CircularProgressIndicator()))
-          : hasError
-              ? Container(
-                  padding: const EdgeInsets.all(32),
-                  decoration: BoxDecoration(
-                    color: AppColors.surface,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: AppColors.border),
-                  ),
-                  child: Column(
-                    children: [
-                      Text('تعذّر تحميل بيانات اللوحة', style: AppTextStyles.bodyMd(color: AppColors.danger)),
-                      const SizedBox(height: 12),
-                      OutlinedButton(
-                        onPressed: () {
-                          ref.invalidate(dashboardSalesProvider);
-                          ref.invalidate(dashboardInventoryProvider);
-                          ref.invalidate(dashboardBranchesProvider);
-                        },
-                        child: const Text('إعادة المحاولة'),
+      body: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // الرؤى فوق الأرقام: البطاقات تقول «ماذا حدث»، والرؤى تقول «ما
+          // الذي يحتاج قراراً الآن» — والثاني هو سبب فتح اللوحة أصلاً.
+          // ولها حالة تحميل مستقلة فلا تؤخّر ظهور الأرقام ولا تنتظرها.
+          const InsightsPanel(),
+          loading
+              // هيكل بطاقات الإحصاء بعدد أعمدة الشبكة نفسه — لوحة التحكم أول
+              // شاشة تُفتح كل صباح، فانطباع سرعتها هو انطباع سرعة النظام كله.
+              ? StatCardsSkeleton(count: crossAxisCount == 1 ? 2 : crossAxisCount)
+              : hasError
+                  ? Container(
+                      padding: const EdgeInsets.all(32),
+                      decoration: BoxDecoration(
+                        color: AppColors.surface,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: AppColors.border),
                       ),
-                    ],
-                  ),
-                )
-              : _DashboardContent(
-                  crossAxisCount: crossAxisCount,
-                  sales: salesAsync.requireValue,
-                  inventory: inventoryAsync.requireValue,
-                  branches: branchesAsync.requireValue,
-                ),
+                      child: Column(
+                        children: [
+                          Text('تعذّر تحميل بيانات اللوحة',
+                              style: AppTextStyles.bodyMd(color: AppColors.danger)),
+                          const SizedBox(height: 12),
+                          OutlinedButton(
+                            onPressed: () {
+                              ref.invalidate(dashboardSalesProvider);
+                              ref.invalidate(dashboardInventoryProvider);
+                              ref.invalidate(dashboardBranchesProvider);
+                            },
+                            child: const Text('إعادة المحاولة'),
+                          ),
+                        ],
+                      ),
+                    )
+                  : _DashboardContent(
+                      crossAxisCount: crossAxisCount,
+                      sales: salesAsync.requireValue,
+                      inventory: inventoryAsync.requireValue,
+                      branches: branchesAsync.requireValue,
+                    ),
+        ],
+      ),
     );
   }
 }

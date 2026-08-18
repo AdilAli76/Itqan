@@ -10,6 +10,13 @@ import '../../../shared/widgets/currency_badge.dart';
 import '../../../shared/widgets/data_table_widget.dart';
 import '../../../shared/widgets/stat_card.dart';
 import '../data/reports_providers.dart';
+import '../../../shared/widgets/skeleton.dart';
+import '../../../core/auth/permissions.dart';
+
+// ux-audit: ignore UX-03 — صفوف التقارير ناتج تجميع (GROUP BY) لا سجلات
+// خام: عددها محكوم بعدد الفئات أو الفروع أو الأيام في الفترة المختارة.
+// ux-audit: ignore UX-02 — الترشيح في هذه الشاشة هو اختيار نوع التقرير
+// وفترته، وهو أعلى من الجدول لا داخله.
 
 final _currencyFormat = NumberFormat('#,##0.00', 'en');
 final _integerFormat = NumberFormat('#,##0', 'en');
@@ -23,16 +30,32 @@ class ReportsScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final period = ref.watch(reportPeriodProvider);
 
+    // حارس على مستوى الوحدة لا الزر: الخادم يحرس هذا الـController
+    // كاملاً، فبلا الصلاحية لا توجد بيانات تُعرض أصلاً — وعرض جدول
+    // فارغ هنا كان يُفهَم كـ«لا توجد سجلات» لا كـ«ليست لك صلاحية».
+    if (!ref.perms.can(Perm.reportsView)) {
+      return const AdaptiveScaffold(
+        title: 'التقارير والتحليلات',
+        activeRoute: '/reports',
+        body: NoPermissionView(moduleName: 'التقارير'),
+      );
+    }
+
+
     return AdaptiveScaffold(
       title: 'التقارير والتحليلات',
       activeRoute: '/reports',
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Row(
+          // Wrap لا Row: شريط الفلاتر يفيض على عرض الهاتف. الالتفاف يبقي
+          // كل فلتر ظاهراً وقابلاً للنقر بدل قصّ آخره بصمت.
+          Wrap(
+            runSpacing: 8,
+            crossAxisAlignment: WrapCrossAlignment.center,
             children: ReportPeriod.values
                 .map((p) => Padding(
-                      padding: const EdgeInsets.only(left: 8),
+                      padding: const EdgeInsetsDirectional.only(end: 8),
                       child: _PeriodChip(
                         label: p.label,
                         selected: p == period,
@@ -68,6 +91,9 @@ class _PeriodChip extends StatelessWidget {
       onTap: onTap,
       borderRadius: BorderRadius.circular(8),
       child: Container(
+        // 44 أدنى هدف لمس؛ الحشو وحده كان يعطي 39.
+        constraints: const BoxConstraints(minHeight: 44),
+        alignment: Alignment.center,
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
         decoration: BoxDecoration(
           color: selected ? color.withValues(alpha: 0.1) : Colors.transparent,
@@ -122,10 +148,7 @@ class _SalesSection extends ConsumerWidget {
     final period = ref.watch(reportPeriodProvider);
 
     return summaryAsync.when(
-      loading: () => const Padding(
-        padding: EdgeInsets.all(48),
-        child: Center(child: CircularProgressIndicator()),
-      ),
+      loading: () => const TableSkeleton(),
       error: (err, _) => _ErrorBox(message: 'تعذّر تحميل تقرير المبيعات', onRetry: () => ref.invalidate(salesSummaryProvider)),
       data: (summary) {
         final crossAxisCount = Breakpoints.isDesktop(context) ? 4 : (Breakpoints.isTablet(context) ? 2 : 1);
@@ -251,7 +274,7 @@ class _RevenueChart extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Padding(
-            padding: const EdgeInsets.only(right: 12, bottom: 8),
+            padding: const EdgeInsetsDirectional.only(start: 12, bottom: 8),
             child: Text('اتجاه المبيعات اليومي', style: AppTextStyles.labelMd()),
           ),
           Expanded(
@@ -261,7 +284,7 @@ class _RevenueChart extends StatelessWidget {
                 maxY: maxRevenue <= 0 ? 10 : maxRevenue * 1.2,
                 gridData: FlGridData(
                   drawVerticalLine: false,
-                  getDrawingHorizontalLine: (value) => const FlLine(color: AppColors.border, strokeWidth: 1),
+                  getDrawingHorizontalLine: (value) => FlLine(color: AppColors.border, strokeWidth: 1),
                 ),
                 borderData: FlBorderData(show: false),
                 titlesData: FlTitlesData(
@@ -298,7 +321,7 @@ class _RevenueChart extends StatelessWidget {
                     getTooltipItems: (spots) => spots
                         .map((s) => LineTooltipItem(
                               '${_dayFormat.format(from.add(Duration(days: s.x.round())))}\n${_currencyFormat.format(s.y)} د.ل',
-                              const TextStyle(color: Colors.white, fontSize: 12),
+                              AppTextStyles.caption(color: AppColors.surface),
                             ))
                         .toList(),
                   ),
@@ -334,10 +357,7 @@ class _InventorySection extends ConsumerWidget {
     final summaryAsync = ref.watch(inventorySummaryProvider);
 
     return summaryAsync.when(
-      loading: () => const Padding(
-        padding: EdgeInsets.all(48),
-        child: Center(child: CircularProgressIndicator()),
-      ),
+      loading: () => const TableSkeleton(),
       error: (err, _) => _ErrorBox(message: 'تعذّر تحميل تقرير المخزون', onRetry: () => ref.invalidate(inventorySummaryProvider)),
       data: (summary) {
         final crossAxisCount = Breakpoints.isDesktop(context) ? 4 : (Breakpoints.isTablet(context) ? 2 : 1);

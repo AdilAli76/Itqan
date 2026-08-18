@@ -12,6 +12,9 @@ import '../../../core/theme/app_text_styles.dart';
 import '../../../shared/widgets/currency_badge.dart';
 import '../../../shared/widgets/data_table_widget.dart';
 import '../data/customers_providers.dart';
+import '../../../shared/widgets/skeleton.dart';
+import '../../../shared/widgets/pagination_bar.dart';
+import '../../../core/auth/permissions.dart';
 
 class CustomersScreen extends ConsumerStatefulWidget {
   const CustomersScreen({super.key});
@@ -33,6 +36,10 @@ class _CustomersScreenState extends ConsumerState<CustomersScreen> {
     _debounce?.cancel();
     _debounce = Timer(const Duration(milliseconds: 350), () {
       ref.read(customerSearchProvider.notifier).state = value;
+      // العودة للصفحة الأولى مع كل بحث جديد. بدونها يبقى المستخدم على
+      // الصفحة الخامسة بينما النتيجة الجديدة صفحة واحدة، فيرى جدولاً فارغاً
+      // ويستنتج أن البحث لم يجد شيئاً — وهو موجود أمامه في الصفحة الأولى.
+      ref.read(customersPageProvider.notifier).state = 1;
     });
   }
 
@@ -44,37 +51,52 @@ class _CustomersScreenState extends ConsumerState<CustomersScreen> {
       title: 'العملاء',
       activeRoute: '/customers',
       actions: [
-        ElevatedButton.icon(
-          onPressed: () => _openCustomerDialog(context),
-          icon: const Icon(Icons.add, size: 18),
-          label: const Text('إضافة عميل'),
+        // الإخفاء لا التعطيل: من لا يملك صلاحية الإضافة لا يحتاج أن يرى
+        // الزر أصلاً — رؤيته تدفعه للنقر ثم لسؤال الدعم عن سبب الرفض.
+        Can(
+          permission: Perm.customersManage,
+          child: ElevatedButton.icon(
+            onPressed: () => _openCustomerDialog(context),
+            icon: const Icon(Icons.add, size: 18),
+            label: const Text('إضافة عميل'),
+          ),
         ),
       ],
       body: customersAsync.when(
-        loading: () => const Padding(
-          padding: EdgeInsets.all(48),
-          child: Center(child: CircularProgressIndicator()),
-        ),
+        loading: () => const TableSkeleton(),
         error: (err, _) => _ErrorBox(
           message: 'تعذّر تحميل العملاء',
           onRetry: () => ref.invalidate(customersProvider),
         ),
-        data: (customers) => AppDataTable(
-          title: 'العملاء (${customers.length})',
-          onSearch: _onSearch,
-          emptyMessage: 'لا يوجد عملاء بعد — أضف أول عميل من زر «إضافة عميل»',
-          emptyIcon: Icons.people_outline,
-          columns: const [
-            AppColumn('الاسم'),
-            AppColumn('الهاتف'),
-            AppColumn('البريد الإلكتروني'),
-            AppColumn('باركود البطاقة'),
-            AppColumn('رصيد المحفظة'),
-            AppColumn('نموذج الحساب'),
-            AppColumn('نقاط الولاء'),
-            AppColumn(''),
+        data: (customers) => Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            AppDataTable(
+              // العدد الكلي لا عدد الصفحة: «العملاء (50)» في منظمة لديها ألف
+              // عميل معلومة خاطئة صريحة.
+              title: 'العملاء (${customers.totalCount})',
+              onSearch: _onSearch,
+              emptyMessage: 'لا يوجد عملاء بعد — أضف أول عميل من زر «إضافة عميل»',
+              emptyIcon: Icons.people_outline,
+              columns: const [
+                AppColumn('الاسم'),
+                AppColumn('الهاتف'),
+                AppColumn('البريد الإلكتروني'),
+                AppColumn('باركود البطاقة'),
+                AppColumn('رصيد المحفظة'),
+                AppColumn('نموذج الحساب'),
+                AppColumn('نقاط الولاء'),
+                AppColumn(''),
+              ],
+              rows: customers.items.map((c) => _customerRow(context, c)).toList(),
+            ),
+            PaginationBar(
+              page: customers.page,
+              pageSize: customers.pageSize,
+              totalCount: customers.totalCount,
+              onPageChanged: (p) => ref.read(customersPageProvider.notifier).state = p,
+            ),
           ],
-          rows: customers.map((c) => _customerRow(context, c)).toList(),
         ),
       ),
     );
@@ -93,29 +115,41 @@ class _CustomersScreenState extends ConsumerState<CustomersScreen> {
       Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          IconButton(
-            tooltip: 'شحن رصيد المحفظة',
-            icon: const Icon(Icons.account_balance_wallet_outlined, size: 18),
-            onPressed: () async {
-              final adjusted = await showDialog<bool>(
-                context: context,
-                builder: (_) => _WalletAdjustmentDialog(customer: c),
-              );
-              if (adjusted == true) ref.invalidate(customersProvider);
-            },
+          Can(
+            permission: Perm.customersWalletAdjust,
+            child: IconButton(
+              tooltip: 'شحن رصيد المحفظة',
+              icon: const Icon(Icons.account_balance_wallet_outlined, size: 18),
+              onPressed: () async {
+                final adjusted = await showDialog<bool>(
+                  context: context,
+                  builder: (_) => _WalletAdjustmentDialog(customer: c),
+                );
+                if (adjusted == true) ref.invalidate(customersProvider);
+              },
+            ),
           ),
           // إصدار البطاقة وطباعتها لهما شاشة مخصَّصة واحدة («بطاقات المحفظة»)
           // — كان هنا مساران مكرَّران يصدران بطاقات بنموذجين مختلفين، وهو ما
           // سبّب اختلاف سلوك إدخال الرقم السري بين الشاشتين.
-          IconButton(
-            tooltip: 'تعديل العميل',
-            icon: const Icon(Icons.edit_outlined, size: 18),
-            onPressed: () => _openCustomerDialog(context, customer: c),
+          Can(
+            permission: Perm.customersManage,
+            child: IconButton(
+              tooltip: 'تعديل العميل',
+              icon: const Icon(Icons.edit_outlined, size: 18),
+              onPressed: () => _openCustomerDialog(context, customer: c),
+            ),
           ),
-          IconButton(
-            tooltip: 'حذف العميل',
-            icon: const Icon(Icons.delete_outline, size: 18),
-            onPressed: () => _confirmDelete(context, c),
+          // صلاحية الحذف منفصلة عن صلاحية التعديل في الخادم
+          // (customers.delete مقابل customers.manage)، فتُفحَص منفصلةً هنا
+          // أيضاً — دمجهما كان سيمنح كل من يعدّل حقّ الحذف ضمناً.
+          Can(
+            permission: Perm.customersDelete,
+            child: IconButton(
+              tooltip: 'حذف العميل',
+              icon: const Icon(Icons.delete_outline, size: 18),
+              onPressed: () => _confirmDelete(context, c),
+            ),
           ),
         ],
       ),
@@ -184,7 +218,6 @@ class _CustomersScreenState extends ConsumerState<CustomersScreen> {
       if (context.mounted) _showError(context, 'تعذّر حذف العميل');
     }
   }
-
 }
 
 class _ErrorBox extends StatelessWidget {
@@ -329,8 +362,14 @@ class _CustomerFormDialogState extends State<_CustomerFormDialog> {
               const SizedBox(height: 6),
               SegmentedButton<String>(
                 segments: const [
-                  ButtonSegment(value: 'prepaid', label: Text('رصيد مدفوع'), icon: Icon(Icons.savings_outlined, size: 16)),
-                  ButtonSegment(value: 'entitlement', label: Text('استحقاق ممنوح'), icon: Icon(Icons.card_giftcard_outlined, size: 16)),
+                  ButtonSegment(
+                      value: 'prepaid',
+                      label: Text('رصيد مدفوع'),
+                      icon: Icon(Icons.savings_outlined, size: 16)),
+                  ButtonSegment(
+                      value: 'entitlement',
+                      label: Text('استحقاق ممنوح'),
+                      icon: Icon(Icons.card_giftcard_outlined, size: 16)),
                 ],
                 selected: {_accountModel},
                 onSelectionChanged: (s) => setState(() => _accountModel = s.first),
@@ -377,9 +416,8 @@ class _CustomerFormDialogState extends State<_CustomerFormDialog> {
                   child: Row(
                     children: [
                       Expanded(
-                        child: Text(_expiresOn == null
-                            ? 'لم يُحدَّد'
-                            : DateFormat('yyyy-MM-dd').format(_expiresOn!)),
+                        child: Text(
+                            _expiresOn == null ? 'لم يُحدَّد' : DateFormat('yyyy-MM-dd').format(_expiresOn!)),
                       ),
                       TextButton.icon(
                         icon: const Icon(Icons.calendar_today_outlined, size: 16),
@@ -476,7 +514,6 @@ class _CustomerFormDialogState extends State<_CustomerFormDialog> {
       if (mounted) setState(() => _saving = false);
     }
   }
-
 }
 
 // ---------------------------------------------------------------------------
@@ -590,7 +627,8 @@ class _SponsorPicker extends ConsumerWidget {
 
     return sponsors.when(
       loading: () => const LinearProgressIndicator(),
-      error: (e, _) => Text('تعذّر تحميل الجهات الممولة', style: AppTextStyles.bodyMd(color: AppColors.danger)),
+      error: (e, _) =>
+          Text('تعذّر تحميل الجهات الممولة', style: AppTextStyles.bodyMd(color: AppColors.danger)),
       data: (list) => Row(
         children: [
           Expanded(

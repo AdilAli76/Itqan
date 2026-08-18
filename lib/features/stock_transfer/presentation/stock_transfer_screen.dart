@@ -11,6 +11,10 @@ import '../../../core/theme/app_text_styles.dart';
 import '../../../shared/widgets/data_table_widget.dart';
 import '../../branches/data/branches_providers.dart';
 import '../data/stock_transfer_providers.dart';
+import '../../../shared/widgets/filter_chip_button.dart';
+import '../../../shared/widgets/skeleton.dart';
+import '../../../shared/widgets/icon_action.dart';
+import '../../../core/auth/permissions.dart';
 
 const _statusLabels = {
   'pending': 'معلّق',
@@ -68,28 +72,38 @@ class StockTransferScreen extends ConsumerWidget {
       title: 'تحويل المخزون بين الفروع',
       activeRoute: '/stock-transfer',
       actions: [
-        ElevatedButton.icon(
-          onPressed: () async {
-            final created = await showDialog<bool>(
-              context: context,
-              builder: (_) => const _CreateTransferDialog(),
-            );
-            if (created == true) ref.invalidate(stockTransfersProvider);
-          },
-          icon: const Icon(Icons.add, size: 18),
-          label: const Text('إنشاء تحويل'),
+        Can(
+          permission: Perm.stockTransferManage,
+          child: ElevatedButton.icon(
+            onPressed: () async {
+              final created = await showDialog<bool>(
+                context: context,
+                builder: (_) => const _CreateTransferDialog(),
+              );
+              if (created == true) ref.invalidate(stockTransfersProvider);
+            },
+            icon: const Icon(Icons.add, size: 18),
+            label: const Text('إنشاء تحويل'),
+          ),
         ),
       ],
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Row(
+          // Wrap لا Row: شرائح الفلاتر تفيض على عرض الهاتف (قياس الفحص
+          // البصري: حتى 233 بكسل). الالتفاف يبقيها كلها ظاهرة وقابلة
+          // للنقر بدل قصّ آخرها بصمت.
+          Wrap(
+            runSpacing: 8,
             children: [
-              _FilterChip(label: 'الكل', selected: statusFilter == null, onTap: () => ref.read(transferStatusFilterProvider.notifier).state = null),
+              FilterChipButton(
+                  label: 'الكل',
+                  selected: statusFilter == null,
+                  onTap: () => ref.read(transferStatusFilterProvider.notifier).state = null),
               const SizedBox(width: 8),
               ..._statusLabels.entries.map((e) => Padding(
-                    padding: const EdgeInsets.only(left: 8),
-                    child: _FilterChip(
+                    padding: const EdgeInsetsDirectional.only(end: 8),
+                    child: FilterChipButton(
                       label: e.value,
                       selected: statusFilter == e.key,
                       onTap: () => ref.read(transferStatusFilterProvider.notifier).state = e.key,
@@ -99,10 +113,7 @@ class StockTransferScreen extends ConsumerWidget {
           ),
           const SizedBox(height: 16),
           transfersAsync.when(
-            loading: () => const Padding(
-              padding: EdgeInsets.all(48),
-              child: Center(child: CircularProgressIndicator()),
-            ),
+            loading: () => const TableSkeleton(),
             error: (err, _) => Container(
               padding: const EdgeInsets.all(32),
               decoration: BoxDecoration(
@@ -114,7 +125,9 @@ class StockTransferScreen extends ConsumerWidget {
                 children: [
                   Text('تعذّر تحميل تحويلات المخزون', style: AppTextStyles.bodyMd(color: AppColors.danger)),
                   const SizedBox(height: 12),
-                  OutlinedButton(onPressed: () => ref.invalidate(stockTransfersProvider), child: const Text('إعادة المحاولة')),
+                  OutlinedButton(
+                      onPressed: () => ref.invalidate(stockTransfersProvider),
+                      child: const Text('إعادة المحاولة')),
                 ],
               ),
             ),
@@ -157,35 +170,6 @@ class StockTransferScreen extends ConsumerWidget {
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _FilterChip extends StatelessWidget {
-  const _FilterChip({required this.label, required this.selected, required this.onTap});
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final color = Theme.of(context).colorScheme.primary;
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(8),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-        decoration: BoxDecoration(
-          color: selected ? color.withValues(alpha: 0.1) : Colors.transparent,
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: selected ? color : AppColors.border),
-        ),
-        child: Text(
-          label,
-          style: AppTextStyles.labelMd(color: selected ? color : AppColors.textSecondary)
-              .copyWith(fontWeight: selected ? FontWeight.w600 : FontWeight.w500),
-        ),
       ),
     );
   }
@@ -249,13 +233,16 @@ class _TransferDetailDialogState extends ConsumerState<_TransferDetailDialog> {
             ],
           ),
           const SizedBox(height: 4),
-          Text(createdAt != null ? DateFormat('yyyy-MM-dd HH:mm').format(createdAt) : '', style: AppTextStyles.bodyMd()),
+          Text(createdAt != null ? DateFormat('yyyy-MM-dd HH:mm').format(createdAt) : '',
+              style: AppTextStyles.bodyMd()),
           const Divider(height: 24),
           ...items.map((item) => Padding(
                 padding: const EdgeInsets.symmetric(vertical: 4),
                 child: Row(
                   children: [
-                    Expanded(child: Text(item['productName'] as String? ?? '', style: AppTextStyles.bodyMd(color: AppColors.textPrimary))),
+                    Expanded(
+                        child: Text(item['productName'] as String? ?? '',
+                            style: AppTextStyles.bodyMd(color: AppColors.textPrimary))),
                     Text(NumberFormat('#,##0.###', 'en').format((item['quantity'] as num?) ?? 0)),
                   ],
                 ),
@@ -279,7 +266,8 @@ class _TransferDetailDialogState extends ConsumerState<_TransferDetailDialog> {
                   child: FilledButton(
                     onPressed: _working ? null : () => _act('ship', successMessage: 'تم شحن التحويل'),
                     child: _working
-                        ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                        ? const SizedBox(
+                            width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
                         : const Text('شحن الآن'),
                   ),
                 ),
@@ -287,7 +275,7 @@ class _TransferDetailDialogState extends ConsumerState<_TransferDetailDialog> {
             )
           else if (status == 'in_transit')
             Align(
-              alignment: Alignment.centerLeft,
+              alignment: AlignmentDirectional.centerEnd,
               child: FilledButton(
                 onPressed: _working ? null : () => _act('receive', successMessage: 'تم تأكيد الاستلام'),
                 child: _working
@@ -364,7 +352,8 @@ class _CreateTransferDialogState extends ConsumerState<_CreateTransferDialog> {
     final code = value.trim();
     if (code.isEmpty) return;
     try {
-      final response = await ApiClient.instance.dio.get('/products/inventory', queryParameters: {'search': code});
+      final response =
+          await ApiClient.instance.dio.get('/products/inventory', queryParameters: {'search': code});
       final results = List<Map<String, dynamic>>.from(response.data as List);
       final exact = results.where((p) => p['barcode'] == code || p['sku'] == code).toList();
       final match = exact.length == 1 ? exact.first : (results.length == 1 ? results.first : null);
@@ -413,7 +402,10 @@ class _CreateTransferDialogState extends ConsumerState<_CreateTransferDialog> {
                       child: DropdownButtonFormField<String>(
                         initialValue: _fromBranchId,
                         decoration: const InputDecoration(labelText: 'من فرع'),
-                        items: branches.map((b) => DropdownMenuItem(value: b['id'] as String, child: Text(b['name'] as String))).toList(),
+                        items: branches
+                            .map((b) =>
+                                DropdownMenuItem(value: b['id'] as String, child: Text(b['name'] as String)))
+                            .toList(),
                         onChanged: (v) => setState(() => _fromBranchId = v),
                       ),
                     ),
@@ -422,7 +414,10 @@ class _CreateTransferDialogState extends ConsumerState<_CreateTransferDialog> {
                       child: DropdownButtonFormField<String>(
                         initialValue: _toBranchId,
                         decoration: const InputDecoration(labelText: 'إلى فرع'),
-                        items: branches.map((b) => DropdownMenuItem(value: b['id'] as String, child: Text(b['name'] as String))).toList(),
+                        items: branches
+                            .map((b) =>
+                                DropdownMenuItem(value: b['id'] as String, child: Text(b['name'] as String)))
+                            .toList(),
                         onChanged: (v) => setState(() => _toBranchId = v),
                       ),
                     ),
@@ -434,7 +429,8 @@ class _CreateTransferDialogState extends ConsumerState<_CreateTransferDialog> {
                 controller: _searchController,
                 onChanged: _onSearch,
                 onSubmitted: _onSearchSubmitted,
-                decoration: const InputDecoration(hintText: 'ابحث أو امسح باركود صنف لإضافته...', prefixIcon: Icon(Icons.search, size: 18)),
+                decoration: const InputDecoration(
+                    hintText: 'ابحث أو امسح باركود صنف لإضافته...', prefixIcon: Icon(Icons.search, size: 18)),
               ),
               const SizedBox(height: 8),
               resultsAsync.when(
@@ -470,9 +466,16 @@ class _CreateTransferDialogState extends ConsumerState<_CreateTransferDialog> {
                       padding: const EdgeInsets.symmetric(vertical: 4),
                       child: Row(
                         children: [
-                          Expanded(child: Text(line.name, style: AppTextStyles.bodyMd(color: AppColors.textPrimary))),
-                          IconButton(
-                            icon: const Icon(Icons.remove_circle_outline, size: 18),
+                          Expanded(
+                              child:
+                                  Text(line.name, style: AppTextStyles.bodyMd(color: AppColors.textPrimary))),
+                          IconAction(
+                            icon: Icons.remove_circle_outline,
+                            iconSize: 18,
+                            dense: true,
+                            tooltip: line.quantity > 1
+                                ? 'إنقاص كمية ${line.name}'
+                                : 'إزالة ${line.name} من التحويل',
                             onPressed: () => setState(() {
                               if (line.quantity > 1) {
                                 line.quantity -= 1;
@@ -480,15 +483,16 @@ class _CreateTransferDialogState extends ConsumerState<_CreateTransferDialog> {
                                 _lines.remove(line);
                               }
                             }),
-                            padding: EdgeInsets.zero,
-                            constraints: const BoxConstraints(),
                           ),
-                          SizedBox(width: 32, child: Text(line.quantity.toStringAsFixed(0), textAlign: TextAlign.center)),
-                          IconButton(
-                            icon: const Icon(Icons.add_circle_outline, size: 18),
+                          SizedBox(
+                              width: 32,
+                              child: Text(line.quantity.toStringAsFixed(0), textAlign: TextAlign.center)),
+                          IconAction(
+                            icon: Icons.add_circle_outline,
+                            iconSize: 18,
+                            dense: true,
+                            tooltip: 'زيادة كمية ${line.name}',
                             onPressed: () => setState(() => line.quantity += 1),
-                            padding: EdgeInsets.zero,
-                            constraints: const BoxConstraints(),
                           ),
                         ],
                       ),

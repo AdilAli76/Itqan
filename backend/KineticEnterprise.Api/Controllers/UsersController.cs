@@ -95,13 +95,32 @@ public class UsersController : ControllerBase
             return BadRequest(new { message = $"كلمة المرور يجب أن تكون {minLength} أحرف على الأقل" });
         }
 
+        // تفرّد البريد **عالمي بين الحسابات النشطة**، لا داخل المنظمة فقط:
+        // تسجيل الدخول يبحث بالبريد بلا منظمة (مجهولة قبل الدخول)، فبريد
+        // مكرَّر بين منظمتين يجعل الدخول غير محدَّد النتيجة وقد يُدخل
+        // المستخدم إلى منظمة ليست منظمته. app_users بلا Security Policy،
+        // فهذا الاستعلام يرى كل المنظمات فعلاً.
+        // القيد الحقيقي في قاعدة البيانات (UQ_app_users_email_active)؛ هذا
+        // الفحص لرسالة مفهومة بدل خطأ SQL خام.
+        var email = request.Email.Trim();
+        if (await _db.AppUsers.AnyAsync(u => u.IsActive && u.Email == email))
+        {
+            return Conflict(new { message = "هذا البريد الإلكتروني مستخدَم بالفعل على حساب نشط" });
+        }
+        var normalizedUsername = string.IsNullOrWhiteSpace(request.Username) ? null : request.Username.Trim();
+        if (normalizedUsername is not null &&
+            await _db.AppUsers.AnyAsync(u => u.IsActive && u.Username == normalizedUsername))
+        {
+            return Conflict(new { message = "اسم المستخدم مستخدَم بالفعل على حساب نشط" });
+        }
+
         var user = new AppUser
         {
             OrganizationId = CurrentOrgId(),
             BranchId = request.BranchId,
             FullName = request.FullName,
-            Email = request.Email,
-            Username = string.IsNullOrWhiteSpace(request.Username) ? null : request.Username.Trim(),
+            Email = email,
+            Username = normalizedUsername,
             PasswordHash = BCrypt.Net.BCrypt.HashPassword(request.Password),
             Role = request.Role,
         };

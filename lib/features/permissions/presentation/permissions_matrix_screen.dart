@@ -8,6 +8,7 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_text_styles.dart';
 import '../../../shared/widgets/section_card.dart';
 import '../data/permissions_providers.dart';
+import '../../../core/auth/permissions.dart';
 
 String _dioErrorMessage(Object error, String fallback) {
   if (error is DioException) {
@@ -131,6 +132,8 @@ class _MatrixBodyState extends ConsumerState<_MatrixBody> {
               },
               borderRadius: BorderRadius.circular(8),
               child: Container(
+                constraints: const BoxConstraints(minHeight: 44),
+                alignment: Alignment.center,
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                 decoration: BoxDecoration(
                   color: selected ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.1) : Colors.transparent,
@@ -204,7 +207,7 @@ class _MatrixBodyState extends ConsumerState<_MatrixBody> {
                   ],
                   const SizedBox(height: 4),
                   Align(
-                    alignment: Alignment.centerLeft,
+                    alignment: AlignmentDirectional.centerEnd,
                     child: ElevatedButton(
                       onPressed: _saving ? null : _submit,
                       child: _saving
@@ -232,6 +235,11 @@ class _MatrixBodyState extends ConsumerState<_MatrixBody> {
         'permissionCodes': _editedCodes!.toList(),
       });
       ref.invalidate(permissionsMatrixProvider);
+      // صلاحيات المستخدم الحالي مُخزَّنة للجلسة كلها (myPermissionsProvider
+      // ليس autoDispose)؛ بلا هذا الإبطال يبقى المدير الذي عدّل صلاحيات
+      // دوره يرى الأزرار القديمة حتى يخرج ويدخل من جديد — فيبدو أن الحفظ
+      // لم يعمل، ويكرّره.
+      ref.invalidate(myPermissionsProvider);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تم حفظ الصلاحيات')));
       }

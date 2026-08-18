@@ -6,6 +6,8 @@ import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text_styles.dart';
 import '../../core/theme/branding_provider.dart';
 import 'nav_items.dart';
+import 'animations.dart';
+import '../../core/auth/permissions.dart';
 
 /// الشريط الجانبي الموحّد — أي موديول جديد يُضاف مستقبلاً (حسب
 /// ARCHITECTURE.md) يُسجَّل في nav_items.dart بسطر واحد فقط ويظهر تلقائياً
@@ -45,11 +47,22 @@ class _AppSidebarState extends ConsumerState<AppSidebar> {
 
   @override
   Widget build(BuildContext context) {
-    final groups = navGroupsFor(isPlatformAdmin: _isPlatformAdmin);
+    final perms = ref.perms;
+    final groups = filterByPermissions(
+      navGroupsFor(isPlatformAdmin: _isPlatformAdmin),
+      (route) {
+        final required = kRoutePermissions[route];
+        return required == null || perms.can(required);
+      },
+    );
     final branding = ref.watch(brandingProvider).valueOrNull;
     final color = Theme.of(context).colorScheme.primary;
 
-    return Container(
+    // Material لا Container: ExpansionTile (وهو ListTile داخلياً) يرسم
+    // خلفيته وأثر النقر على أقرب Material أعلاه. مع Container ملوّن يعترض
+    // الطريق تختفي تلك الآثار خلف لونه — وFlutter يؤكّد على ذلك بصراحة في
+    // وضع التطوير. Material يوفّر اللون والسطح معاً فيزول التعارض.
+    return Material(
       color: AppColors.surface,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -57,8 +70,8 @@ class _AppSidebarState extends ConsumerState<AppSidebar> {
           Container(
             height: 64,
             padding: const EdgeInsets.symmetric(horizontal: 20),
-            alignment: Alignment.centerRight,
-            decoration: const BoxDecoration(
+            alignment: AlignmentDirectional.centerStart,
+            decoration: BoxDecoration(
               border: Border(bottom: BorderSide(color: AppColors.border)),
             ),
             child: Row(
@@ -149,26 +162,39 @@ class _SidebarTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final color = Theme.of(context).colorScheme.primary;
-    return Material(
-      color: active ? color.withValues(alpha: 0.08) : Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        child: Container(
-          padding: EdgeInsets.only(right: indented ? 44 : 20, left: 20, top: 12, bottom: 12),
-          child: Row(
-            children: [
-              Icon(item.icon, size: indented ? 18 : 20, color: active ? color : AppColors.textSecondary),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  item.label,
-                  style: AppTextStyles.bodyMd(
-                    color: active ? color : AppColors.textPrimary,
-                  ).copyWith(fontWeight: active ? FontWeight.w600 : FontWeight.w400),
-                  overflow: TextOverflow.ellipsis,
+    // selected لا يُستنتج بصرياً: التظليل الخفيف هو كل ما يميّز العنصر
+    // النشط، وهو غير مرئي لقارئ الشاشة. بدون الوسم يتنقّل المستخدم بين
+    // ثمانية عشر عنصراً متطابقة صوتياً بلا معرفة أين هو الآن.
+    return Semantics(
+      button: true,
+      selected: active,
+      label: item.label,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          // AnimatedContainer بدل Container: تبديل التبويب يُظلّل العنصر
+          // الجديد تدريجياً بدل قفزة لونية مفاجئة، فيتابع النظر أين انتقل.
+          child: AnimatedContainer(
+            duration: AppMotion.fast,
+            curve: AppMotion.curve,
+            color: active ? color.withValues(alpha: 0.08) : Colors.transparent,
+            padding: EdgeInsetsDirectional.only(start: indented ? 44 : 20, end: 20, top: 12, bottom: 12),
+            child: Row(
+              children: [
+                Icon(item.icon, size: indented ? 18 : 20, color: active ? color : AppColors.textSecondary),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    item.label,
+                    style: AppTextStyles.bodyMd(
+                      color: active ? color : AppColors.textPrimary,
+                    ).copyWith(fontWeight: active ? FontWeight.w600 : FontWeight.w400),
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),

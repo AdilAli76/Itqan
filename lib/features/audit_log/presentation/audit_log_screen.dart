@@ -13,6 +13,9 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_text_styles.dart';
 import '../../../shared/widgets/data_table_widget.dart';
 import '../data/audit_log_providers.dart';
+import '../../../shared/widgets/skeleton.dart';
+import '../../../core/auth/permissions.dart';
+import '../../../shared/widgets/pagination_bar.dart';
 
 const _actionLabels = {
   'product.deleted': 'حذف صنف',
@@ -68,6 +71,18 @@ class _AuditLogScreenState extends ConsumerState<AuditLogScreen> {
     final entityFilter = ref.watch(auditLogEntityFilterProvider);
     final page = ref.watch(auditLogPageProvider);
 
+    // حارس على مستوى الوحدة لا الزر: الخادم يحرس هذا الـController
+    // كاملاً، فبلا الصلاحية لا توجد بيانات تُعرض أصلاً — وعرض جدول
+    // فارغ هنا كان يُفهَم كـ«لا توجد سجلات» لا كـ«ليست لك صلاحية».
+    if (!ref.perms.can(Perm.auditLogView)) {
+      return const AdaptiveScaffold(
+        title: 'سجل التدقيق',
+        activeRoute: '/audit-log',
+        body: NoPermissionView(moduleName: 'سجل التدقيق'),
+      );
+    }
+
+
     return AdaptiveScaffold(
       title: 'سجل التدقيق',
       activeRoute: '/audit-log',
@@ -97,16 +112,12 @@ class _AuditLogScreenState extends ConsumerState<AuditLogScreen> {
           ),
           const SizedBox(height: 16),
           logsAsync.when(
-            loading: () => const Padding(
-              padding: EdgeInsets.all(48),
-              child: Center(child: CircularProgressIndicator()),
-            ),
+            loading: () => const TableSkeleton(),
             error: (err, _) => _ErrorBox(onRetry: () => ref.invalidate(auditLogProvider)),
             data: (result) {
               final items = List<Map<String, dynamic>>.from(result['items'] as List);
               final totalCount = result['totalCount'] as int? ?? items.length;
               final pageSize = result['pageSize'] as int? ?? auditLogPageSize;
-              final totalPages = totalCount == 0 ? 1 : ((totalCount - 1) ~/ pageSize) + 1;
 
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -123,22 +134,15 @@ class _AuditLogScreenState extends ConsumerState<AuditLogScreen> {
                     ],
                     rows: items.map((log) => _logRow(context, log)).toList(),
                   ),
-                  const SizedBox(height: 12),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      IconButton(
-                        tooltip: 'الصفحة السابقة',
-                        icon: const Icon(Icons.chevron_right),
-                        onPressed: page > 1 ? () => ref.read(auditLogPageProvider.notifier).state = page - 1 : null,
-                      ),
-                      Text('صفحة $page من $totalPages', style: AppTextStyles.bodyMd()),
-                      IconButton(
-                        tooltip: 'الصفحة التالية',
-                        icon: const Icon(Icons.chevron_left),
-                        onPressed: page < totalPages ? () => ref.read(auditLogPageProvider.notifier).state = page + 1 : null,
-                      ),
-                    ],
+                  // الشريط المشترك بدل نسخة يدوية: النسخة السابقة كانت
+                  // تستعمل chevron_right لـ«السابق»، وهي تنعكس تلقائياً في
+                  // العربية فتشير يساراً — أي عكس المطلوب. وكانت تعرض رقم
+                  // الصفحة وحده بلا العدد الكلي المعروض.
+                  PaginationBar(
+                    page: page,
+                    pageSize: pageSize,
+                    totalCount: totalCount,
+                    onPageChanged: (p) => ref.read(auditLogPageProvider.notifier).state = p,
                   ),
                 ],
               );

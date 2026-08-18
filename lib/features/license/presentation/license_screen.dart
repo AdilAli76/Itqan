@@ -8,6 +8,7 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_text_styles.dart';
 import '../../../shared/widgets/stat_card.dart';
 import '../data/license_providers.dart';
+import '../../../core/auth/permissions.dart';
 
 const _planLabels = {
   'trial': 'تجريبية',
@@ -38,6 +39,18 @@ class LicenseScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final licenseAsync = ref.watch(licenseProvider);
+
+    // حارس على مستوى الوحدة لا الزر: الخادم يحرس هذا الـController
+    // كاملاً، فبلا الصلاحية لا توجد بيانات تُعرض أصلاً — وعرض جدول
+    // فارغ هنا كان يُفهَم كـ«لا توجد سجلات» لا كـ«ليست لك صلاحية».
+    if (!ref.perms.can(Perm.licenseView)) {
+      return const AdaptiveScaffold(
+        title: 'الترخيص والاشتراك',
+        activeRoute: '/license',
+        body: NoPermissionView(moduleName: 'الترخيص والاشتراك'),
+      );
+    }
+
 
     return AdaptiveScaffold(
       title: 'الترخيص والاشتراك',
@@ -191,7 +204,7 @@ class _LicenseContent extends StatelessWidget {
           decoration: BoxDecoration(color: AppColors.infoBg, borderRadius: BorderRadius.circular(12)),
           child: Row(
             children: [
-              const Icon(Icons.info_outline, color: AppColors.info, size: 20),
+              Icon(Icons.info_outline, color: AppColors.info, size: 20),
               const SizedBox(width: 10),
               Expanded(
                 child: Text(

@@ -6,6 +6,31 @@ using KineticEnterprise.Api.Data;
 using KineticEnterprise.Api.Hubs;
 using KineticEnterprise.Api.Middleware;
 
+// أوامر الصيانة تُنفَّذ وتخرج قبل بناء السيرفر — لا تفتح منفذاً ولا تشغّل
+// المهام الخلفية. راجع PlatformOwnerBootstrap لسبب كون إنشاء أول حساب أمراً
+// على السيرفر لا نقطة نهاية HTTP.
+if (args.Length > 0 &&
+    (args[0] == KineticEnterprise.Api.Data.PlatformOwnerBootstrap.CommandName ||
+     args[0] == KineticEnterprise.Api.Data.PlatformOwnerBootstrap.ResetCommandName ||
+     args[0] == KineticEnterprise.Api.Data.PlatformOwnerBootstrap.CreateUserCommandName))
+{
+    var bootstrapConfig = new ConfigurationBuilder()
+        .SetBasePath(Directory.GetCurrentDirectory())
+        .AddJsonFile("appsettings.json", optional: true)
+        .AddJsonFile($"appsettings.{Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") ?? "Production"}.json", optional: true)
+        .AddEnvironmentVariables()
+        .Build();
+
+    return args[0] switch
+    {
+        KineticEnterprise.Api.Data.PlatformOwnerBootstrap.ResetCommandName =>
+            await KineticEnterprise.Api.Data.PlatformOwnerBootstrap.ResetPasswordAsync(bootstrapConfig),
+        KineticEnterprise.Api.Data.PlatformOwnerBootstrap.CreateUserCommandName =>
+            await KineticEnterprise.Api.Data.PlatformOwnerBootstrap.CreateUserAsync(bootstrapConfig),
+        _ => await KineticEnterprise.Api.Data.PlatformOwnerBootstrap.RunAsync(args, bootstrapConfig),
+    };
+}
+
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddDbContext<AppDbContext>(opt =>
@@ -71,3 +96,7 @@ app.MapControllers();
 app.MapHub<NotificationsHub>("/hubs/notifications");
 
 app.Run();
+
+// نقطة الدخول تُرجع int الآن (أوامر الصيانة أعلاه ترجع رمز خروجها)، فيلزم
+// إرجاع صريح هنا أيضاً.
+return 0;

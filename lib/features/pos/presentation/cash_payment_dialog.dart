@@ -2,15 +2,22 @@ import 'package:flutter/material.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_text_styles.dart';
 import '../../../shared/widgets/currency_badge.dart';
+import '../../../shared/widgets/numeric_keypad.dart';
 
 /// حاسبة الدفع النقدي — واجهة وحساب فقط في هذه المرحلة (لا يُحفَظ المبلغ
 /// المستلَم أو الباقي في قاعدة البيانات ولا يُطبَع على الإيصال، بقرار
 /// صريح لتفادي تعديل الـ Backend الآن). عند "تأكيد الدفع" يُرجِع true
 /// فقط، فتُنفَّذ عملية البيع الحالية دون أي تغيير في _checkout نفسها.
 class CashPaymentDialog extends StatefulWidget {
-  const CashPaymentDialog({super.key, required this.totalDue, this.currencySymbol = 'د.ل'});
+  const CashPaymentDialog({
+    super.key,
+    required this.totalDue,
+    this.currencySymbol = 'د.ل',
+    this.keypadSize = KeypadSize.compact,
+  });
   final double totalDue;
   final String currencySymbol;
+  final KeypadSize keypadSize;
 
   @override
   State<CashPaymentDialog> createState() => _CashPaymentDialogState();
@@ -34,21 +41,6 @@ class _CashPaymentDialogState extends State<CashPaymentDialog> {
     return [exact, ...sorted.take(3)];
   }
 
-  void _onKeyTap(String key) {
-    setState(() {
-      if (key == '⌫') {
-        if (_amountText.isNotEmpty) _amountText = _amountText.substring(0, _amountText.length - 1);
-      } else if (key == '.') {
-        if (!_amountText.contains('.')) _amountText += _amountText.isEmpty ? '0.' : '.';
-      } else {
-        // منع أكثر من رقمين بعد الفاصلة (قيمة نقدية، لا حاجة لدقة أكبر).
-        final parts = _amountText.split('.');
-        if (parts.length == 2 && parts[1].length >= 2) return;
-        _amountText += key;
-      }
-    });
-  }
-
   void _setAmount(double value) {
     setState(() => _amountText = value.toStringAsFixed(value.truncateToDouble() == value ? 0 : 2));
   }
@@ -58,7 +50,7 @@ class _CashPaymentDialogState extends State<CashPaymentDialog> {
     return AlertDialog(
       title: const Text('الدفع نقداً'),
       content: SizedBox(
-        width: 360,
+        width: widget.keypadSize == KeypadSize.large ? 440 : 360,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -71,15 +63,10 @@ class _CashPaymentDialogState extends State<CashPaymentDialog> {
               ],
             ),
             const Divider(height: 24),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 12),
-              decoration: BoxDecoration(color: AppColors.surfaceAlt, borderRadius: BorderRadius.circular(8)),
-              child: Text(
-                _amountText.isEmpty ? '0' : _amountText,
-                textAlign: TextAlign.center,
-                style: AppTextStyles.displayLg(),
-              ),
+            KeypadDisplay(
+              value: _amountText,
+              suffix: widget.currencySymbol,
+              label: 'المبلغ المستلَم',
             ),
             const SizedBox(height: 12),
             Wrap(
@@ -94,7 +81,14 @@ class _CashPaymentDialogState extends State<CashPaymentDialog> {
               }).toList(),
             ),
             const SizedBox(height: 16),
-            _NumericKeypad(onKeyTap: _onKeyTap),
+            NumericKeypad(
+              value: _amountText,
+              onChanged: (v) => setState(() => _amountText = v),
+              size: widget.keypadSize,
+              onSubmit: () {
+                if (_isSufficient) Navigator.pop(context, true);
+              },
+            ),
             const SizedBox(height: 16),
             Container(
               width: double.infinity,
@@ -127,32 +121,6 @@ class _CashPaymentDialogState extends State<CashPaymentDialog> {
           child: const Text('تأكيد الدفع'),
         ),
       ],
-    );
-  }
-}
-
-class _NumericKeypad extends StatelessWidget {
-  const _NumericKeypad({required this.onKeyTap});
-  final ValueChanged<String> onKeyTap;
-
-  static const _keys = ['7', '8', '9', '4', '5', '6', '1', '2', '3', '.', '0', '⌫'];
-
-  @override
-  Widget build(BuildContext context) {
-    return GridView.count(
-      crossAxisCount: 3,
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      mainAxisSpacing: 8,
-      crossAxisSpacing: 8,
-      childAspectRatio: 1.8,
-      children: _keys.map((key) {
-        return OutlinedButton(
-          style: OutlinedButton.styleFrom(padding: EdgeInsets.zero),
-          onPressed: () => onKeyTap(key),
-          child: Text(key, style: AppTextStyles.headlineMd()),
-        );
-      }).toList(),
     );
   }
 }

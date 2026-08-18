@@ -6,8 +6,16 @@ import '../../../core/responsive/adaptive_scaffold.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_text_styles.dart';
 import '../data/notifications_providers.dart';
+import '../../../shared/widgets/filter_chip_button.dart';
 
-const _typeMeta = {
+// ux-audit: ignore GV-02 — الإشعارات شخصية: كل مستخدم يرى إشعاراته هو،
+// والخادم يحصرها بالمنظمة والمستخدم (NotificationsController) بلا أي رمز
+// صلاحية. لا يوجد إجراء هنا يملكه بعض المستخدمين دون بعض.
+
+// getter لا final: ألوان الحالات صارت تتبع سطوع السمة، ومتغيّر final على
+// مستوى الملف يُقيَّم مرّة واحدة عند أول قراءة فيلتقط ألوان الوضع النهاري
+// ويحتفظ بها بعد التبديل إلى الليلي. الـgetter يُعيد البناء عند كل قراءة.
+Map<String, (IconData, Color, Color)> get _typeMeta => {
   'low_stock': (Icons.inventory_2_outlined, AppColors.warning, AppColors.warningBg),
   'expiry': (Icons.event_busy_outlined, AppColors.danger, AppColors.dangerBg),
   'count_variance': (Icons.difference_outlined, AppColors.info, AppColors.infoBg),
@@ -38,13 +46,17 @@ class NotificationsScreen extends ConsumerWidget {
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Row(
+          // Wrap لا Row: شرائح الفلاتر تفيض على عرض الهاتف (قياس الفحص
+          // البصري: حتى 233 بكسل). الالتفاف يبقيها كلها ظاهرة وقابلة
+          // للنقر بدل قصّ آخرها بصمت.
+          Wrap(
+            runSpacing: 8,
             children: [
-              _FilterChip(label: 'الكل', selected: filter == null, onTap: () => ref.read(notificationsFilterProvider.notifier).state = null),
+              FilterChipButton(label: 'الكل', selected: filter == null, onTap: () => ref.read(notificationsFilterProvider.notifier).state = null),
               const SizedBox(width: 8),
-              _FilterChip(label: 'غير مقروءة', selected: filter == false, onTap: () => ref.read(notificationsFilterProvider.notifier).state = false),
+              FilterChipButton(label: 'غير مقروءة', selected: filter == false, onTap: () => ref.read(notificationsFilterProvider.notifier).state = false),
               const SizedBox(width: 8),
-              _FilterChip(label: 'مقروءة', selected: filter == true, onTap: () => ref.read(notificationsFilterProvider.notifier).state = true),
+              FilterChipButton(label: 'مقروءة', selected: filter == true, onTap: () => ref.read(notificationsFilterProvider.notifier).state = true),
             ],
           ),
           const SizedBox(height: 16),
@@ -98,34 +110,6 @@ class NotificationsScreen extends ConsumerWidget {
   }
 }
 
-class _FilterChip extends StatelessWidget {
-  const _FilterChip({required this.label, required this.selected, required this.onTap});
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final color = Theme.of(context).colorScheme.primary;
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(8),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-        decoration: BoxDecoration(
-          color: selected ? color.withValues(alpha: 0.1) : Colors.transparent,
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: selected ? color : AppColors.border),
-        ),
-        child: Text(
-          label,
-          style: AppTextStyles.labelMd(color: selected ? color : AppColors.textSecondary)
-              .copyWith(fontWeight: selected ? FontWeight.w600 : FontWeight.w500),
-        ),
-      ),
-    );
-  }
-}
 
 class _ErrorBox extends StatelessWidget {
   const _ErrorBox({required this.onRetry});
@@ -165,7 +149,7 @@ class _NotificationTile extends ConsumerWidget {
       onTap: isRead ? null : () => _markRead(ref),
       child: Container(
         padding: const EdgeInsets.all(16),
-        decoration: const BoxDecoration(border: Border(top: BorderSide(color: AppColors.border))),
+        decoration: BoxDecoration(border: Border(top: BorderSide(color: AppColors.border))),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -201,7 +185,7 @@ class _NotificationTile extends ConsumerWidget {
                 margin: const EdgeInsets.only(top: 4),
                 width: 8,
                 height: 8,
-                decoration: const BoxDecoration(color: AppColors.info, shape: BoxShape.circle),
+                decoration: BoxDecoration(color: AppColors.info, shape: BoxShape.circle),
               ),
           ],
         ),

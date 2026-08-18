@@ -8,6 +8,10 @@ import '../../../core/theme/app_text_styles.dart';
 import '../../../shared/widgets/barcode_view.dart';
 import '../../../shared/widgets/currency_badge.dart';
 
+// ux-audit: ignore GV-02 — بوابة العميل خارج نظام صلاحيات الموظفين تماماً:
+// من يفتحها زبونٌ لا مستخدَم نظام، ولا دور له في مصفوفة الأدوار أصلاً
+// (راجع تعليق app_router.dart: هذا المسار خارج AppShell عمداً).
+
 String _dioErrorMessage(Object error, String fallback) {
   if (error is DioException) {
     final data = error.response?.data;
@@ -82,7 +86,10 @@ class _CustomerPortalScreenState extends State<CustomerPortalScreen> {
       appBar: AppBar(
         title: const Text('حسابي'),
         leading: IconButton(
-          icon: const Icon(Icons.arrow_forward),
+          // arrow_back لا arrow_forward: الأيقونة تنعكس تلقائياً في الاتجاه
+          // العربي فتشير يميناً — وهو اتجاه الرجوع الصحيح. استعمال forward
+          // «تعويضاً» يقلبها مرّتين فتشير لجهة التقدّم لا الرجوع.
+          icon: const Icon(Icons.arrow_back),
           tooltip: 'رجوع',
           onPressed: () => context.go('/login'),
         ),
@@ -137,7 +144,7 @@ class _CustomerPortalScreenState extends State<CustomerPortalScreen> {
             prefixIcon: Icon(Icons.credit_card_outlined),
           ),
         ),
-        const SizedBox(height: 14),
+        const SizedBox(height: 16),
         TextField(
           controller: _pinController,
           obscureText: true,
@@ -164,7 +171,7 @@ class _CustomerPortalScreenState extends State<CustomerPortalScreen> {
           child: Padding(
             padding: const EdgeInsets.symmetric(vertical: 6),
             child: _loading
-                ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                 : const Text('عرض حسابي'),
           ),
         ),
@@ -272,8 +279,8 @@ class _CustomerPortalScreenState extends State<CustomerPortalScreen> {
                 final signed = (t['signedAmount'] as num?)?.toDouble() ?? 0;
                 final createdAt = DateTime.tryParse(t['createdAt'] as String? ?? '');
                 return Container(
-                  padding: const EdgeInsets.all(14),
-                  decoration: const BoxDecoration(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
                     border: Border(bottom: BorderSide(color: AppColors.border)),
                   ),
                   child: Row(
@@ -292,7 +299,7 @@ class _CustomerPortalScreenState extends State<CustomerPortalScreen> {
                                 style: AppTextStyles.bodyMd(color: AppColors.textPrimary)),
                             if (createdAt != null)
                               Text(DateFormat('yyyy-MM-dd HH:mm').format(createdAt),
-                                  style: AppTextStyles.bodyMd(color: AppColors.textMuted).copyWith(fontSize: 12)),
+                                  style: AppTextStyles.caption(color: AppColors.textMuted)),
                           ],
                         ),
                       ),
@@ -309,7 +316,7 @@ class _CustomerPortalScreenState extends State<CustomerPortalScreen> {
           decoration: BoxDecoration(color: AppColors.infoBg, borderRadius: BorderRadius.circular(8)),
           child: Row(
             children: [
-              const Icon(Icons.info_outline, size: 18, color: AppColors.info),
+              Icon(Icons.info_outline, size: 18, color: AppColors.info),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
@@ -333,7 +340,7 @@ class _MiniStat extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: AppColors.surface,
         borderRadius: BorderRadius.circular(12),
@@ -342,7 +349,7 @@ class _MiniStat extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(label, style: AppTextStyles.bodyMd(color: AppColors.textSecondary).copyWith(fontSize: 12)),
+          Text(label, style: AppTextStyles.caption()),
           const SizedBox(height: 4),
           Text(value, style: AppTextStyles.headlineMd()),
         ],

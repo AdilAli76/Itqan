@@ -10,6 +10,10 @@ import '../theme/branding_provider.dart';
 import 'breakpoints.dart';
 import '../../shared/widgets/app_navbar.dart';
 import '../../shared/widgets/app_sidebar.dart';
+import '../../shared/widgets/animations.dart';
+import '../network/realtime_listener.dart';
+import '../../shared/widgets/icon_action.dart';
+import '../theme/theme_mode_provider.dart';
 
 const _roleLabels = {
   'super_admin': 'مدير عام',
@@ -53,22 +57,29 @@ class AdaptiveScaffold extends ConsumerWidget {
     final header = Container(
       height: 64,
       padding: const EdgeInsets.symmetric(horizontal: 24),
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         color: AppColors.surface,
         border: Border(bottom: BorderSide(color: AppColors.border)),
       ),
       child: Row(
         children: [
           Text(title, style: Theme.of(context).textTheme.headlineMedium),
+          const SizedBox(width: 12),
+          // يظهر فقط عند انقطاع الاتصال اللحظي أو إعادته — ملاصقاً للعنوان
+          // لا في طرف الشريط، لأنه تحذير عن صحّة البيانات المعروضة نفسها.
+          const RealtimeIndicator(),
+          const OfflineQueueIndicator(),
           const Spacer(),
           if (actions != null) ...actions!,
           if (insideShell && isDesktop) ...[
             if (actions != null && actions!.isNotEmpty) ...[
               const SizedBox(width: 16),
-              const SizedBox(height: 24, child: VerticalDivider(width: 1, color: AppColors.border)),
+              SizedBox(height: 24, child: VerticalDivider(width: 1, color: AppColors.border)),
               const SizedBox(width: 16),
             ] else
               const SizedBox(width: 16),
+            const _ThemeToggle(),
+            const SizedBox(width: 8),
             const _HeaderAccountArea(),
           ],
         ],
@@ -89,7 +100,13 @@ class AdaptiveScaffold extends ConsumerWidget {
               mainAxisAlignment: MainAxisAlignment.center,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                ConstrainedBox(constraints: const BoxConstraints(maxWidth: 1440), child: body),
+                // دخول المحتوى بظهور تدريجي — يُشغَّل مرّة واحدة عند فتح
+                // التبويب لا مع كل إعادة بناء (راجع FadeSlideIn)، فلا يرمش
+                // الجدول عند البحث أو التصفية.
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 1440),
+                  child: FadeSlideIn(child: body),
+                ),
               ],
             ),
           ),
@@ -183,6 +200,29 @@ class _HeaderAccountArea extends ConsumerWidget {
           ],
         );
       },
+    );
+  }
+}
+
+/// تبديل الوضع النهاري/الليلي.
+///
+/// في الشريط العلوي لا في شاشة الإعدادات: الوضع الليلي يُبدَّل حين تتغيّر
+/// الإضاءة حول المستخدم — عند غروب أو دخول وردية مسائية — لا حين يفتح
+/// الإعدادات. دفنه في شاشة إعدادات يعني أن أحداً لن يستعمله.
+class _ThemeToggle extends ConsumerWidget {
+  const _ThemeToggle();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return IconAction(
+      icon: isDark ? Icons.light_mode_outlined : Icons.dark_mode_outlined,
+      iconSize: 18,
+      dense: true,
+      tooltip: isDark ? 'التبديل إلى الوضع النهاري' : 'التبديل إلى الوضع الليلي',
+      onPressed: () => ref.read(themeModeProvider.notifier).toggle(
+            Theme.of(context).brightness,
+          ),
     );
   }
 }

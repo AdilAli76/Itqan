@@ -9,8 +9,8 @@ namespace KineticEnterprise.Api.Controllers;
 public record BrandingResponse(string DisplayName, string? LogoUrl, string PrimaryColor, string SecondaryColor, string CurrencySymbol, string NavLayout);
 public record UpdateBrandingRequest(string DisplayName, string PrimaryColor, string SecondaryColor, string NavLayout);
 
-public record OrganizationSettingsDto(string CurrencyCode, string CurrencySymbol, string Locale, decimal TaxRate, int PasswordMinLength, double ReceiptWidthMm);
-public record UpdateSettingsRequest(string CurrencyCode, string CurrencySymbol, string Locale, decimal TaxRate, int PasswordMinLength, double ReceiptWidthMm);
+public record OrganizationSettingsDto(string CurrencyCode, string CurrencySymbol, string Locale, decimal TaxRate, int PasswordMinLength, double ReceiptWidthMm, bool PosAllowOpenProduct);
+public record UpdateSettingsRequest(string CurrencyCode, string CurrencySymbol, string Locale, decimal TaxRate, int PasswordMinLength, double ReceiptWidthMm, bool PosAllowOpenProduct);
 
 public record BarcodeTemplateDto(double WidthMm, double HeightMm, bool ShowName, bool ShowPrice, bool ShowSku);
 
@@ -71,7 +71,7 @@ public class OrganizationsController : ControllerBase
         var org = await _db.Organizations.FirstOrDefaultAsync();
         if (org is null) return NotFound();
 
-        return new OrganizationSettingsDto(org.CurrencyCode, org.CurrencySymbol, org.Locale, org.TaxRate, org.PasswordMinLength, org.ReceiptWidthMm);
+        return new OrganizationSettingsDto(org.CurrencyCode, org.CurrencySymbol, org.Locale, org.TaxRate, org.PasswordMinLength, org.ReceiptWidthMm, org.PosAllowOpenProduct);
     }
 
     [HttpPut("me/settings")]
@@ -100,6 +100,9 @@ public class OrganizationsController : ControllerBase
         org.TaxRate = request.TaxRate;
         org.PasswordMinLength = request.PasswordMinLength;
         org.ReceiptWidthMm = request.ReceiptWidthMm;
+        // بيع بقيمة يكتبها الكاشير هو أوسع باب لسحب نقدية بلا بضاعة مقابلة،
+        // فتغييره محصور بـ super_admin مثل بقية هذه الشاشة.
+        org.PosAllowOpenProduct = request.PosAllowOpenProduct;
         org.UpdatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync();
 

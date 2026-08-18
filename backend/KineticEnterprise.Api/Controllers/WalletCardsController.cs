@@ -27,17 +27,53 @@ public record WalletCardDto(
 [ApiController]
 [Route("api/wallet-cards")]
 [Authorize]
+/// صفحة بطاقات محفظة.
+public record WalletCardPageDto(List<WalletCardDto> Items, int TotalCount, int Page, int PageSize);
+
 public class WalletCardsController : ControllerBase
 {
     private readonly AppDbContext _db;
     public WalletCardsController(AppDbContext db) => _db = db;
 
+    /// <summary>
+    /// بطاقات المحفظة مقسَّمة صفحات. عدد البطاقات يساوي عدد العملاء تقريباً،
+    /// فهو ينمو بلا سقف مثلهم.
+    ///
+    /// الفلترة بالحالة والبحث كانتا تُطبَّقان في الذاكرة بعد جلب كل البطاقات؛
+    /// نُقلتا إلى الاستعلام لأن الترقيم فوق فلترة لاحقة يعني البحث داخل
+    /// الصفحة الحالية وحدها — بطاقة موجودة لا يجدها المستخدم لأنها في صفحة
+    /// أخرى.
+    /// </summary>
     [HttpGet]
-    public async Task<ActionResult<List<WalletCardDto>>> GetAll([FromQuery] string? state, [FromQuery] string? search)
+    public async Task<ActionResult<WalletCardPageDto>> GetAll(
+        [FromQuery] string? state,
+        [FromQuery] string? search,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 50)
     {
+        page = Math.Max(1, page);
+        pageSize = Math.Clamp(pageSize, 1, 200);
+
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
-        var cards = await _db.CustomerCardIndexes.OrderByDescending(c => c.IssuedAt).ToListAsync();
-        if (!string.IsNullOrWhiteSpace(state)) cards = cards.Where(c => c.State == state).ToList();
+        var cardQuery = _db.CustomerCardIndexes.AsQueryable();
+        if (!string.IsNullOrWhiteSpace(state)) cardQuery = cardQuery.Where(c => c.State == state);
+
+        // البحث يمسّ اسم العميل وهاتفه أيضاً، لا رمز البطاقة وحده، فيحتاج
+        // ربطاً بجدول العملاء قبل العدّ والتقطيع.
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            cardQuery = cardQuery.Where(c =>
+                c.CardCode.Contains(search) ||
+                _db.Customers.Any(cu => cu.Id == c.CustomerId &&
+                    (cu.FullName.Contains(search) ||
+                     (cu.Phone != null && cu.Phone.Contains(search)))));
+        }
+
+        var totalCount = await cardQuery.CountAsync();
+        var cards = await cardQuery.OrderByDescending(c => c.IssuedAt)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToListAsync();
 
         var customerIds = cards.Select(c => c.CustomerId).ToList();
         var customers = await _db.Customers
@@ -60,7 +96,7 @@ public class WalletCardsController : ControllerBase
             })
             .ToDictionaryAsync(x => x.CustomerId, x => x.In - x.Out);
 
-        var result = cards
+        var items = cards
             .Where(c => customers.ContainsKey(c.CustomerId))
             .Select(c =>
             {
@@ -71,17 +107,10 @@ public class WalletCardsController : ControllerBase
                     c.IssuedAt, c.ExpiryDate, c.BlockedReason,
                     c.IssuedBy.HasValue ? issuers.GetValueOrDefault(c.IssuedBy.Value) : null,
                     c.HolderName);
-            });
+            })
+            .ToList();
 
-        if (!string.IsNullOrWhiteSpace(search))
-        {
-            result = result.Where(c =>
-                c.CustomerName.Contains(search, StringComparison.OrdinalIgnoreCase) ||
-                c.CardCode.Contains(search, StringComparison.OrdinalIgnoreCase) ||
-                (c.CustomerPhone?.Contains(search) ?? false));
-        }
-
-        return result.ToList();
+        return new WalletCardPageDto(items, totalCount, page, pageSize);
     }
 
     /// <summary>
@@ -89,7 +118,7 @@ public class WalletCardsController : ControllerBase
     /// (يُحذف من الفهرس) فلا تبقى بطاقتان صالحتان لنفس العميل.
     /// </summary>
     [HttpPost("issue")]
-    [RequirePermission("customers.manage")]
+    [RequirePermission("cards.issue")]
     public async Task<ActionResult<WalletCardDto>> Issue(IssueCardForCustomerRequest request)
     {
         var customer = await _db.Customers.FirstOrDefaultAsync(c => c.Id == request.CustomerId && !c.IsDeleted);
@@ -135,7 +164,7 @@ public class WalletCardsController : ControllerBase
     }
 
     [HttpPost("{cardCode}/block")]
-    [RequirePermission("customers.manage")]
+    [RequirePermission("cards.issue")]
     public async Task<IActionResult> Block(string cardCode, BlockCardRequest request)
     {
         var card = await _db.CustomerCardIndexes.FirstOrDefaultAsync(c => c.CardCode == cardCode);
@@ -150,7 +179,7 @@ public class WalletCardsController : ControllerBase
     }
 
     [HttpPost("{cardCode}/unblock")]
-    [RequirePermission("customers.manage")]
+    [RequirePermission("cards.issue")]
     public async Task<IActionResult> Unblock(string cardCode)
     {
         var card = await _db.CustomerCardIndexes.FirstOrDefaultAsync(c => c.CardCode == cardCode);
@@ -170,7 +199,7 @@ public class WalletCardsController : ControllerBase
     /// يرفع القفل أيضاً لأن سببه غالباً هو النسيان نفسه.
     /// </summary>
     [HttpPost("{cardCode}/reset-pin")]
-    [RequirePermission("customers.manage")]
+    [RequirePermission("cards.issue")]
     public async Task<IActionResult> ResetPin(string cardCode, ResetCardPinRequest request)
     {
         var card = await _db.CustomerCardIndexes.FirstOrDefaultAsync(c => c.CardCode == cardCode);

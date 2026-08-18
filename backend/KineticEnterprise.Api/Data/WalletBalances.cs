@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using KineticEnterprise.Api.Models;
 
 namespace KineticEnterprise.Api.Data;
@@ -28,6 +29,49 @@ public static class WalletBalances
             .FirstOrDefaultAsync();
 
         return totals is null ? 0 : totals.In - totals.Out;
+    }
+
+    /// <summary>
+    /// نفس الرصيد، لكن مع قفل نطاق يمنع إدراج حركات جديدة لهذا العميل حتى
+    /// نهاية المعاملة الجارية.
+    ///
+    /// يُستدعى قبل أي عملية **تنفق** من الرصيد (بيع بالخصم من المحفظة).
+    /// بدونه: عمليتا بيع متزامنتان تقرآن نفس الرصيد وتمرّان كلتاهما، فيُنفَق
+    /// الرصيد مرتين. HOLDLOCK على نطاق customer_id هو ما يمنع الإدراج
+    /// المتزامن — UPDLOCK وحده يقفل الصفوف الموجودة لا الصفوف الجديدة.
+    ///
+    /// يجب استدعاؤه داخل معاملة مفتوحة، وإلا تحرّر القفل فوراً بلا فائدة.
+    /// </summary>
+    public static async Task<decimal> ComputeLockedAsync(AppDbContext db, Guid customerId)
+    {
+        var inKinds = string.Join(",", WalletKinds.InKinds.Select(k => $"'{k}'"));
+        var outKinds = string.Join(",", WalletKinds.OutKinds.Select(k => $"'{k}'"));
+
+        // أنواع الحركات ثوابت في الكود (WalletKinds) لا مدخلات مستخدم، فلا
+        // مسار حقن هنا؛ ومعرّف العميل يُمرَّر كمعامل حقيقي على أي حال.
+        var sql = $@"
+            SELECT ISNULL(SUM(CASE WHEN kind IN ({inKinds})  THEN amount ELSE 0 END), 0)
+                 - ISNULL(SUM(CASE WHEN kind IN ({outKinds}) THEN amount ELSE 0 END), 0)
+            FROM customer_wallet_transactions WITH (UPDLOCK, HOLDLOCK)
+            WHERE customer_id = @customerId";
+
+        var connection = db.Database.GetDbConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = sql;
+        command.Transaction = db.Database.CurrentTransaction?.GetDbTransaction();
+
+        var parameter = command.CreateParameter();
+        parameter.ParameterName = "@customerId";
+        parameter.Value = customerId;
+        command.Parameters.Add(parameter);
+
+        if (connection.State != System.Data.ConnectionState.Open)
+        {
+            await connection.OpenAsync();
+        }
+
+        var result = await command.ExecuteScalarAsync();
+        return result is null or DBNull ? 0 : Convert.ToDecimal(result);
     }
 
     /// <summary>

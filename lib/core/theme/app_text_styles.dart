@@ -10,14 +10,17 @@ class AppTextStyles {
     required double size,
     required FontWeight weight,
     double? height,
-    Color color = AppColors.textPrimary,
+    // لم تعد قيمة افتراضية ثابتة: AppColors.textPrimary صار getter يتبع
+    // سطوع السمة، وقيم المعاملات الافتراضية في Dart يجب أن تكون ثوابت.
+    // null هنا تعني «اللون الأساسي أياً كان في السمة الحالية».
+    Color? color,
     double letterSpacing = 0,
   }) {
     return GoogleFonts.ibmPlexSansArabic(
       fontSize: size,
       fontWeight: weight,
       height: height,
-      color: color,
+      color: color ?? AppColors.textPrimary,
       letterSpacing: letterSpacing,
     );
   }
@@ -39,6 +42,19 @@ class AppTextStyles {
 
   static TextStyle labelMd({Color? color}) =>
       _base(size: 13, weight: FontWeight.w500, height: 1.3, color: color ?? AppColors.textSecondary);
+
+  /// أصغر درجة في السلّم — للنصوص المساعدة: تسميات التبويبات، التواريخ
+  /// الثانوية، النصوص التوضيحية تحت الحقول، وتلميحات الرسوم البيانية.
+  ///
+  /// أُضيفت لأن غيابها كان يُنتج النمط نفسه في سبعة مواضع مختلفة:
+  /// `AppTextStyles.bodyMd(...).copyWith(fontSize: 12)`. حين يلتفّ سبعة
+  /// مواضع حول السلّم بالطريقة نفسها فالنقص في السلّم لا في المواضع —
+  /// وتركها كما هي يعني أن الثامن سيخترع 11 أو 13 بدل 12.
+  ///
+  /// 12 نقطة هو الحدّ الأدنى المقروء المعتمد في هذا النظام؛ لا تُضاف درجة
+  /// أصغر منه (راجع قاعدة AC-02 في مدقّق الوصولية).
+  static TextStyle caption({Color? color}) =>
+      _base(size: 12, weight: FontWeight.w400, height: 1.35, color: color ?? AppColors.textSecondary);
 
   /// عرض العملة (د.ل) — يستخدم أرقام جدولية لمحاذاة الجداول المالية.
   static TextStyle currency({Color? color, double size = 15}) => _base(

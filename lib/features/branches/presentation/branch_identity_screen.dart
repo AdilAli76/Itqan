@@ -10,6 +10,13 @@ import '../../../core/theme/branding_provider.dart';
 import '../../../shared/widgets/data_table_widget.dart';
 import '../../../shared/widgets/section_card.dart';
 import '../data/branches_providers.dart';
+import '../../../shared/widgets/skeleton.dart';
+
+// ux-audit: ignore UX-03 — قائمة فروع المنظمة محدودة بطبيعة العمل (وحدات
+// إلى عشرات، لا آلاف). الترقيم هنا يضيف شريطاً لا يظهر أبداً وحالة صفحة
+// تُدار بلا داعٍ.
+// ux-audit: ignore UX-02 — للسبب نفسه: الترشيح فوق قائمة تُقرأ كاملةً في
+// نظرة واحدة يزيد الخطوات ولا يقلّلها.
 
 String _dioErrorMessage(Object error, String fallback) {
   if (error is DioException) {
@@ -78,10 +85,7 @@ class _BranchIdentityScreenState extends ConsumerState<BranchIdentityScreen> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 brandingAsync.when(
-                  loading: () => const Padding(
-                    padding: EdgeInsets.all(24),
-                    child: Center(child: CircularProgressIndicator()),
-                  ),
+                  loading: () => const TableSkeleton(),
                   error: (_, __) => _ErrorBox(
                     message: 'تعذّر تحميل بيانات الهوية',
                     onRetry: () => ref.invalidate(brandingProvider),
@@ -142,21 +146,6 @@ class _BrandingFormState extends ConsumerState<_BrandingForm> {
   bool _saving = false;
   String? _error;
 
-  static const _presetPrimaries = [
-    Color(0xFF0B2540), // الافتراضي - Kinetic Ink
-    Color(0xFF1E3A2E), // أخضر مؤسسي غامق
-    Color(0xFF5C1A1A), // عنابي
-    Color(0xFF3A2E1E), // بني بن
-    Color(0xFF1E293B), // كحلي رمادي
-  ];
-
-  static const _presetSecondaries = [
-    Color(0xFFC8952B), // الافتراضي - ذهبي
-    Color(0xFF2A9D6F),
-    Color(0xFFB23A2E),
-    Color(0xFF2A5F82),
-  ];
-
   @override
   void dispose() {
     _nameController.dispose();
@@ -192,7 +181,7 @@ class _BrandingFormState extends ConsumerState<_BrandingForm> {
             Text('اللون الأساسي (Primary)', style: AppTextStyles.labelMd()),
             const SizedBox(height: 8),
             _ColorSwatchRow(
-              colors: _presetPrimaries,
+              colors: AppColors.presetPrimaries,
               selected: _primary,
               onSelect: widget.canEdit ? (c) => setState(() => _primary = c) : null,
             ),
@@ -200,7 +189,7 @@ class _BrandingFormState extends ConsumerState<_BrandingForm> {
             Text('اللون الثانوي (Secondary)', style: AppTextStyles.labelMd()),
             const SizedBox(height: 8),
             _ColorSwatchRow(
-              colors: _presetSecondaries,
+              colors: AppColors.presetSecondaries,
               selected: _secondary,
               onSelect: widget.canEdit ? (c) => setState(() => _secondary = c) : null,
             ),
@@ -222,7 +211,7 @@ class _BrandingFormState extends ConsumerState<_BrandingForm> {
         const SizedBox(height: 16),
         if (widget.canEdit)
           Align(
-            alignment: Alignment.centerLeft,
+            alignment: AlignmentDirectional.centerEnd,
             child: ElevatedButton(
               onPressed: _saving ? null : _submit,
               child: _saving
@@ -279,7 +268,7 @@ class _LogoUploadBox extends StatelessWidget {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          const Icon(Icons.upload_outlined, color: AppColors.textMuted),
+          Icon(Icons.upload_outlined, color: AppColors.textMuted),
           const SizedBox(height: 6),
           Text('رفع الشعار — غير مفعَّل بعد', style: AppTextStyles.bodyMd()),
         ],
@@ -304,8 +293,11 @@ class _ColorSwatchRow extends StatelessWidget {
           onTap: onSelect == null ? null : () => onSelect!(c),
           borderRadius: BorderRadius.circular(20),
           child: Container(
-            width: 32,
-            height: 32,
+            // 44 هدف اللمس لا حجم الدائرة المرئية — الحشو يوسّع المنطقة
+            // القابلة للنقر دون تكبير الشكل.
+            width: 44,
+            height: 44,
+            padding: const EdgeInsets.all(6),
             decoration: BoxDecoration(
               color: c,
               shape: BoxShape.circle,
@@ -335,16 +327,22 @@ class _NavLayoutRow extends StatelessWidget {
     ];
     final color = Theme.of(context).colorScheme.primary;
 
-    return Row(
+    // Wrap لا Row: خياران بنصوصهما الكاملة يفيضان على عرض ضيّق، والالتفاف
+    // إلى سطر ثانٍ أنسب من قصّ نص الخيار الذي يشرح ما يختاره المستخدم.
+    return Wrap(
+      spacing: 0,
+      runSpacing: 10,
       children: options.map((o) {
         final (key, label, icon) = o;
         final selected = value == key;
         return Padding(
-          padding: const EdgeInsets.only(left: 10),
+          padding: const EdgeInsetsDirectional.only(end: 10),
           child: InkWell(
             onTap: onChanged == null ? null : () => onChanged!(key),
             borderRadius: BorderRadius.circular(8),
             child: Container(
+              constraints: const BoxConstraints(minHeight: 44),
+              alignment: Alignment.center,
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
               decoration: BoxDecoration(
                 color: selected ? color.withValues(alpha: 0.1) : Colors.transparent,
@@ -379,7 +377,13 @@ class _PreviewBar extends StatelessWidget {
       decoration: BoxDecoration(color: primary, borderRadius: BorderRadius.circular(8)),
       child: Row(
         children: [
-          Text('معاينة الهوية', style: AppTextStyles.labelMd(color: Colors.white)),
+          Flexible(
+            child: Text(
+              'معاينة الهوية',
+              style: AppTextStyles.labelMd(color: Colors.white),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
           const Spacer(),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
@@ -405,10 +409,7 @@ class _BranchesSection extends ConsumerWidget {
     final branchesAsync = ref.watch(allBranchesProvider);
 
     return branchesAsync.when(
-      loading: () => const Padding(
-        padding: EdgeInsets.all(48),
-        child: Center(child: CircularProgressIndicator()),
-      ),
+      loading: () => const TableSkeleton(),
       error: (err, _) => _ErrorBox(
         message: 'تعذّر تحميل الفروع',
         onRetry: () => ref.invalidate(allBranchesProvider),
@@ -502,6 +503,10 @@ class _BranchFormDialogState extends State<_BranchFormDialog> {
             children: [
               TextFormField(
                 controller: _nameController,
+                // أول حقل في الحوار يأخذ التركيز فور الفتح: المستخدم يكتب
+                // مباشرة بدل نقرة إضافية في كل مرة — وهي نقرة تتكرّر آلاف
+                // المرات في عمر النظام.
+                autofocus: true,
                 decoration: const InputDecoration(labelText: 'اسم الفرع'),
                 validator: (v) => (v == null || v.trim().isEmpty) ? 'حقل إلزامي' : null,
               ),

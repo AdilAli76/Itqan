@@ -14,6 +14,9 @@ import '../../../core/theme/branding_provider.dart';
 import '../../../shared/widgets/currency_badge.dart';
 import '../../../shared/widgets/data_table_widget.dart';
 import '../data/invoices_providers.dart';
+import '../../../shared/widgets/skeleton.dart';
+import '../../../shared/widgets/pagination_bar.dart';
+import '../../../core/auth/permissions.dart';
 
 const _statusLabels = {
   'completed': 'مكتملة',
@@ -53,10 +56,15 @@ class _InvoicesScreenState extends ConsumerState<InvoicesScreen> {
     super.dispose();
   }
 
+  /// أي تغيير في البحث أو الفلاتر يُعيد الترقيم للصفحة الأولى — النتيجة
+  /// الجديدة قد تكون أقصر من موضع المستخدم الحالي فيقع خارجها.
+  void _resetPage() => ref.read(invoicesPageProvider.notifier).state = 1;
+
   void _onSearch(String value) {
     _debounce?.cancel();
     _debounce = Timer(const Duration(milliseconds: 350), () {
       ref.read(invoiceSearchProvider.notifier).state = value;
+      _resetPage();
     });
   }
 
@@ -72,48 +80,66 @@ class _InvoicesScreenState extends ConsumerState<InvoicesScreen> {
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Row(
+          // Wrap لا Row: شريط الفلاتر يفيض على عرض الهاتف. الالتفاف يبقي
+          // كل فلتر ظاهراً وقابلاً للنقر بدل قصّ آخره بصمت.
+          Wrap(
+            runSpacing: 8,
+            crossAxisAlignment: WrapCrossAlignment.center,
             children: [
               _FilterDropdown<String?>(
                 label: 'الحالة',
                 value: status,
                 items: const {null: 'كل الحالات', ..._statusLabels},
-                onChanged: (v) => ref.read(invoiceStatusFilterProvider.notifier).state = v,
+                onChanged: (v) {
+                  ref.read(invoiceStatusFilterProvider.notifier).state = v;
+                  _resetPage();
+                },
               ),
               const SizedBox(width: 12),
               _FilterDropdown<String?>(
                 label: 'النوع',
                 value: type,
                 items: const {null: 'كل الأنواع', ..._typeLabels},
-                onChanged: (v) => ref.read(invoiceTypeFilterProvider.notifier).state = v,
+                onChanged: (v) {
+                  ref.read(invoiceTypeFilterProvider.notifier).state = v;
+                  _resetPage();
+                },
               ),
             ],
           ),
           const SizedBox(height: 16),
           invoicesAsync.when(
-            loading: () => const Padding(
-              padding: EdgeInsets.all(48),
-              child: Center(child: CircularProgressIndicator()),
-            ),
+            loading: () => const TableSkeleton(),
             error: (err, _) => _ErrorBox(
               message: 'تعذّر تحميل الفواتير',
               onRetry: () => ref.invalidate(invoicesProvider),
             ),
-            data: (invoices) => AppDataTable(
-              title: 'الفواتير (${invoices.length})',
-              onSearch: _onSearch,
-              columns: const [
-                AppColumn('رقم الفاتورة'),
-                AppColumn('النوع'),
-                AppColumn('الحالة'),
-                AppColumn('العميل'),
-                AppColumn('عدد الأصناف'),
-                AppColumn('طريقة الدفع'),
-                AppColumn('الإجمالي'),
-                AppColumn('التاريخ'),
-                AppColumn(''),
+            data: (invoices) => Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                AppDataTable(
+                  title: 'الفواتير (${invoices.totalCount})',
+                  onSearch: _onSearch,
+                  columns: const [
+                    AppColumn('رقم الفاتورة'),
+                    AppColumn('النوع'),
+                    AppColumn('الحالة'),
+                    AppColumn('العميل'),
+                    AppColumn('عدد الأصناف'),
+                    AppColumn('طريقة الدفع'),
+                    AppColumn('الإجمالي'),
+                    AppColumn('التاريخ'),
+                    AppColumn(''),
+                  ],
+                  rows: invoices.items.map((i) => _invoiceRow(context, i)).toList(),
+                ),
+                PaginationBar(
+                  page: invoices.page,
+                  pageSize: invoices.pageSize,
+                  totalCount: invoices.totalCount,
+                  onPageChanged: (p) => ref.read(invoicesPageProvider.notifier).state = p,
+                ),
               ],
-              rows: invoices.map((i) => _invoiceRow(context, i)).toList(),
             ),
           ),
         ],
@@ -125,7 +151,9 @@ class _InvoicesScreenState extends ConsumerState<InvoicesScreen> {
     final createdAt = DateTime.tryParse(i['createdAt'] as String? ?? '');
     return [
       Text(i['invoiceNumber'] as String? ?? ''),
-      _tag(_typeLabel(i['invoiceType'] as String? ?? ''), i['invoiceType'] == 'return' ? AppColors.info : AppColors.textSecondary,
+      _tag(
+          _typeLabel(i['invoiceType'] as String? ?? ''),
+          i['invoiceType'] == 'return' ? AppColors.info : AppColors.textSecondary,
           i['invoiceType'] == 'return' ? AppColors.infoBg : AppColors.surfaceAlt),
       _statusTag(i['status'] as String? ?? ''),
       Text(i['customerName'] as String? ?? 'زبون نقدي'),
@@ -175,7 +203,8 @@ class _InvoicesScreenState extends ConsumerState<InvoicesScreen> {
 }
 
 class _FilterDropdown<T> extends StatelessWidget {
-  const _FilterDropdown({required this.label, required this.value, required this.items, required this.onChanged});
+  const _FilterDropdown(
+      {required this.label, required this.value, required this.items, required this.onChanged});
   final String label;
   final T value;
   final Map<T, String> items;
@@ -194,9 +223,7 @@ class _FilterDropdown<T> extends StatelessWidget {
         child: DropdownButton<T>(
           value: value,
           hint: Text(label),
-          items: items.entries
-              .map((e) => DropdownMenuItem<T>(value: e.key, child: Text(e.value)))
-              .toList(),
+          items: items.entries.map((e) => DropdownMenuItem<T>(value: e.key, child: Text(e.value))).toList(),
           onChanged: (v) => onChanged(v as T),
         ),
       ),
@@ -353,12 +380,16 @@ class _InvoiceDetailDialogState extends ConsumerState<_InvoiceDetailDialog> {
               ),
               if (canRefund) ...[
                 const SizedBox(width: 10),
-                OutlinedButton.icon(
-                  onPressed: _refunding ? null : () => _confirmRefund(context),
-                  icon: _refunding
-                      ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-                      : const Icon(Icons.keyboard_return, size: 18),
-                  label: const Text('استرجاع الفاتورة'),
+                Can(
+                  permission: Perm.invoicesRefund,
+                  child: OutlinedButton.icon(
+                    onPressed: _refunding ? null : () => _confirmRefund(context),
+                    icon: _refunding
+                        ? const SizedBox(
+                            width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                        : const Icon(Icons.keyboard_return, size: 18),
+                    label: const Text('استرجاع الفاتورة'),
+                  ),
                 ),
               ],
             ],
@@ -380,7 +411,8 @@ class _InvoiceDetailDialogState extends ConsumerState<_InvoiceDetailDialog> {
       );
     } catch (_) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تعذّر تحضير الإيصال للطباعة')));
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('تعذّر تحضير الإيصال للطباعة')));
       }
     }
   }

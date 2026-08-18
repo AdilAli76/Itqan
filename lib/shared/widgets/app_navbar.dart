@@ -5,6 +5,7 @@ import '../../core/shell/open_tabs_provider.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text_styles.dart';
 import 'nav_items.dart';
+import '../../core/auth/permissions.dart';
 
 /// بديل أفقي عن AppSidebar لمن يفضّل شريطاً علوياً بدل شريط جانبي ثابت —
 /// نفس مجموعات nav_items.dart بالضبط، فقط بتخطيط مختلف. راجع AppShell
@@ -38,12 +39,19 @@ class _AppNavbarState extends ConsumerState<AppNavbar> {
 
   @override
   Widget build(BuildContext context) {
-    final groups = navGroupsFor(isPlatformAdmin: _isPlatformAdmin);
+    final perms = ref.perms;
+    final groups = filterByPermissions(
+      navGroupsFor(isPlatformAdmin: _isPlatformAdmin),
+      (route) {
+        final required = kRoutePermissions[route];
+        return required == null || perms.can(required);
+      },
+    );
     final color = Theme.of(context).colorScheme.primary;
 
     return Container(
       height: 52,
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         color: AppColors.surface,
         border: Border(bottom: BorderSide(color: AppColors.border)),
       ),
@@ -135,8 +143,9 @@ class _NavButton extends StatelessWidget {
           const SizedBox(width: 6),
           Text(
             label,
-            style: AppTextStyles.bodyMd(color: active ? color : AppColors.textPrimary)
-                .copyWith(fontWeight: active ? FontWeight.w600 : FontWeight.w400, fontSize: 13),
+            // labelMd هو 13 نقطة أصلاً — لا حاجة لفرضه يدوياً فوق bodyMd.
+            style: AppTextStyles.labelMd(color: active ? color : AppColors.textPrimary)
+                .copyWith(fontWeight: active ? FontWeight.w600 : FontWeight.w400),
           ),
           if (showChevron) ...[
             const SizedBox(width: 2),

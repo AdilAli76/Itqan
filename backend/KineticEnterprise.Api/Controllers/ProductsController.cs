@@ -32,31 +32,58 @@ public record StockAdjustmentRequest(Guid? BranchId, decimal QuantityDelta, stri
 [ApiController]
 [Route("api/products")]
 [Authorize]
+/// صفحة مخزون — نفس شكل بقية صفحات النظام.
+public record ProductInventoryPageDto(List<ProductInventoryDto> Items, int TotalCount, int Page, int PageSize);
+
 public class ProductsController : ControllerBase
 {
     private readonly AppDbContext _db;
     public ProductsController(AppDbContext db) => _db = db;
 
+    /// <summary>
+    /// قائمة الأصناف المسطّحة — يستهلكها البحث في نقطة البيع أساساً.
+    ///
+    /// تبقى قائمة غير مغلَّفة عمداً (بخلاف /products/inventory): مستهلكها
+    /// الوحيد بحثٌ فوري يعرض أول نتائج مطابقة، ولا معنى لصفحات فيه. والسقف
+    /// الصلب بدل الترقيم هو الحماية الصحيحة هنا: يمنع تحميل عشرين ألف صنف
+    /// حين يمسح الكاشير الحقل ويتركه فارغاً.
+    /// </summary>
     [HttpGet]
-    public async Task<ActionResult<List<Product>>> GetAll([FromQuery] string? search)
+    public async Task<ActionResult<List<Product>>> GetAll([FromQuery] string? search, [FromQuery] int limit = 100)
     {
+        limit = Math.Clamp(limit, 1, 500);
         var query = _db.Products.Where(p => !p.IsDeleted);
         if (!string.IsNullOrWhiteSpace(search))
         {
             query = query.Where(p => p.Name.Contains(search) || p.Sku.Contains(search) || (p.Barcode != null && p.Barcode.Contains(search)));
         }
-        return await query.OrderBy(p => p.Name).ToListAsync();
+        return await query.OrderBy(p => p.Name).Take(limit).ToListAsync();
     }
 
+    /// <summary>
+    /// مخزون الأصناف مقسَّماً صفحات. جدول الأصناف هو أكبر جدول في نظام
+    /// تجزئة عادةً، وكان يُجلَب كاملاً في كل فتح لشاشة المخزون.
+    /// </summary>
     [HttpGet("inventory")]
-    public async Task<ActionResult<List<ProductInventoryDto>>> GetInventory([FromQuery] string? search)
+    public async Task<ActionResult<ProductInventoryPageDto>> GetInventory(
+        [FromQuery] string? search,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 50)
     {
+        page = Math.Max(1, page);
+        pageSize = Math.Clamp(pageSize, 1, 200);
+
         var query = _db.Products.Where(p => !p.IsDeleted);
         if (!string.IsNullOrWhiteSpace(search))
         {
             query = query.Where(p => p.Name.Contains(search) || p.Sku.Contains(search) || (p.Barcode != null && p.Barcode.Contains(search)));
         }
-        var products = await query.OrderBy(p => p.Name).ToListAsync();
+
+        var totalCount = await query.CountAsync();
+        var products = await query.OrderBy(p => p.Name)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToListAsync();
 
         var categories = await _db.ProductCategories.ToDictionaryAsync(c => c.Id, c => c.Name);
         var suppliers = await _db.Suppliers.Where(s => !s.IsDeleted).ToDictionaryAsync(s => s.Id, s => s.Name);
@@ -74,7 +101,7 @@ public class ProductsController : ControllerBase
                                   .FirstOrDefault(),
             });
 
-        return products.Select(p =>
+        var items = products.Select(p =>
         {
             stockByProduct.TryGetValue(p.Id, out var stock);
             categories.TryGetValue(p.CategoryId ?? Guid.Empty, out var categoryName);
@@ -84,6 +111,8 @@ public class ProductsController : ControllerBase
                 p.TrackExpiry, p.ReorderLevel, p.CategoryId, categoryName, p.SupplierId, supplierName,
                 stock?.Quantity ?? 0, stock?.NearestExpiry, p.TracksStock);
         }).ToList();
+
+        return new ProductInventoryPageDto(items, totalCount, page, pageSize);
     }
 
     /// <summary>

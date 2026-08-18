@@ -11,6 +11,9 @@ import '../../../core/theme/app_text_styles.dart';
 import '../../../shared/widgets/currency_badge.dart';
 import '../../../shared/widgets/data_table_widget.dart';
 import '../data/inventory_providers.dart';
+import 'import_products_dialog.dart';
+import '../../../shared/widgets/skeleton.dart';
+import '../../../shared/widgets/pagination_bar.dart';
 
 /// شاشة "المخزون والموردين" — تجمع الموديولين لأن هذا نمط الشاشة الوحيد
 /// المسجَّل في القائمة الجانبية (راجع app_sidebar.dart)، بدل تقسيمهما إلى
@@ -31,6 +34,15 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
       title: 'إدارة المخزون والموردين',
       activeRoute: '/inventory',
       actions: [
+        // الاستيراد في تبويب الأصناف فقط — لا معنى له للموردين، وإظهاره
+        // هناك كان سيوحي بأنه يستورد ملف موردين.
+        if (_tab == 0)
+          OutlinedButton.icon(
+            onPressed: () => _openImportDialog(context),
+            icon: const Icon(Icons.file_upload_outlined, size: 18),
+            label: const Text('استيراد من ملف'),
+          ),
+        const SizedBox(width: 8),
         ElevatedButton.icon(
           onPressed: () => _tab == 0 ? _openProductDialog(context) : _openSupplierDialog(context),
           icon: const Icon(Icons.add, size: 18),
@@ -59,6 +71,15 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
     if (saved == true) {
       ref.invalidate(productsInventoryProvider);
     }
+  }
+
+  Future<void> _openImportDialog(BuildContext context) async {
+    final imported = await showDialog<bool>(
+      context: context,
+      builder: (_) => const ImportProductsDialog(),
+    );
+    // تحديث القائمة فقط عند استيراد فعلي — الخروج بعد المعاينة لا يغيّر شيئاً.
+    if (imported == true) ref.invalidate(productsInventoryProvider);
   }
 
   Future<void> _openSupplierDialog(BuildContext context, {Map<String, dynamic>? supplier}) async {
@@ -102,6 +123,9 @@ class _TabChip extends StatelessWidget {
       onTap: onTap,
       borderRadius: BorderRadius.circular(8),
       child: Container(
+        // 44 أدنى هدف لمس؛ الحشو وحده كان يعطي 39.
+        constraints: const BoxConstraints(minHeight: 44),
+        alignment: Alignment.center,
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
         decoration: BoxDecoration(
           color: selected ? color.withValues(alpha: 0.1) : Colors.transparent,
@@ -145,6 +169,7 @@ class _ProductsSectionState extends ConsumerState<_ProductsSection> {
     _debounce?.cancel();
     _debounce = Timer(const Duration(milliseconds: 350), () {
       ref.read(productSearchProvider.notifier).state = value;
+      ref.read(productsPageProvider.notifier).state = 1;
     });
   }
 
@@ -153,28 +178,36 @@ class _ProductsSectionState extends ConsumerState<_ProductsSection> {
     final productsAsync = ref.watch(productsInventoryProvider);
 
     return productsAsync.when(
-      loading: () => const Padding(
-        padding: EdgeInsets.all(48),
-        child: Center(child: CircularProgressIndicator()),
-      ),
+      loading: () => const TableSkeleton(),
       error: (err, _) => _ErrorBox(
         message: 'تعذّر تحميل الأصناف',
         onRetry: () => ref.invalidate(productsInventoryProvider),
       ),
-      data: (products) => AppDataTable(
-        title: 'الأصناف (${products.length})',
-        onSearch: _onSearch,
-        columns: const [
-          AppColumn('الصنف'),
-          AppColumn('الباركود'),
-          AppColumn('التصنيف'),
-          AppColumn('المورد'),
-          AppColumn('الكمية'),
-          AppColumn('سعر البيع'),
-          AppColumn('الحالة'),
-          AppColumn(''),
+      data: (products) => Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          AppDataTable(
+            title: 'الأصناف (${products.totalCount})',
+            onSearch: _onSearch,
+            columns: const [
+              AppColumn('الصنف'),
+              AppColumn('الباركود'),
+              AppColumn('التصنيف'),
+              AppColumn('المورد'),
+              AppColumn('الكمية'),
+              AppColumn('سعر البيع'),
+              AppColumn('الحالة'),
+              AppColumn(''),
+            ],
+            rows: products.items.map((p) => _productRow(context, ref, p)).toList(),
+          ),
+          PaginationBar(
+            page: products.page,
+            pageSize: products.pageSize,
+            totalCount: products.totalCount,
+            onPageChanged: (p) => ref.read(productsPageProvider.notifier).state = p,
+          ),
         ],
-        rows: products.map((p) => _productRow(context, ref, p)).toList(),
       ),
     );
   }
@@ -184,7 +217,8 @@ class _ProductsSectionState extends ConsumerState<_ProductsSection> {
     final reorderLevel = (p['reorderLevel'] as num?)?.toDouble() ?? 0;
     final trackExpiry = p['trackExpiry'] as bool? ?? false;
     final tracksStock = p['tracksStock'] as bool? ?? true;
-    final nearestExpiry = p['nearestExpiryDate'] != null ? DateTime.tryParse(p['nearestExpiryDate'] as String) : null;
+    final nearestExpiry =
+        p['nearestExpiryDate'] != null ? DateTime.tryParse(p['nearestExpiryDate'] as String) : null;
 
     return [
       Text(p['name'] as String? ?? ''),
@@ -388,6 +422,7 @@ class _ProductFormDialogState extends ConsumerState<_ProductFormDialog> {
               children: [
                 TextFormField(
                   controller: _nameController,
+                  autofocus: true,
                   decoration: const InputDecoration(labelText: 'اسم الصنف'),
                   validator: (v) => (v == null || v.trim().isEmpty) ? 'حقل إلزامي' : null,
                 ),
@@ -530,8 +565,7 @@ class _ProductFormDialogState extends ConsumerState<_ProductFormDialog> {
         FilledButton(
           onPressed: _saving ? null : _submit,
           child: _saving
-              ? const SizedBox(
-                  width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+              ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
               : const Text('حفظ'),
         ),
       ],
@@ -771,10 +805,7 @@ class _SuppliersSectionState extends ConsumerState<_SuppliersSection> {
     final suppliersAsync = ref.watch(suppliersProvider);
 
     return suppliersAsync.when(
-      loading: () => const Padding(
-        padding: EdgeInsets.all(48),
-        child: Center(child: CircularProgressIndicator()),
-      ),
+      loading: () => const TableSkeleton(),
       error: (err, _) => _ErrorBox(
         message: 'تعذّر تحميل الموردين',
         onRetry: () => ref.invalidate(suppliersProvider),
@@ -891,7 +922,8 @@ class _SupplierFormDialogState extends State<_SupplierFormDialog> {
               TextFormField(
                 controller: _balanceController,
                 keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
-                decoration: const InputDecoration(labelText: 'الرصيد الحالي', helperText: 'موجب = نحن مدينون له'),
+                decoration:
+                    const InputDecoration(labelText: 'الرصيد الحالي', helperText: 'موجب = نحن مدينون له'),
                 validator: (v) {
                   if (v == null || v.trim().isEmpty) return 'حقل إلزامي';
                   return double.tryParse(v) == null ? 'قيمة غير صحيحة' : null;

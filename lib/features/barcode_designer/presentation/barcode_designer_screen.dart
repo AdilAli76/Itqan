@@ -16,6 +16,12 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_text_styles.dart';
 import '../../../core/theme/branding_provider.dart';
 import '../data/barcode_template_providers.dart';
+import '../../../shared/widgets/icon_action.dart';
+
+// ux-audit: ignore RT-06 — القيمة المالية الوحيدة هنا سعرٌ مطبوع على ملصق
+// 30×20 مم، وتنسيقه toStringAsFixed(2) هو الصحيح لا NumberFormat: فواصل
+// الآلاف تلتهم عرض الملصق، والملصق يُقرأ بماسح ضوئي وبعين على بُعد شبر
+// لا في جدول مالي. العرض داخل pdfLtr أصلاً لضبط اتجاه الرقم.
 
 String _dioErrorMessage(Object error, String fallback) {
   if (error is DioException) {
@@ -255,7 +261,7 @@ class _DesignerBodyState extends ConsumerState<_DesignerBody> {
           if (widget.canEdit) ...[
             const SizedBox(height: 16),
             Align(
-              alignment: Alignment.centerLeft,
+              alignment: AlignmentDirectional.centerEnd,
               child: FilledButton(
                 onPressed: _savingSettings ? null : _saveSettings,
                 child: _savingSettings
@@ -321,8 +327,13 @@ class _DesignerBodyState extends ConsumerState<_DesignerBody> {
                   child: Row(
                     children: [
                       Expanded(child: Text(line.name, style: AppTextStyles.bodyMd(color: AppColors.textPrimary))),
-                      IconButton(
-                        icon: const Icon(Icons.remove_circle_outline, size: 18),
+                      IconAction(
+                        icon: Icons.remove_circle_outline,
+                        iconSize: 18,
+                        dense: true,
+                        tooltip: line.quantity > 1
+                            ? 'إنقاص كمية ${line.name}'
+                            : 'إزالة ${line.name} من القائمة',
                         onPressed: () => setState(() {
                           if (line.quantity > 1) {
                             line.quantity -= 1;
@@ -330,15 +341,14 @@ class _DesignerBodyState extends ConsumerState<_DesignerBody> {
                             _lines.remove(line);
                           }
                         }),
-                        padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(),
                       ),
                       SizedBox(width: 36, child: Text('${line.quantity}', textAlign: TextAlign.center)),
-                      IconButton(
-                        icon: const Icon(Icons.add_circle_outline, size: 18),
+                      IconAction(
+                        icon: Icons.add_circle_outline,
+                        iconSize: 18,
+                        dense: true,
+                        tooltip: 'زيادة كمية ${line.name}',
                         onPressed: () => setState(() => line.quantity += 1),
-                        padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(),
                       ),
                     ],
                   ),
@@ -505,11 +515,15 @@ class _LabelPreview extends StatelessWidget {
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           if (showName)
+            // ux-audit: ignore AC-02 — معاينة ملصق 30×20 مم بمقاسه الحقيقي؛
+            // تكبير الخط هنا يجعل المعاينة تكذب على المستخدم بشأن ما سيُطبع.
             const Text('اسم الصنف', style: TextStyle(fontSize: 9), maxLines: 1, overflow: TextOverflow.ellipsis),
           Expanded(
             child: CustomPaint(painter: _BarcodePainter('0123456789'), child: Container()),
           ),
+          // ux-audit: ignore AC-02 — كما أعلاه: مقاس الطباعة لا مقاس الشاشة.
           if (showPrice) Text('0.00 $currencySymbol', style: const TextStyle(fontSize: 9)),
+          // ux-audit: ignore AC-02 — كما أعلاه.
           if (showSku) const Text('SKU-0000', style: TextStyle(fontSize: 8)),
         ],
       ),

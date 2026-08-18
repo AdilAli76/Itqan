@@ -42,6 +42,9 @@ CREATE TABLE organizations (
   receipt_width_mm DECIMAL(5,2) NOT NULL DEFAULT 80,
   nav_layout NVARCHAR(20) NOT NULL DEFAULT 'sidebar'
     CHECK (nav_layout IN ('sidebar','navbar')),
+  -- السماح ببيع الأصناف مفتوحة القيمة في نقطة البيع. مطفأ افتراضياً: قيمة
+  -- يكتبها الكاشير بنفسه لا تقابلها بضاعة في المخزون. يضبطه مدير المنظمة.
+  pos_allow_open_product BIT NOT NULL DEFAULT 0,
   is_active BIT NOT NULL DEFAULT 1,
   created_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
   updated_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
@@ -134,6 +137,33 @@ CREATE TABLE permissions (
   label_ar NVARCHAR(150) NOT NULL,
   module NVARCHAR(60) NOT NULL
 );
+GO
+
+-- الصلاحيات المتاحة في النظام — كتالوج ثابت يقرأه RequirePermissionAttribute
+-- وتعرضه شاشة مصفوفة الصلاحيات. بادئة N إلزامية على كل نص عربي: بدونها
+-- يُحوَّل إلى ترميز النظام ويُخزَّن تالفاً بلا أي رسالة خطأ.
+--
+-- role_permissions يحمل مفتاحاً أجنبياً على هذا الجدول، وإنشاء أي منظمة
+-- يُدرج صفوف الأدوار الافتراضية — فبقاء هذا الجدول فارغاً كان يعني فشل
+-- إنشاء أول منظمة على أي تثبيت جديد.
+INSERT INTO permissions (code, label_ar, module) VALUES
+  ('inventory.manage',        N'إدارة المنتجات (إضافة/تعديل/تسوية مخزون)', N'inventory'),
+  ('inventory.delete',        N'حذف المنتجات',                              N'inventory'),
+  ('categories.manage',       N'إدارة تصنيفات المنتجات',                    N'inventory'),
+  ('suppliers.manage',        N'إدارة الموردين',                            N'suppliers'),
+  ('suppliers.delete',        N'حذف الموردين',                              N'suppliers'),
+  ('purchasing.manage',       N'إدارة أوامر الشراء',                        N'purchasing'),
+  ('stock_transfer.manage',   N'تحويل المخزون بين الفروع',                  N'stock_transfer'),
+  ('stock_count.manage',      N'الجرد الدوري',                              N'stock_count'),
+  ('customers.manage',        N'إدارة بيانات العملاء',                      N'customers'),
+  ('customers.delete',        N'حذف العملاء',                               N'customers'),
+  ('customers.wallet_adjust', N'تعديل رصيد محفظة العميل',                   N'customers'),
+  ('cards.issue',             N'إصدار بطاقات العملاء وضبط أرقامها السرية',  N'customers'),
+  ('invoices.refund',         N'استرجاع الفواتير',                          N'invoices'),
+  ('pos.price_override',      N'البيع بسعر مخالف لسعر الكتالوج',            N'pos'),
+  ('reports.view',            N'عرض التقارير',                              N'reports'),
+  ('audit_log.view',          N'عرض سجل التدقيق',                           N'audit_log'),
+  ('license.view',            N'عرض الترخيص والاشتراك',                     N'license');
 GO
 
 CREATE TABLE role_permissions (

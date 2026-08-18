@@ -97,6 +97,7 @@ class _SettingsFormState extends ConsumerState<_SettingsForm> {
       TextEditingController(text: (widget.settings['passwordMinLength'] as num?)?.toString() ?? '6');
   late final _receiptWidthController =
       TextEditingController(text: (widget.settings['receiptWidthMm'] as num?)?.toString() ?? '80');
+  late bool _posAllowOpenProduct = widget.settings['posAllowOpenProduct'] as bool? ?? false;
 
   late String _locale = widget.settings['locale'] as String? ?? 'ar';
   bool _saving = false;
@@ -212,6 +213,26 @@ class _SettingsFormState extends ConsumerState<_SettingsForm> {
                 ),
               ],
             ),
+            const SizedBox(height: 16),
+            SectionCard(
+              title: 'نقطة البيع',
+              icon: Icons.point_of_sale_outlined,
+              children: [
+                SwitchListTile(
+                  value: _posAllowOpenProduct,
+                  onChanged: widget.canEdit ? (v) => setState(() => _posAllowOpenProduct = v) : null,
+                  contentPadding: EdgeInsets.zero,
+                  title: Text('السماح ببيع الأصناف مفتوحة القيمة',
+                      style: AppTextStyles.bodyMd(color: AppColors.textPrimary)),
+                  subtitle: Text(
+                    'الكاشير يكتب قيمة الصنف عند البيع بدل سعر ثابت. مفيد للخدمات '
+                    'والبضاعة بالقيمة، لكنه يسمح بإصدار فاتورة بمبلغ لا تقابله بضاعة '
+                    'في المخزون — راجع سجل التغييرات دورياً عند تفعيله.',
+                    style: AppTextStyles.labelMd(),
+                  ),
+                ),
+              ],
+            ),
             if (!widget.canEdit) ...[
               const SizedBox(height: 16),
               Container(
@@ -227,7 +248,7 @@ class _SettingsFormState extends ConsumerState<_SettingsForm> {
             if (widget.canEdit) ...[
               const SizedBox(height: 20),
               Align(
-                alignment: Alignment.centerLeft,
+                alignment: AlignmentDirectional.centerEnd,
                 child: FilledButton(
                   onPressed: _saving ? null : _submit,
                   child: _saving
@@ -257,6 +278,7 @@ class _SettingsFormState extends ConsumerState<_SettingsForm> {
         'taxRate': double.parse(_taxRateController.text),
         'passwordMinLength': int.parse(_passwordMinLengthController.text),
         'receiptWidthMm': double.parse(_receiptWidthController.text),
+        'posAllowOpenProduct': _posAllowOpenProduct,
       });
       ref.invalidate(settingsProvider);
       if (mounted) {

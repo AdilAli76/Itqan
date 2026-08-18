@@ -15,6 +15,9 @@ import '../../../shared/widgets/currency_badge.dart';
 import '../../../shared/widgets/data_table_widget.dart';
 import '../../../shared/widgets/pin_pad.dart';
 import '../data/wallet_cards_providers.dart';
+import '../../../shared/widgets/filter_chip_button.dart';
+import '../../../shared/widgets/skeleton.dart';
+import '../../../shared/widgets/pagination_bar.dart';
 
 const _stateLabels = {
   'active': 'فعّالة',
@@ -52,6 +55,7 @@ class _WalletCardsScreenState extends ConsumerState<WalletCardsScreen> {
     _debounce?.cancel();
     _debounce = Timer(const Duration(milliseconds: 350), () {
       ref.read(cardSearchProvider.notifier).state = value;
+      ref.read(walletCardsPageProvider.notifier).state = 1;
     });
   }
 
@@ -82,27 +86,37 @@ class _WalletCardsScreenState extends ConsumerState<WalletCardsScreen> {
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Row(
+          // Wrap لا Row: شريط الفلاتر يفيض على عرض الهاتف. الالتفاف يبقي
+          // كل فلتر ظاهراً وقابلاً للنقر بدل قصّ آخره بصمت.
+          Wrap(
+            runSpacing: 8,
+            crossAxisAlignment: WrapCrossAlignment.center,
             children: [
-              _FilterChip(
+              FilterChipButton(
                 label: 'الكل',
                 selected: stateFilter == null,
-                onTap: () => ref.read(cardStateFilterProvider.notifier).state = null,
+                onTap: () {
+                  ref.read(cardStateFilterProvider.notifier).state = null;
+                  ref.read(walletCardsPageProvider.notifier).state = 1;
+                },
               ),
               const SizedBox(width: 8),
               ..._stateLabels.entries.map((e) => Padding(
-                    padding: const EdgeInsets.only(left: 8),
-                    child: _FilterChip(
+                    padding: const EdgeInsetsDirectional.only(end: 8),
+                    child: FilterChipButton(
                       label: e.value,
                       selected: stateFilter == e.key,
-                      onTap: () => ref.read(cardStateFilterProvider.notifier).state = e.key,
+                      onTap: () {
+                        ref.read(cardStateFilterProvider.notifier).state = e.key;
+                        ref.read(walletCardsPageProvider.notifier).state = 1;
+                      },
                     ),
                   )),
             ],
           ),
           const SizedBox(height: 16),
           cardsAsync.when(
-            loading: () => const Padding(padding: EdgeInsets.all(48), child: Center(child: CircularProgressIndicator())),
+            loading: () => const TableSkeleton(),
             error: (err, _) => Container(
               padding: const EdgeInsets.all(32),
               decoration: BoxDecoration(
@@ -114,26 +128,39 @@ class _WalletCardsScreenState extends ConsumerState<WalletCardsScreen> {
                 children: [
                   Text('تعذّر تحميل البطاقات', style: AppTextStyles.bodyMd(color: AppColors.danger)),
                   const SizedBox(height: 12),
-                  OutlinedButton(onPressed: () => ref.invalidate(walletCardsProvider), child: const Text('إعادة المحاولة')),
+                  OutlinedButton(
+                      onPressed: () => ref.invalidate(walletCardsProvider),
+                      child: const Text('إعادة المحاولة')),
                 ],
               ),
             ),
-            data: (cards) => AppDataTable(
-              title: 'البطاقات (${cards.length})',
-              icon: Icons.credit_card_outlined,
-              onSearch: _onSearch,
-              emptyMessage: 'لا توجد بطاقات مُصدَرة بعد — ابدأ بـ«إصدار بطاقة»',
-              emptyIcon: Icons.credit_card_off_outlined,
-              columns: const [
-                AppColumn('العميل'),
-                AppColumn('رمز البطاقة'),
-                AppColumn('الحالة'),
-                AppColumn('الرصيد'),
-                AppColumn('تاريخ الإصدار'),
-                AppColumn('الصلاحية'),
-                AppColumn(''),
+            data: (cards) => Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                AppDataTable(
+                  title: 'البطاقات (${cards.totalCount})',
+                  icon: Icons.credit_card_outlined,
+                  onSearch: _onSearch,
+                  emptyMessage: 'لا توجد بطاقات مُصدَرة بعد — ابدأ بـ«إصدار بطاقة»',
+                  emptyIcon: Icons.credit_card_off_outlined,
+                  columns: const [
+                    AppColumn('العميل'),
+                    AppColumn('رمز البطاقة'),
+                    AppColumn('الحالة'),
+                    AppColumn('الرصيد'),
+                    AppColumn('تاريخ الإصدار'),
+                    AppColumn('الصلاحية'),
+                    AppColumn(''),
+                  ],
+                  rows: cards.items.map((card) => _cardRow(context, card)).toList(),
+                ),
+                PaginationBar(
+                  page: cards.page,
+                  pageSize: cards.pageSize,
+                  totalCount: cards.totalCount,
+                  onPageChanged: (p) => ref.read(walletCardsPageProvider.notifier).state = p,
+                ),
               ],
-              rows: cards.map((card) => _cardRow(context, card)).toList(),
             ),
           ),
         ],
@@ -191,35 +218,6 @@ class _StateTag extends StatelessWidget {
   }
 }
 
-class _FilterChip extends StatelessWidget {
-  const _FilterChip({required this.label, required this.selected, required this.onTap});
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final color = Theme.of(context).colorScheme.primary;
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(8),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-        decoration: BoxDecoration(
-          color: selected ? color.withValues(alpha: 0.1) : Colors.transparent,
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: selected ? color : AppColors.border),
-        ),
-        child: Text(
-          label,
-          style: AppTextStyles.labelMd(color: selected ? color : AppColors.textSecondary)
-              .copyWith(fontWeight: selected ? FontWeight.w600 : FontWeight.w500),
-        ),
-      ),
-    );
-  }
-}
-
 // ---------------------------------------------------------------------------
 // تفاصيل البطاقة وإجراءاتها
 // ---------------------------------------------------------------------------
@@ -273,8 +271,10 @@ class _CardDetailDialogState extends ConsumerState<_CardDetailDialog> {
                   ],
                 ),
               ),
-              const SizedBox(height: 14),
-              _DetailRow(label: 'الرصيد الحالي', value: NumberFormat('#,##0.000', 'en').format((widget.card['balance'] as num?) ?? 0)),
+              const SizedBox(height: 16),
+              _DetailRow(
+                  label: 'الرصيد الحالي',
+                  value: NumberFormat('#,##0.000', 'en').format((widget.card['balance'] as num?) ?? 0)),
               if (issuedBy != null) _DetailRow(label: 'أصدرها', value: issuedBy),
               if (blockedReason != null) _DetailRow(label: 'سبب الحظر', value: blockedReason),
               if (_error != null) ...[
@@ -431,7 +431,7 @@ class _StatusBar extends StatelessWidget {
         };
         return Expanded(
           child: Container(
-            margin: const EdgeInsets.only(left: 6),
+            margin: const EdgeInsetsDirectional.only(end: 6),
             padding: const EdgeInsets.symmetric(vertical: 8),
             alignment: Alignment.center,
             decoration: BoxDecoration(
@@ -461,7 +461,8 @@ class _DetailRow extends StatelessWidget {
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
         children: [
-          SizedBox(width: 120, child: Text(label, style: AppTextStyles.labelMd(color: AppColors.textSecondary))),
+          SizedBox(
+              width: 120, child: Text(label, style: AppTextStyles.labelMd(color: AppColors.textSecondary))),
           Expanded(child: Text(value, style: AppTextStyles.bodyMd(color: AppColors.textPrimary))),
         ],
       ),
@@ -499,7 +500,8 @@ class _ReasonDialogState extends State<_ReasonDialog> {
       ),
       actions: [
         TextButton(onPressed: () => Navigator.pop(context), child: const Text('إلغاء')),
-        FilledButton(onPressed: () => Navigator.pop(context, _controller.text.trim()), child: const Text('حظر')),
+        FilledButton(
+            onPressed: () => Navigator.pop(context, _controller.text.trim()), child: const Text('حظر')),
       ],
     );
   }
@@ -528,7 +530,7 @@ class _PinDialogState extends State<_PinDialog> {
           children: [
             Text(
               'من 4 إلى 6 أرقام — لا يُقبَل مكرَّر (1111) ولا متسلسل (1234)',
-              style: AppTextStyles.bodyMd(color: AppColors.textSecondary).copyWith(fontSize: 12),
+              style: AppTextStyles.caption(),
             ),
             const SizedBox(height: 10),
             PinPad(value: _pin, onChanged: (v) => setState(() => _pin = v)),
@@ -609,11 +611,13 @@ class _IssueCardDialogState extends ConsumerState<_IssueCardDialog> {
         if (widget.fixedCustomerId == null)
           customersAsync.when(
             loading: () => const LinearProgressIndicator(),
-            error: (_, __) => Text('تعذّر تحميل العملاء', style: AppTextStyles.bodyMd(color: AppColors.danger)),
+            error: (_, __) =>
+                Text('تعذّر تحميل العملاء', style: AppTextStyles.bodyMd(color: AppColors.danger)),
             data: (customers) => customers.isEmpty
                 ? Container(
                     padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(color: AppColors.infoBg, borderRadius: BorderRadius.circular(8)),
+                    decoration:
+                        BoxDecoration(color: AppColors.infoBg, borderRadius: BorderRadius.circular(8)),
                     child: Text(
                       'كل العملاء لديهم بطاقات. أضف عميلاً جديداً من شاشة العملاء أولاً، أو أعد إصدار بطاقة قائمة.',
                       style: AppTextStyles.bodyMd(color: AppColors.info),
@@ -671,7 +675,7 @@ class _IssueCardDialogState extends ConsumerState<_IssueCardDialog> {
         const SizedBox(height: 2),
         Text(
           'من 4 إلى 6 أرقام — لا يُقبَل مكرَّر (1111) ولا متسلسل (1234)',
-          style: AppTextStyles.bodyMd(color: AppColors.textSecondary).copyWith(fontSize: 12),
+          style: AppTextStyles.caption(),
         ),
         const SizedBox(height: 8),
         PinPad(value: _pin, onChanged: (v) => setState(() => _pin = v)),
@@ -707,7 +711,7 @@ class _IssueCardDialogState extends ConsumerState<_IssueCardDialog> {
             style: AppTextStyles.bodyMd(color: AppColors.warning),
           ),
         ),
-        const SizedBox(height: 14),
+        const SizedBox(height: 16),
         Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(

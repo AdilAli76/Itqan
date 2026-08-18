@@ -12,6 +12,9 @@ import '../../../shared/widgets/data_table_widget.dart';
 import '../../branches/data/branches_providers.dart';
 import '../../inventory/data/inventory_providers.dart';
 import '../data/purchase_orders_providers.dart';
+import '../../../shared/widgets/filter_chip_button.dart';
+import '../../../shared/widgets/skeleton.dart';
+import '../../../shared/widgets/icon_action.dart';
 
 const _statusLabels = {
   'draft': 'مسودة',
@@ -86,13 +89,20 @@ class PurchaseOrdersScreen extends ConsumerWidget {
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Row(
+          // Wrap لا Row: شرائح الفلاتر تفيض على عرض الهاتف (قياس الفحص
+          // البصري: حتى 233 بكسل). الالتفاف يبقيها كلها ظاهرة وقابلة
+          // للنقر بدل قصّ آخرها بصمت.
+          Wrap(
+            runSpacing: 8,
             children: [
-              _FilterChip(label: 'الكل', selected: statusFilter == null, onTap: () => ref.read(purchaseOrderStatusFilterProvider.notifier).state = null),
+              FilterChipButton(
+                  label: 'الكل',
+                  selected: statusFilter == null,
+                  onTap: () => ref.read(purchaseOrderStatusFilterProvider.notifier).state = null),
               const SizedBox(width: 8),
               ..._statusLabels.entries.map((e) => Padding(
-                    padding: const EdgeInsets.only(left: 8),
-                    child: _FilterChip(
+                    padding: const EdgeInsetsDirectional.only(end: 8),
+                    child: FilterChipButton(
                       label: e.value,
                       selected: statusFilter == e.key,
                       onTap: () => ref.read(purchaseOrderStatusFilterProvider.notifier).state = e.key,
@@ -102,10 +112,7 @@ class PurchaseOrdersScreen extends ConsumerWidget {
           ),
           const SizedBox(height: 16),
           ordersAsync.when(
-            loading: () => const Padding(
-              padding: EdgeInsets.all(48),
-              child: Center(child: CircularProgressIndicator()),
-            ),
+            loading: () => const TableSkeleton(),
             error: (err, _) => Container(
               padding: const EdgeInsets.all(32),
               decoration: BoxDecoration(
@@ -117,7 +124,9 @@ class PurchaseOrdersScreen extends ConsumerWidget {
                 children: [
                   Text('تعذّر تحميل أوامر الشراء', style: AppTextStyles.bodyMd(color: AppColors.danger)),
                   const SizedBox(height: 12),
-                  OutlinedButton(onPressed: () => ref.invalidate(purchaseOrdersProvider), child: const Text('إعادة المحاولة')),
+                  OutlinedButton(
+                      onPressed: () => ref.invalidate(purchaseOrdersProvider),
+                      child: const Text('إعادة المحاولة')),
                 ],
               ),
             ),
@@ -162,35 +171,6 @@ class PurchaseOrdersScreen extends ConsumerWidget {
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _FilterChip extends StatelessWidget {
-  const _FilterChip({required this.label, required this.selected, required this.onTap});
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final color = Theme.of(context).colorScheme.primary;
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(8),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-        decoration: BoxDecoration(
-          color: selected ? color.withValues(alpha: 0.1) : Colors.transparent,
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: selected ? color : AppColors.border),
-        ),
-        child: Text(
-          label,
-          style: AppTextStyles.labelMd(color: selected ? color : AppColors.textSecondary)
-              .copyWith(fontWeight: selected ? FontWeight.w600 : FontWeight.w500),
-        ),
       ),
     );
   }
@@ -254,18 +234,23 @@ class _PurchaseOrderDetailDialogState extends ConsumerState<_PurchaseOrderDetail
             ],
           ),
           const SizedBox(height: 4),
-          Text(createdAt != null ? DateFormat('yyyy-MM-dd HH:mm').format(createdAt) : '', style: AppTextStyles.bodyMd()),
+          Text(createdAt != null ? DateFormat('yyyy-MM-dd HH:mm').format(createdAt) : '',
+              style: AppTextStyles.bodyMd()),
           const Divider(height: 24),
           ...items.map((item) => Padding(
                 padding: const EdgeInsets.symmetric(vertical: 4),
                 child: Row(
                   children: [
-                    Expanded(child: Text(item['productName'] as String? ?? '', style: AppTextStyles.bodyMd(color: AppColors.textPrimary))),
-                    Text('${NumberFormat('#,##0.###', 'en').format((item['quantity'] as num?) ?? 0)} × ${_currencyFormat.format((item['unitCost'] as num?) ?? 0)}'),
+                    Expanded(
+                        child: Text(item['productName'] as String? ?? '',
+                            style: AppTextStyles.bodyMd(color: AppColors.textPrimary))),
+                    Text(
+                        '${NumberFormat('#,##0.###', 'en').format((item['quantity'] as num?) ?? 0)} × ${_currencyFormat.format((item['unitCost'] as num?) ?? 0)}'),
                     const SizedBox(width: 10),
                     SizedBox(
                       width: 80,
-                      child: Text(_currencyFormat.format((item['lineTotal'] as num?) ?? 0), textAlign: TextAlign.left),
+                      child: Text(_currencyFormat.format((item['lineTotal'] as num?) ?? 0),
+                          textAlign: TextAlign.left),
                     ),
                   ],
                 ),
@@ -275,7 +260,8 @@ class _PurchaseOrderDetailDialogState extends ConsumerState<_PurchaseOrderDetail
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text('الإجمالي', style: AppTextStyles.labelMd()),
-              Text(_currencyFormat.format((order['totalAmount'] as num?) ?? 0), style: AppTextStyles.headlineMd()),
+              Text(_currencyFormat.format((order['totalAmount'] as num?) ?? 0),
+                  style: AppTextStyles.headlineMd()),
             ],
           ),
           if (_error != null) ...[
@@ -295,9 +281,11 @@ class _PurchaseOrderDetailDialogState extends ConsumerState<_PurchaseOrderDetail
                 const SizedBox(width: 10),
                 Expanded(
                   child: FilledButton(
-                    onPressed: _working ? null : () => _act('order', successMessage: 'تم إرسال الأمر للمورّد'),
+                    onPressed:
+                        _working ? null : () => _act('order', successMessage: 'تم إرسال الأمر للمورّد'),
                     child: _working
-                        ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                        ? const SizedBox(
+                            width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
                         : const Text('إرسال للمورّد'),
                   ),
                 ),
@@ -317,7 +305,8 @@ class _PurchaseOrderDetailDialogState extends ConsumerState<_PurchaseOrderDetail
                   child: FilledButton(
                     onPressed: _working ? null : () => _confirmReceive(items),
                     child: _working
-                        ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                        ? const SizedBox(
+                            width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
                         : const Text('تأكيد الاستلام'),
                   ),
                 ),
@@ -375,7 +364,9 @@ class _ReceiveExpiryDialog extends StatefulWidget {
 }
 
 class _ReceiveExpiryDialogState extends State<_ReceiveExpiryDialog> {
-  late final _batchControllers = {for (final i in widget.items) i['productId'] as String: TextEditingController()};
+  late final _batchControllers = {
+    for (final i in widget.items) i['productId'] as String: TextEditingController()
+  };
   final Map<String, DateTime> _expiryDates = {};
 
   @override
@@ -411,7 +402,8 @@ class _ReceiveExpiryDialogState extends State<_ReceiveExpiryDialog> {
                         Expanded(
                           child: TextField(
                             controller: _batchControllers[productId],
-                            decoration: const InputDecoration(labelText: 'رقم الدفعة (اختياري)', isDense: true),
+                            decoration:
+                                const InputDecoration(labelText: 'رقم الدفعة (اختياري)', isDense: true),
                           ),
                         ),
                         const SizedBox(width: 10),
@@ -426,7 +418,8 @@ class _ReceiveExpiryDialogState extends State<_ReceiveExpiryDialog> {
                               );
                               if (picked != null) setState(() => _expiryDates[productId] = picked);
                             },
-                            child: Text(expiry != null ? DateFormat('yyyy-MM-dd').format(expiry) : 'تاريخ الصلاحية'),
+                            child: Text(
+                                expiry != null ? DateFormat('yyyy-MM-dd').format(expiry) : 'تاريخ الصلاحية'),
                           ),
                         ),
                       ],
@@ -446,7 +439,9 @@ class _ReceiveExpiryDialogState extends State<_ReceiveExpiryDialog> {
               final productId = item['productId'] as String;
               return {
                 'productId': productId,
-                'batchNumber': _batchControllers[productId]!.text.trim().isEmpty ? null : _batchControllers[productId]!.text.trim(),
+                'batchNumber': _batchControllers[productId]!.text.trim().isEmpty
+                    ? null
+                    : _batchControllers[productId]!.text.trim(),
                 'expiryDate': _expiryDates[productId]?.toIso8601String(),
               };
             }).toList();
@@ -506,7 +501,8 @@ class _CreatePurchaseOrderDialogState extends ConsumerState<_CreatePurchaseOrder
     final code = value.trim();
     if (code.isEmpty) return;
     try {
-      final response = await ApiClient.instance.dio.get('/products/inventory', queryParameters: {'search': code});
+      final response =
+          await ApiClient.instance.dio.get('/products/inventory', queryParameters: {'search': code});
       final results = List<Map<String, dynamic>>.from(response.data as List);
       final exact = results.where((p) => p['barcode'] == code || p['sku'] == code).toList();
       final match = exact.length == 1 ? exact.first : (results.length == 1 ? results.first : null);
@@ -547,129 +543,157 @@ class _CreatePurchaseOrderDialogState extends ConsumerState<_CreatePurchaseOrder
       title: const Text('أمر شراء جديد'),
       content: SizedBox(
         width: 480,
-        child: SingleChildScrollView(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              branchesAsync.when(
-                loading: () => const LinearProgressIndicator(),
-                error: (_, __) => const Text('تعذّر تحميل الفروع'),
-                data: (branches) => DropdownButtonFormField<String>(
-                  initialValue: _branchId,
-                  decoration: const InputDecoration(labelText: 'الفرع المستلِم'),
-                  items: branches.map((b) => DropdownMenuItem(value: b['id'] as String, child: Text(b['name'] as String))).toList(),
-                  onChanged: (v) => setState(() => _branchId = v),
+        child: Form(
+          key: _formKey,
+          // onUserInteraction: الخطأ يظهر عند الكتابة لا بعد الضغط على
+          // «إنشاء» — في أمر بعشرة أسطر، الفارق بين تصحيح سطر واحد فور
+          // كتابته وبين البحث عن السطر الخاطئ بين عشرة بعد الرفض.
+          autovalidateMode: AutovalidateMode.onUserInteraction,
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                branchesAsync.when(
+                  loading: () => const LinearProgressIndicator(),
+                  error: (_, __) => const Text('تعذّر تحميل الفروع'),
+                  data: (branches) => DropdownButtonFormField<String>(
+                    initialValue: _branchId,
+                    decoration: const InputDecoration(labelText: 'الفرع المستلِم'),
+                    items: branches
+                        .map((b) =>
+                            DropdownMenuItem(value: b['id'] as String, child: Text(b['name'] as String)))
+                        .toList(),
+                    onChanged: (v) => setState(() => _branchId = v),
+                  ),
                 ),
-              ),
-              const SizedBox(height: 12),
-              suppliersAsync.when(
-                loading: () => const LinearProgressIndicator(),
-                error: (_, __) => const Text('تعذّر تحميل الموردين'),
-                data: (suppliers) => DropdownButtonFormField<String?>(
-                  initialValue: _supplierId,
-                  decoration: const InputDecoration(labelText: 'المورّد (اختياري)'),
-                  items: [
-                    const DropdownMenuItem<String?>(value: null, child: Text('بلا مورّد محدَّد')),
-                    ...suppliers.map((s) => DropdownMenuItem(value: s['id'] as String, child: Text(s['name'] as String))),
-                  ],
-                  onChanged: (v) => setState(() => _supplierId = v),
+                const SizedBox(height: 12),
+                suppliersAsync.when(
+                  loading: () => const LinearProgressIndicator(),
+                  error: (_, __) => const Text('تعذّر تحميل الموردين'),
+                  data: (suppliers) => DropdownButtonFormField<String?>(
+                    initialValue: _supplierId,
+                    decoration: const InputDecoration(labelText: 'المورّد (اختياري)'),
+                    items: [
+                      const DropdownMenuItem<String?>(value: null, child: Text('بلا مورّد محدَّد')),
+                      ...suppliers.map((s) =>
+                          DropdownMenuItem(value: s['id'] as String, child: Text(s['name'] as String))),
+                    ],
+                    onChanged: (v) => setState(() => _supplierId = v),
+                  ),
                 ),
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: _searchController,
-                onChanged: _onSearch,
-                onSubmitted: _onSearchSubmitted,
-                decoration: const InputDecoration(hintText: 'ابحث أو امسح باركود صنف لإضافته...', prefixIcon: Icon(Icons.search, size: 18)),
-              ),
-              const SizedBox(height: 8),
-              resultsAsync.when(
-                loading: () => const LinearProgressIndicator(),
-                error: (_, __) => const SizedBox.shrink(),
-                data: (products) => products.isEmpty
-                    ? const SizedBox.shrink()
-                    : SizedBox(
-                        height: 140,
-                        child: ListView.builder(
-                          itemCount: products.length,
-                          itemBuilder: (context, index) {
-                            final p = products[index];
-                            return ListTile(
-                              dense: true,
-                              title: Text(p['name'] as String? ?? ''),
-                              subtitle: Text('تكلفة حالية: ${_currencyFormat.format((p['costPrice'] as num?) ?? 0)}'),
-                              trailing: const Icon(Icons.add_circle_outline, size: 18),
-                              onTap: () => _addLine(p),
-                            );
-                          },
-                        ),
-                      ),
-              ),
-              const Divider(height: 24),
-              if (_lines.isEmpty)
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                  child: Text('لم تُضف أصناف بعد', style: AppTextStyles.bodyMd()),
-                )
-              else
-                ..._lines.map((line) => Container(
-                      margin: const EdgeInsets.only(bottom: 10),
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(color: AppColors.surfaceAlt, borderRadius: BorderRadius.circular(8)),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Expanded(child: Text(line.name, style: AppTextStyles.bodyMd(color: AppColors.textPrimary))),
-                              IconButton(
-                                icon: const Icon(Icons.delete_outline, size: 18),
-                                onPressed: () => setState(() => _lines.remove(line)),
-                                padding: EdgeInsets.zero,
-                                constraints: const BoxConstraints(),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 6),
-                          Row(
-                            children: [
-                              Expanded(
-                                child: TextFormField(
-                                  initialValue: line.quantity.toStringAsFixed(line.quantity.truncateToDouble() == line.quantity ? 0 : 3),
-                                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                                  decoration: const InputDecoration(labelText: 'الكمية', isDense: true),
-                                  onChanged: (v) => line.quantity = double.tryParse(v) ?? line.quantity,
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: TextFormField(
-                                  initialValue: line.unitCost.toStringAsFixed(2),
-                                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                                  decoration: const InputDecoration(labelText: 'تكلفة الوحدة', isDense: true),
-                                  onChanged: (v) => line.unitCost = double.tryParse(v) ?? line.unitCost,
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: TextFormField(
-                                  initialValue: line.salePrice.toStringAsFixed(2),
-                                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                                  decoration: const InputDecoration(labelText: 'سعر البيع', isDense: true),
-                                  onChanged: (v) => line.salePrice = double.tryParse(v) ?? line.salePrice,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    )),
-              if (_error != null) ...[
+                const SizedBox(height: 16),
+                TextField(
+                  controller: _searchController,
+                  // التركيز يبدأ عند حقل البحث عن الأصناف لا عند قائمة الفرع:
+                  // القائمة تُختار بضغطة واحدة، أما الأصناف فهي العمل الفعلي
+                  // في هذا الحوار وتُدخَل كتابةً أو بقارئ الباركود — والقارئ
+                  // يحتاج حقلاً ممسكاً بالتركيز ليكتب فيه أصلاً.
+                  autofocus: true,
+                  onChanged: _onSearch,
+                  onSubmitted: _onSearchSubmitted,
+                  decoration: const InputDecoration(
+                      hintText: 'ابحث أو امسح باركود صنف لإضافته...',
+                      prefixIcon: Icon(Icons.search, size: 18)),
+                ),
                 const SizedBox(height: 8),
-                Text(_error!, style: AppTextStyles.bodyMd(color: AppColors.danger)),
+                resultsAsync.when(
+                  loading: () => const LinearProgressIndicator(),
+                  error: (_, __) => const SizedBox.shrink(),
+                  data: (products) => products.isEmpty
+                      ? const SizedBox.shrink()
+                      : SizedBox(
+                          height: 140,
+                          child: ListView.builder(
+                            itemCount: products.length,
+                            itemBuilder: (context, index) {
+                              final p = products[index];
+                              return ListTile(
+                                dense: true,
+                                title: Text(p['name'] as String? ?? ''),
+                                subtitle: Text(
+                                    'تكلفة حالية: ${_currencyFormat.format((p['costPrice'] as num?) ?? 0)}'),
+                                trailing: const Icon(Icons.add_circle_outline, size: 18),
+                                onTap: () => _addLine(p),
+                              );
+                            },
+                          ),
+                        ),
+                ),
+                const Divider(height: 24),
+                if (_lines.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    child: Text('لم تُضف أصناف بعد', style: AppTextStyles.bodyMd()),
+                  )
+                else
+                  ..._lines.map((line) => Container(
+                        margin: const EdgeInsets.only(bottom: 10),
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                            color: AppColors.surfaceAlt, borderRadius: BorderRadius.circular(8)),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Expanded(
+                                    child: Text(line.name,
+                                        style: AppTextStyles.bodyMd(color: AppColors.textPrimary))),
+                                IconAction(
+                                  icon: Icons.delete_outline,
+                                  iconSize: 18,
+                                  dense: true,
+                                  tooltip: 'حذف ${line.name} من الأمر',
+                                  onPressed: () => setState(() => _lines.remove(line)),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 6),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: TextFormField(
+                                    initialValue: line.quantity.toStringAsFixed(
+                                        line.quantity.truncateToDouble() == line.quantity ? 0 : 3),
+                                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                                    decoration: const InputDecoration(labelText: 'الكمية', isDense: true),
+                                    validator: _validateQuantity,
+                                    onChanged: (v) => line.quantity = double.tryParse(v) ?? line.quantity,
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: TextFormField(
+                                    initialValue: line.unitCost.toStringAsFixed(2),
+                                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                                    decoration:
+                                        const InputDecoration(labelText: 'تكلفة الوحدة', isDense: true),
+                                    validator: _validateMoney,
+                                    onChanged: (v) => line.unitCost = double.tryParse(v) ?? line.unitCost,
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: TextFormField(
+                                    initialValue: line.salePrice.toStringAsFixed(2),
+                                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                                    decoration: const InputDecoration(labelText: 'سعر البيع', isDense: true),
+                                    validator: _validateMoney,
+                                    onChanged: (v) => line.salePrice = double.tryParse(v) ?? line.salePrice,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      )),
+                if (_error != null) ...[
+                  const SizedBox(height: 8),
+                  Text(_error!, style: AppTextStyles.bodyMd(color: AppColors.danger)),
+                ],
               ],
-            ],
+            ),
           ),
         ),
       ),
@@ -685,7 +709,34 @@ class _CreatePurchaseOrderDialogState extends ConsumerState<_CreatePurchaseOrder
     );
   }
 
+  final _formKey = GlobalKey<FormState>();
+
+  /// الكمية: رقم موجب فعلي.
+  ///
+  /// كان الحقل يعتمد على `double.tryParse(v) ?? line.quantity` وحده، أي أن
+  /// إدخالاً غير صالح يُتجاهَل صامتاً وتبقى القيمة القديمة: يكتب المستخدم
+  /// «12» فوق «3»، يخطئ فيكتب «12ا»، فيرى ما كتبه في الحقل بينما المحفوظ
+  /// فعلياً هو 3 — ويُسجَّل أمر شراء بكمية غير التي أمامه على الشاشة.
+  static String? _validateQuantity(String? v) {
+    final q = double.tryParse((v ?? '').trim());
+    if (q == null) return 'رقم غير صالح';
+    if (q <= 0) return 'يجب أن تكون أكبر من صفر';
+    return null;
+  }
+
+  /// المبالغ: صفر مقبول (هدية أو عيّنة)، والسالب لا.
+  static String? _validateMoney(String? v) {
+    final n = double.tryParse((v ?? '').trim());
+    if (n == null) return 'رقم غير صالح';
+    if (n < 0) return 'لا يقبل قيمة سالبة';
+    return null;
+  }
+
   Future<void> _submit() async {
+    // التحقّق أولاً: التحقّقات اليدوية أدناه تفحص الفرع والأسطر، لكنها لا
+    // تفحص محتوى الحقول نفسها.
+    if (!(_formKey.currentState?.validate() ?? false)) return;
+
     if (_branchId == null) {
       setState(() => _error = 'اختر الفرع المستلِم');
       return;
@@ -704,7 +755,14 @@ class _CreatePurchaseOrderDialogState extends ConsumerState<_CreatePurchaseOrder
       await ApiClient.instance.dio.post('/purchase-orders', data: {
         'branchId': _branchId,
         'supplierId': _supplierId,
-        'lines': _lines.map((l) => {'productId': l.productId, 'quantity': l.quantity, 'unitCost': l.unitCost, 'salePrice': l.salePrice}).toList(),
+        'lines': _lines
+            .map((l) => {
+                  'productId': l.productId,
+                  'quantity': l.quantity,
+                  'unitCost': l.unitCost,
+                  'salePrice': l.salePrice
+                })
+            .toList(),
       });
       if (mounted) Navigator.pop(context, true);
     } catch (e) {

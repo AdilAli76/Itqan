@@ -11,6 +11,10 @@ import '../../../core/theme/app_text_styles.dart';
 import '../../../shared/widgets/data_table_widget.dart';
 import '../../branches/data/branches_providers.dart';
 import '../data/users_providers.dart';
+import '../../../shared/widgets/skeleton.dart';
+
+// ux-audit: ignore UX-03 — مستخدمو المنظمة عشرات لا آلاف، وعددهم مقيَّد
+// بالتراخيص أصلاً (راجع شاشة الترخيص). البحث الموجود يكفي.
 
 const _roleLabels = {
   'super_admin': 'مدير عام',
@@ -61,7 +65,11 @@ class _UsersScreenState extends ConsumerState<UsersScreen> {
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Row(
+          // Wrap لا Row: شريط الفلاتر يفيض على عرض الهاتف. الالتفاف يبقي
+          // كل فلتر ظاهراً وقابلاً للنقر بدل قصّ آخره بصمت.
+          Wrap(
+            runSpacing: 8,
+            crossAxisAlignment: WrapCrossAlignment.center,
             children: [
               _TabChip(label: 'المستخدمون', selected: _tab == 0, onTap: () => setState(() => _tab = 0)),
               const SizedBox(width: 8),
@@ -102,6 +110,9 @@ class _TabChip extends StatelessWidget {
       onTap: onTap,
       borderRadius: BorderRadius.circular(8),
       child: Container(
+        // 44 أدنى هدف لمس؛ الحشو وحده كان يعطي 39.
+        constraints: const BoxConstraints(minHeight: 44),
+        alignment: Alignment.center,
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
         decoration: BoxDecoration(
           color: selected ? color.withValues(alpha: 0.1) : Colors.transparent,
@@ -177,10 +188,7 @@ class _UsersSectionState extends ConsumerState<_UsersSection> {
     final branchesAsync = ref.watch(branchesProvider);
 
     return usersAsync.when(
-      loading: () => const Padding(
-        padding: EdgeInsets.all(48),
-        child: Center(child: CircularProgressIndicator()),
-      ),
+      loading: () => const TableSkeleton(),
       error: (err, _) => _ErrorBox(message: 'تعذّر تحميل المستخدمين', onRetry: () => ref.invalidate(usersProvider)),
       data: (users) {
         final branchNames = <String, String>{
@@ -514,10 +522,7 @@ class _LoginHistorySection extends ConsumerWidget {
     final historyAsync = ref.watch(loginHistoryProvider);
 
     return historyAsync.when(
-      loading: () => const Padding(
-        padding: EdgeInsets.all(48),
-        child: Center(child: CircularProgressIndicator()),
-      ),
+      loading: () => const TableSkeleton(),
       error: (err, _) => _ErrorBox(message: 'تعذّر تحميل سجل تسجيل الدخول', onRetry: () => ref.invalidate(loginHistoryProvider)),
       data: (history) => AppDataTable(
         title: 'سجل تسجيل الدخول (${history.length})',

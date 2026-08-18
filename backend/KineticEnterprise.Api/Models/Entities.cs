@@ -26,6 +26,11 @@ public class Organization
     public double ReceiptWidthMm { get; set; } = 80;
     // شريط جانبي أو شريط علوي — تفضيل عرض بحت لا يغيّر أي وظيفة.
     public string NavLayout { get; set; } = "sidebar";
+    // السماح ببيع الأصناف مفتوحة القيمة في نقطة البيع. مطفأ افتراضياً:
+    // قيمة يكتبها الكاشير بنفسه لا تقابلها بضاعة في المخزون، فهي أوسع باب
+    // لسحب نقدية بلا أثر. تفعيله قرار مدير المنظمة (super_admin) وحده،
+    // ولا يُضبط من إعدادات جهاز الكاشير.
+    public bool PosAllowOpenProduct { get; set; }
     public bool IsActive { get; set; } = true;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
@@ -479,6 +484,15 @@ public static class WalletKinds
 
 public class Invoice
 {
+    /// <summary>
+    /// مفتاح العملية الأصلي كما ولّده جهاز نقطة البيع. فريد حين يوجد.
+    ///
+    /// يبقى محفوظاً بعد المزامنة لا يُمحى: هو أثر التدقيق الذي يربط الفاتورة
+    /// بعملية البيع التي وقعت فعلياً على الجهاز أثناء الانقطاع، ويسمح بكشف
+    /// أي ازدواج لاحقاً.
+    /// </summary>
+    public string? ClientRequestId { get; set; }
+
     public Guid Id { get; set; } = Guid.NewGuid();
     public Guid OrganizationId { get; set; }
     public Guid BranchId { get; set; }

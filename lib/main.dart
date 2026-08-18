@@ -3,8 +3,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'core/constants/app_constants.dart';
 import 'core/router/app_router.dart';
+import 'core/theme/app_colors.dart';
 import 'core/theme/app_theme.dart';
 import 'core/theme/branding_provider.dart';
+import 'core/theme/theme_mode_provider.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -20,11 +22,14 @@ class KineticApp extends ConsumerWidget {
     final branding = brandingAsync.valueOrNull ?? OrganizationBranding.fallback;
 
     final router = ref.watch(appRouterProvider);
+    final themeMode = ref.watch(themeModeProvider);
 
     return MaterialApp.router(
       title: branding.displayName,
       debugShowCheckedModeBanner: false,
       theme: AppTheme.build(branding.colors),
+      darkTheme: AppTheme.build(branding.colors, brightness: Brightness.dark),
+      themeMode: themeMode,
       locale: AppConstants.locale,
       supportedLocales: const [Locale('ar'), Locale('en')],
       
@@ -37,6 +42,14 @@ class KineticApp extends ConsumerWidget {
       // -----------------------------------------------------------------
 
       builder: (context, child) {
+        // مزامنة اللوحة النشطة مع السمة المطبَّقة فعلياً.
+        //
+        // ضرورية لأن AppTheme.build يُستدعى مرّتين (نهارية وليلية) عند كل
+        // بناء لـ MaterialApp، فآخر استدعاء هو من يترك أثره في اللوحة —
+        // وهو الليلي دائماً بحكم الترتيب. هنا، وبعد أن يحسم Flutter أي
+        // سمة تُطبَّق فعلاً، نضبط اللوحة على سطوعها الحقيقي. والموضع
+        // مضمون: builder يُنفَّذ قبل بناء أي شاشة تحته.
+        AppColors.applyBrightness(Theme.of(context).brightness);
         return Directionality(
           textDirection: AppConstants.direction,
           child: child ?? const SizedBox.shrink(),

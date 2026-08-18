@@ -43,30 +43,71 @@ class AppDataTable extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          // رأس الجدول: كان Row فيه Spacer وحقل بحث بعرض ثابت 240، فيفيض
+          // على أي عرض أضيق من (العنوان + 240). وهذا الودجت مشترك بين كل
+          // شاشات القوائم، فكان الفيض الواحد يظهر في أربع عشرة شاشة.
+          //
+          // Wrap بدل Row: العنوان والبحث يبقيان في سطر واحد متى اتّسع
+          // العرض، وينزل البحث سطراً تحته متى ضاق — بدل أن يُقتطع.
           Padding(
             padding: const EdgeInsets.all(16),
-            child: Row(
-              children: [
-                if (icon != null) ...[
-                  Icon(icon, size: 18, color: AppColors.textSecondary),
-                  const SizedBox(width: 8),
-                ],
-                if (title != null) Text(title!, style: AppTextStyles.headlineMd()),
-                const Spacer(),
-                if (onSearch != null)
-                  SizedBox(
-                    width: 240,
-                    height: 40,
-                    child: TextField(
-                      onChanged: onSearch,
-                      decoration: const InputDecoration(
-                        hintText: 'بحث...',
-                        prefixIcon: Icon(Icons.search, size: 18),
-                        isDense: true,
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final titleRow = Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (icon != null) ...[
+                      // أيقونة زخرفية بحتة بجوار عنوان مكتوب — نطقها يضيف
+                      // ضجيجاً ولا يضيف معنى.
+                      ExcludeSemantics(
+                        child: Icon(icon, size: 18, color: AppColors.textSecondary),
+                      ),
+                      const SizedBox(width: 8),
+                    ],
+                    if (title != null)
+                      Flexible(
+                        child: Text(
+                          title!,
+                          style: AppTextStyles.headlineMd(),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                  ],
+                );
+
+                if (onSearch == null) return titleRow;
+
+                // العرض المتاح للبحث بعد العنوان؛ 240 سقف لا قيمة ثابتة.
+                final searchWidth = constraints.maxWidth < 360
+                    ? constraints.maxWidth
+                    : 240.0;
+
+                return Wrap(
+                  alignment: WrapAlignment.spaceBetween,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  spacing: 12,
+                  runSpacing: 12,
+                  children: [
+                    if (title != null || icon != null)
+                      ConstrainedBox(
+                        constraints: BoxConstraints(maxWidth: constraints.maxWidth),
+                        child: titleRow,
+                      ),
+                    SizedBox(
+                      width: searchWidth,
+                      height: 44,
+                      child: TextField(
+                        onChanged: onSearch,
+                        decoration: const InputDecoration(
+                          hintText: 'بحث...',
+                          prefixIcon: Icon(Icons.search, size: 18),
+                          isDense: true,
+                        ),
                       ),
                     ),
-                  ),
-              ],
+                  ],
+                );
+              },
             ),
           ),
           const Divider(height: 1),
@@ -80,14 +121,22 @@ class AppDataTable extends StatelessWidget {
   }
 
   Widget _buildEmptyState(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 48),
-      child: Column(
-        children: [
-          Icon(emptyIcon, size: 32, color: AppColors.textMuted),
-          const SizedBox(height: 12),
-          Text(emptyMessage, style: AppTextStyles.bodyMd(color: AppColors.textMuted)),
-        ],
+    // liveRegion: المستخدم الذي يبحث ثم لا يجد نتائج يجب أن يُبلَّغ بذلك
+    // فوراً، لا أن ينتظر صمتاً لا يعرف معناه — هل النتيجة فارغة أم أن
+    // البحث ما زال جارياً؟
+    return Semantics(
+      liveRegion: true,
+      label: emptyMessage,
+      excludeSemantics: true,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 48),
+        child: Column(
+          children: [
+            Icon(emptyIcon, size: 32, color: AppColors.textMuted),
+            const SizedBox(height: 12),
+            Text(emptyMessage, style: AppTextStyles.bodyMd(color: AppColors.textMuted)),
+          ],
+        ),
       ),
     );
   }
@@ -115,7 +164,7 @@ class AppDataTable extends StatelessWidget {
       children: rows.map((row) {
         return Container(
           padding: const EdgeInsets.all(16),
-          decoration: const BoxDecoration(
+          decoration: BoxDecoration(
             border: Border(top: BorderSide(color: AppColors.border)),
           ),
           child: Column(
@@ -129,7 +178,10 @@ class AppDataTable extends StatelessWidget {
                       width: 100,
                       child: Text(columns[i].label, style: AppTextStyles.labelMd()),
                     ),
-                    Expanded(child: row[i]),
+                    // على الموبايل يصبح كل صف بطاقة، وبلا هذا الدمج يقرأ قارئ
+                    // الشاشة العنوان والقيمة كعنصرين منفصلين فينفصل «السعر»
+                    // عن رقمه. MergeSemantics يبقيهما جملة واحدة.
+                    Expanded(child: MergeSemantics(child: row[i])),
                   ],
                 ),
               );

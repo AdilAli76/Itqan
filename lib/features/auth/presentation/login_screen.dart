@@ -6,6 +6,7 @@ import '../../../core/responsive/breakpoints.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_text_styles.dart';
 import '../../../core/theme/branding_provider.dart';
+import '../../../shared/widgets/icon_action.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});
@@ -84,8 +85,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
             controller: _passwordController,
             obscureText: _obscure,
             decoration: InputDecoration(
-              suffixIcon: IconButton(
-                icon: Icon(_obscure ? Icons.visibility_off_outlined : Icons.visibility_outlined, size: 20),
+              suffixIcon: IconAction(
+                icon: _obscure ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+                tooltip: _obscure ? 'إظهار كلمة المرور' : 'إخفاء كلمة المرور',
                 onPressed: () => setState(() => _obscure = !_obscure),
               ),
             ),
@@ -204,14 +206,14 @@ class _ForgotPasswordDialog extends StatelessWidget {
               body: 'راجع المدير العام لمنظمتك — يعيد تعيين كلمة مرورك فوراً من '
                   '«الإدارة ← الصلاحيات والمستخدمون ← أيقونة إعادة تعيين كلمة المرور».',
             ),
-            const SizedBox(height: 14),
+            const SizedBox(height: 16),
             const _Step(
               icon: Icons.admin_panel_settings_outlined,
               title: 'إن كنت المدير العام',
               body: 'راجع مزوّد النظام (الدعم الفني) — لديه صلاحية إعادة التعيين '
                   'على مستوى السيرفر. بيانات التواصل داخل النظام في «النظام ← الدعم الفني».',
             ),
-            const SizedBox(height: 14),
+            const SizedBox(height: 16),
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(color: AppColors.infoBg, borderRadius: BorderRadius.circular(8)),
