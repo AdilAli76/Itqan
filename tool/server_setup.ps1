@@ -406,9 +406,22 @@ GRANT EXECUTE TO [$poolIdentity];
     # ملف الأسرار يجب ألّا يُخدَم كملف ثابت لو أخطأ أحد في ترتيب المسارات.
     Head 'الحماية'
     $req = "IIS:\Sites\KineticWeb\api"
-    Add-WebConfigurationProperty -PSPath $req -Filter 'system.webServer/security/requestFiltering/hiddenSegments' `
-        -Name '.' -Value @{ segment = 'appsettings.Production.json' } -ErrorAction SilentlyContinue
-    Ok 'appsettings.Production.json محجوب عن الطلبات المباشرة'
+    # الإضافة تفشل إن كان المقطع مُسجَّلاً من تشغيل سابق، وIIS يرميها استثناءً
+    # COM لا يكبحه -ErrorAction. والمرحلة يُعاد تنفيذها بعد كل تصحيح إعدادات
+    # بطبيعتها، فالفحص قبل الإضافة هو الصواب — لا الانهيار على خطوة نتيجتها
+    # مُحقَّقة أصلاً.
+    try {
+        $existing = (Get-WebConfiguration -PSPath $req -Filter 'system.webServer/security/requestFiltering/hiddenSegments').Collection |
+            Where-Object { $_.segment -eq 'appsettings.Production.json' }
+        if ($existing) {
+            Ok 'appsettings.Production.json محجوب أصلاً'
+        } else {
+            Add-WebConfigurationProperty -PSPath $req -Filter 'system.webServer/security/requestFiltering/hiddenSegments' -Name '.' -Value @{ segment = 'appsettings.Production.json' }
+            Ok 'appsettings.Production.json محجوب عن الطلبات المباشرة'
+        }
+    } catch {
+        Warn 'تعذّر ضبط حجب ملف الأسرار — تحقّق يدوياً من Request Filtering.'
+    }
 
     Write-Host ''
     Write-Host '  التالي — الشهادة (الخطوة الوحيدة المتبقّية قبل الإطلاق):' -ForegroundColor Yellow
