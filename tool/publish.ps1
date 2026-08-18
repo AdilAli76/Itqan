@@ -160,9 +160,9 @@ Step 7 'تعليمات مرافقة'
 الترتيب مُلزَم — كل خطوة تعتمد على ما قبلها.
 
 1) قاعدة البيانات
-   sqlcmd -S .\SQLEXPRESS -E -i "sql\DATABASE_SCHEMA_SQLSERVER.sql"
-   sqlcmd -S .\SQLEXPRESS -E -d KineticEnterprise -i "sql\MIGRATIONS.sql"
-   sqlcmd -S .\SQLEXPRESS -E -d KineticEnterprise -i "sql\INDEXES.sql"
+   sqlcmd -S .\SQLEXPRESS -E -I -i "sql\DATABASE_SCHEMA_SQLSERVER.sql"
+   sqlcmd -S .\SQLEXPRESS -E -I -d KineticEnterprise -i "sql\MIGRATIONS.sql"
+   sqlcmd -S .\SQLEXPRESS -E -I -d KineticEnterprise -i "sql\INDEXES.sql"
 
    على ترقية لقاعدة قائمة: نفّذ MIGRATIONS.sql وINDEXES.sql وحدهما.
    كلاهما آمن للإعادة (IF NOT EXISTS حول كل تغيير).
