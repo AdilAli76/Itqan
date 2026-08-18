@@ -50,6 +50,7 @@ class NotificationsScreen extends ConsumerWidget {
           // البصري: حتى 233 بكسل). الالتفاف يبقيها كلها ظاهرة وقابلة
           // للنقر بدل قصّ آخرها بصمت.
           Wrap(
+            spacing: 8,
             runSpacing: 8,
             children: [
               FilterChipButton(label: 'الكل', selected: filter == null, onTap: () => ref.read(notificationsFilterProvider.notifier).state = null),

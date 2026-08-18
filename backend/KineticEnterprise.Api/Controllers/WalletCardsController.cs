@@ -19,6 +19,9 @@ public record WalletCardDto(
     DateTime IssuedAt, DateOnly? ExpiryDate, string? BlockedReason, string? IssuedByName,
     string? HolderName);
 
+/// صفحة بطاقات محفظة.
+public record WalletCardPageDto(List<WalletCardDto> Items, int TotalCount, int Page, int PageSize);
+
 /// <summary>
 /// إدارة بطاقات المحفظة — الشاشة التي يعمل عليها المدير: إصدار، حظر، رفع
 /// حظر، إعادة تعيين رقم سري، وإعادة إصدار برمز جديد. حالة البطاقة تُفرَض
@@ -27,8 +30,6 @@ public record WalletCardDto(
 [ApiController]
 [Route("api/wallet-cards")]
 [Authorize]
-/// صفحة بطاقات محفظة.
-public record WalletCardPageDto(List<WalletCardDto> Items, int TotalCount, int Page, int PageSize);
 
 public class WalletCardsController : ControllerBase
 {

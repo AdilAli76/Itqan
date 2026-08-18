@@ -70,7 +70,11 @@ public class AppDbContext : DbContext
         modelBuilder.Entity<Invoice>()
             .HasIndex(i => i.ClientRequestId)
             .IsUnique()
-            .HasFilter("[ClientRequestId] IS NOT NULL");
+            // [client_request_id] لا [ClientRequestId]: نصّ الفلتر يُمرَّر إلى
+            // SQL Server حرفياً بلا مرور على اصطلاح التسمية، بخلاف اسم العمود
+            // في HasIndex الذي يترجمه UseSnakeCaseNamingConvention. كتابته
+            // بصيغة الخاصية يجعل الفهرس يشير إلى عمود غير موجود.
+            .HasFilter("[client_request_id] IS NOT NULL");
         modelBuilder.Entity<InvoiceItem>().ToTable("invoice_items");
         modelBuilder.Entity<InvoicePayment>().ToTable("invoice_payments");
         modelBuilder.Entity<NotificationItem>().ToTable("notifications");

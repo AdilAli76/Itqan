@@ -23,6 +23,9 @@ public record ProductInventoryDto(
 
 public record StockAdjustmentRequest(Guid? BranchId, decimal QuantityDelta, string? BatchNumber, DateTime? ExpiryDate);
 
+/// صفحة مخزون — نفس شكل بقية صفحات النظام.
+public record ProductInventoryPageDto(List<ProductInventoryDto> Items, int TotalCount, int Page, int PageSize);
+
 /// <summary>
 /// النمط المرجعي لأي Controller جديد في النظام: لا حاجة لكتابة
 /// WHERE organization_id = ... يدوياً — الـ Security Policy على قاعدة
@@ -32,8 +35,6 @@ public record StockAdjustmentRequest(Guid? BranchId, decimal QuantityDelta, stri
 [ApiController]
 [Route("api/products")]
 [Authorize]
-/// صفحة مخزون — نفس شكل بقية صفحات النظام.
-public record ProductInventoryPageDto(List<ProductInventoryDto> Items, int TotalCount, int Page, int PageSize);
 
 public class ProductsController : ControllerBase
 {

@@ -211,7 +211,10 @@ class _BrandingFormState extends ConsumerState<_BrandingForm> {
             child: ElevatedButton(
               onPressed: _saving ? null : _submit,
               child: _saving
-                  ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                   : const Text('حفظ الهوية'),
             ),
           )
@@ -219,7 +222,8 @@ class _BrandingFormState extends ConsumerState<_BrandingForm> {
           Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(color: AppColors.warningBg, borderRadius: BorderRadius.circular(8)),
-            child: Text('عرض فقط — تعديل الهوية متاح للمدير العام فقط', style: AppTextStyles.bodyMd(color: AppColors.warning)),
+            child: Text('عرض فقط — تعديل الهوية متاح للمدير العام فقط',
+                style: AppTextStyles.bodyMd(color: AppColors.warning)),
           ),
       ],
     );
@@ -433,7 +437,8 @@ class _BranchesSection extends ConsumerWidget {
                 color: isActive ? AppColors.successBg : AppColors.dangerBg,
                 borderRadius: BorderRadius.circular(6),
               ),
-              child: Text(isActive ? 'نشط' : 'معطَّل', style: AppTextStyles.labelMd(color: isActive ? AppColors.success : AppColors.danger)),
+              child: Text(isActive ? 'نشط' : 'معطَّل',
+                  style: AppTextStyles.labelMd(color: isActive ? AppColors.success : AppColors.danger)),
             ),
             if (canEdit)
               IconButton(
@@ -493,51 +498,56 @@ class _BranchFormDialogState extends State<_BranchFormDialog> {
         key: _formKey,
         child: SizedBox(
           width: 380,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              TextFormField(
-                controller: _nameController,
-                // أول حقل في الحوار يأخذ التركيز فور الفتح: المستخدم يكتب
-                // مباشرة بدل نقرة إضافية في كل مرة — وهي نقرة تتكرّر آلاف
-                // المرات في عمر النظام.
-                autofocus: true,
-                decoration: const InputDecoration(labelText: 'اسم الفرع'),
-                validator: (v) => (v == null || v.trim().isEmpty) ? 'حقل إلزامي' : null,
-              ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: _codeController,
-                textCapitalization: TextCapitalization.characters,
-                decoration: const InputDecoration(labelText: 'رمز الفرع', hintText: 'مثال: TRP-01'),
-                validator: (v) => (v == null || v.trim().isEmpty) ? 'حقل إلزامي' : null,
-              ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: _addressController,
-                decoration: const InputDecoration(labelText: 'العنوان (اختياري)'),
-              ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: _phoneController,
-                keyboardType: TextInputType.phone,
-                decoration: const InputDecoration(labelText: 'الهاتف (اختياري)'),
-              ),
-              if (_isEdit) ...[
-                const SizedBox(height: 4),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('فرع نشط'),
-                  value: _isActive,
-                  onChanged: (v) => setState(() => _isActive = v),
+          child: SingleChildScrollView(
+            // بلا تمرير يفيض الحوار على أي شاشة أقصر من محتواه،
+            // فيخرج زرّا الحفظ والإلغاء عن المتناول ويصبح الحوار
+            // مصيدة لا مخرج منها. أربعة حقول تكفي لذلك على الهاتف.
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                TextFormField(
+                  controller: _nameController,
+                  // أول حقل في الحوار يأخذ التركيز فور الفتح: المستخدم يكتب
+                  // مباشرة بدل نقرة إضافية في كل مرة — وهي نقرة تتكرّر آلاف
+                  // المرات في عمر النظام.
+                  autofocus: true,
+                  decoration: const InputDecoration(labelText: 'اسم الفرع'),
+                  validator: (v) => (v == null || v.trim().isEmpty) ? 'حقل إلزامي' : null,
                 ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: _codeController,
+                  textCapitalization: TextCapitalization.characters,
+                  decoration: const InputDecoration(labelText: 'رمز الفرع', hintText: 'مثال: TRP-01'),
+                  validator: (v) => (v == null || v.trim().isEmpty) ? 'حقل إلزامي' : null,
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: _addressController,
+                  decoration: const InputDecoration(labelText: 'العنوان (اختياري)'),
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: _phoneController,
+                  keyboardType: TextInputType.phone,
+                  decoration: const InputDecoration(labelText: 'الهاتف (اختياري)'),
+                ),
+                if (_isEdit) ...[
+                  const SizedBox(height: 4),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('فرع نشط'),
+                    value: _isActive,
+                    onChanged: (v) => setState(() => _isActive = v),
+                  ),
+                ],
+                if (_error != null) ...[
+                  const SizedBox(height: 8),
+                  Text(_error!, style: AppTextStyles.bodyMd(color: AppColors.danger)),
+                ],
               ],
-              if (_error != null) ...[
-                const SizedBox(height: 8),
-                Text(_error!, style: AppTextStyles.bodyMd(color: AppColors.danger)),
-              ],
-            ],
+            ),
           ),
         ),
       ),

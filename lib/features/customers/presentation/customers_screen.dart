@@ -309,153 +309,159 @@ class _CustomerFormDialogState extends State<_CustomerFormDialog> {
         key: _formKey,
         child: SizedBox(
           width: 380,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              TextFormField(
-                controller: _nameController,
-                decoration: const InputDecoration(labelText: 'اسم العميل'),
-                validator: (v) => (v == null || v.trim().isEmpty) ? 'حقل إلزامي' : null,
-              ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: _phoneController,
-                keyboardType: TextInputType.phone,
-                decoration: const InputDecoration(labelText: 'الهاتف'),
-              ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: _emailController,
-                keyboardType: TextInputType.emailAddress,
-                decoration: const InputDecoration(labelText: 'البريد الإلكتروني (اختياري)'),
-                validator: (v) {
-                  final value = v?.trim() ?? '';
-                  if (value.isEmpty) return null;
-                  return value.contains('@') ? null : 'بريد إلكتروني غير صحيح';
-                },
-              ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: _cardController,
-                decoration: const InputDecoration(
-                  labelText: 'باركود البطاقة',
-                  helperText: 'يُملأ تلقائياً عند إصدار بطاقة من شاشة «بطاقات المحفظة»',
-                ),
-              ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: _creditLimitController,
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                decoration: const InputDecoration(labelText: 'سقف البيع الآجل'),
-                validator: (v) {
-                  if (v == null || v.trim().isEmpty) return 'حقل إلزامي';
-                  return double.tryParse(v) == null ? 'قيمة غير صحيحة' : null;
-                },
-              ),
-              const Divider(height: 28),
-              Text('نموذج الحساب', style: AppTextStyles.labelMd()),
-              const SizedBox(height: 6),
-              SegmentedButton<String>(
-                segments: const [
-                  ButtonSegment(
-                      value: 'prepaid',
-                      label: Text('رصيد مدفوع'),
-                      icon: Icon(Icons.savings_outlined, size: 16)),
-                  ButtonSegment(
-                      value: 'entitlement',
-                      label: Text('استحقاق ممنوح'),
-                      icon: Icon(Icons.card_giftcard_outlined, size: 16)),
-                ],
-                selected: {_accountModel},
-                onSelectionChanged: (s) => setState(() => _accountModel = s.first),
-              ),
-              const SizedBox(height: 8),
-              Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(color: AppColors.infoBg, borderRadius: BorderRadius.circular(8)),
-                child: Text(
-                  _isEntitlement
-                      ? 'جهة ممولة تمنح رصيداً بسقف وفترة. ما لا يُصرف يسقط بانتهاء الفترة، '
-                          'والمحاسبة تكون مع الجهة لا مع العميل.'
-                      : 'رصيد يدفعه العميل من ماله. لا يسقط بمرور الوقت ولا سقف له — '
-                          'إسقاط مال دفعه صاحبه مصادرة له.',
-                  style: AppTextStyles.bodyMd(color: AppColors.info),
-                ),
-              ),
-              if (_isEntitlement) ...[
-                const SizedBox(height: 12),
-                _SponsorPicker(
-                  value: _sponsorId,
-                  onChanged: (v) => setState(() => _sponsorId = v),
+          child: SingleChildScrollView(
+            // بلا تمرير يفيض الحوار على أي شاشة أقصر من محتواه،
+            // فيخرج زرّا الحفظ والإلغاء عن المتناول ويصبح الحوار
+            // مصيدة لا مخرج منها. أربعة حقول تكفي لذلك على الهاتف.
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                TextFormField(
+                  controller: _nameController,
+                  decoration: const InputDecoration(labelText: 'اسم العميل'),
+                  validator: (v) => (v == null || v.trim().isEmpty) ? 'حقل إلزامي' : null,
                 ),
                 const SizedBox(height: 12),
                 TextFormField(
-                  controller: _ceilingController,
-                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                  decoration: const InputDecoration(
-                    labelText: 'سقف المنح للفترة',
-                    helperText: 'صفر = بلا سقف',
-                  ),
+                  controller: _phoneController,
+                  keyboardType: TextInputType.phone,
+                  decoration: const InputDecoration(labelText: 'الهاتف'),
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: _emailController,
+                  keyboardType: TextInputType.emailAddress,
+                  decoration: const InputDecoration(labelText: 'البريد الإلكتروني (اختياري)'),
                   validator: (v) {
-                    if (!_isEntitlement) return null;
+                    final value = v?.trim() ?? '';
+                    if (value.isEmpty) return null;
+                    return value.contains('@') ? null : 'بريد إلكتروني غير صحيح';
+                  },
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: _cardController,
+                  decoration: const InputDecoration(
+                    labelText: 'باركود البطاقة',
+                    helperText: 'يُملأ تلقائياً عند إصدار بطاقة من شاشة «بطاقات المحفظة»',
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: _creditLimitController,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  decoration: const InputDecoration(labelText: 'سقف البيع الآجل'),
+                  validator: (v) {
                     if (v == null || v.trim().isEmpty) return 'حقل إلزامي';
                     return double.tryParse(v) == null ? 'قيمة غير صحيحة' : null;
                   },
                 ),
-                const SizedBox(height: 12),
-                InputDecorator(
-                  decoration: const InputDecoration(
-                    labelText: 'صالح حتى',
-                    helperText: 'بعد هذا التاريخ يسقط ما تبقّى من الاستحقاق',
-                  ),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                            _expiresOn == null ? 'لم يُحدَّد' : DateFormat('yyyy-MM-dd').format(_expiresOn!)),
-                      ),
-                      TextButton.icon(
-                        icon: const Icon(Icons.calendar_today_outlined, size: 16),
-                        label: const Text('اختر'),
-                        onPressed: () async {
-                          final now = DateTime.now();
-                          final picked = await showDatePicker(
-                            context: context,
-                            initialDate: _expiresOn ?? DateTime(now.year, now.month + 1, 0),
-                            firstDate: DateTime(now.year - 1),
-                            lastDate: DateTime(now.year + 10),
-                          );
-                          if (picked != null) setState(() => _expiresOn = picked);
-                        },
-                      ),
-                    ],
+                const Divider(height: 28),
+                Text('نموذج الحساب', style: AppTextStyles.labelMd()),
+                const SizedBox(height: 6),
+                SegmentedButton<String>(
+                  segments: const [
+                    ButtonSegment(
+                        value: 'prepaid',
+                        label: Text('رصيد مدفوع'),
+                        icon: Icon(Icons.savings_outlined, size: 16)),
+                    ButtonSegment(
+                        value: 'entitlement',
+                        label: Text('استحقاق ممنوح'),
+                        icon: Icon(Icons.card_giftcard_outlined, size: 16)),
+                  ],
+                  selected: {_accountModel},
+                  onSelectionChanged: (s) => setState(() => _accountModel = s.first),
+                ),
+                const SizedBox(height: 8),
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(color: AppColors.infoBg, borderRadius: BorderRadius.circular(8)),
+                  child: Text(
+                    _isEntitlement
+                        ? 'جهة ممولة تمنح رصيداً بسقف وفترة. ما لا يُصرف يسقط بانتهاء الفترة، '
+                            'والمحاسبة تكون مع الجهة لا مع العميل.'
+                        : 'رصيد يدفعه العميل من ماله. لا يسقط بمرور الوقت ولا سقف له — '
+                            'إسقاط مال دفعه صاحبه مصادرة له.',
+                    style: AppTextStyles.bodyMd(color: AppColors.info),
                   ),
                 ),
+                if (_isEntitlement) ...[
+                  const SizedBox(height: 12),
+                  _SponsorPicker(
+                    value: _sponsorId,
+                    onChanged: (v) => setState(() => _sponsorId = v),
+                  ),
+                  const SizedBox(height: 12),
+                  TextFormField(
+                    controller: _ceilingController,
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    decoration: const InputDecoration(
+                      labelText: 'سقف المنح للفترة',
+                      helperText: 'صفر = بلا سقف',
+                    ),
+                    validator: (v) {
+                      if (!_isEntitlement) return null;
+                      if (v == null || v.trim().isEmpty) return 'حقل إلزامي';
+                      return double.tryParse(v) == null ? 'قيمة غير صحيحة' : null;
+                    },
+                  ),
+                  const SizedBox(height: 12),
+                  InputDecorator(
+                    decoration: const InputDecoration(
+                      labelText: 'صالح حتى',
+                      helperText: 'بعد هذا التاريخ يسقط ما تبقّى من الاستحقاق',
+                    ),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(_expiresOn == null
+                              ? 'لم يُحدَّد'
+                              : DateFormat('yyyy-MM-dd').format(_expiresOn!)),
+                        ),
+                        TextButton.icon(
+                          icon: const Icon(Icons.calendar_today_outlined, size: 16),
+                          label: const Text('اختر'),
+                          onPressed: () async {
+                            final now = DateTime.now();
+                            final picked = await showDatePicker(
+                              context: context,
+                              initialDate: _expiresOn ?? DateTime(now.year, now.month + 1, 0),
+                              firstDate: DateTime(now.year - 1),
+                              lastDate: DateTime(now.year + 10),
+                            );
+                            if (picked != null) setState(() => _expiresOn = picked);
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+                const Divider(height: 28),
+                TextFormField(
+                  controller: _notesController,
+                  maxLines: 2,
+                  decoration: const InputDecoration(labelText: 'ملاحظات (اختياري)'),
+                ),
+                const SizedBox(height: 4),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('ربط العميل بفرعي'),
+                  // الصياغة القديمة كانت "خاص بهذا الفرع فقط" وهي غير صحيحة:
+                  // جدول customers معزول على مستوى المنظمة لا الفرع، فالعميل
+                  // يبقى ظاهراً لكل الفروع. الحقل وصفي (لمعرفة فرع التسجيل)
+                  // وليس قيداً أمنياً — راجع تعليق CustomersController.
+                  subtitle: const Text('للتصنيف فقط — بيانات العميل تبقى متاحة لكل الفروع'),
+                  value: _isBranchOnly,
+                  onChanged: (v) => setState(() => _isBranchOnly = v),
+                ),
+                if (_error != null) ...[
+                  const SizedBox(height: 8),
+                  Text(_error!, style: AppTextStyles.bodyMd(color: AppColors.danger)),
+                ],
               ],
-              const Divider(height: 28),
-              TextFormField(
-                controller: _notesController,
-                maxLines: 2,
-                decoration: const InputDecoration(labelText: 'ملاحظات (اختياري)'),
-              ),
-              const SizedBox(height: 4),
-              SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                title: const Text('ربط العميل بفرعي'),
-                // الصياغة القديمة كانت "خاص بهذا الفرع فقط" وهي غير صحيحة:
-                // جدول customers معزول على مستوى المنظمة لا الفرع، فالعميل
-                // يبقى ظاهراً لكل الفروع. الحقل وصفي (لمعرفة فرع التسجيل)
-                // وليس قيداً أمنياً — راجع تعليق CustomersController.
-                subtitle: const Text('للتصنيف فقط — بيانات العميل تبقى متاحة لكل الفروع'),
-                value: _isBranchOnly,
-                onChanged: (v) => setState(() => _isBranchOnly = v),
-              ),
-              if (_error != null) ...[
-                const SizedBox(height: 8),
-                Text(_error!, style: AppTextStyles.bodyMd(color: AppColors.danger)),
-              ],
-            ],
+            ),
           ),
         ),
       ),
@@ -546,32 +552,37 @@ class _WalletAdjustmentDialogState extends State<_WalletAdjustmentDialog> {
         key: _formKey,
         child: SizedBox(
           width: 340,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(
-                'الرصيد الحالي: ${NumberFormat('#,##0.00', 'en').format(balance)}',
-                style: AppTextStyles.bodyMd(),
-              ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: _amountController,
-                keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
-                decoration: const InputDecoration(
-                  labelText: 'الفرق (+ للشحن، - للخصم)',
-                  hintText: 'مثال: 50 أو -20',
+          child: SingleChildScrollView(
+            // بلا تمرير يفيض الحوار على أي شاشة أقصر من محتواه،
+            // فيخرج زرّا الحفظ والإلغاء عن المتناول ويصبح الحوار
+            // مصيدة لا مخرج منها. أربعة حقول تكفي لذلك على الهاتف.
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  'الرصيد الحالي: ${NumberFormat('#,##0.00', 'en').format(balance)}',
+                  style: AppTextStyles.bodyMd(),
                 ),
-                validator: (v) {
-                  if (v == null || v.trim().isEmpty) return 'حقل إلزامي';
-                  return double.tryParse(v) == null ? 'قيمة غير صحيحة' : null;
-                },
-              ),
-              if (_error != null) ...[
-                const SizedBox(height: 8),
-                Text(_error!, style: AppTextStyles.bodyMd(color: AppColors.danger)),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: _amountController,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
+                  decoration: const InputDecoration(
+                    labelText: 'الفرق (+ للشحن، - للخصم)',
+                    hintText: 'مثال: 50 أو -20',
+                  ),
+                  validator: (v) {
+                    if (v == null || v.trim().isEmpty) return 'حقل إلزامي';
+                    return double.tryParse(v) == null ? 'قيمة غير صحيحة' : null;
+                  },
+                ),
+                if (_error != null) ...[
+                  const SizedBox(height: 8),
+                  Text(_error!, style: AppTextStyles.bodyMd(color: AppColors.danger)),
+                ],
               ],
-            ],
+            ),
           ),
         ),
       ),

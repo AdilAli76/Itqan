@@ -83,6 +83,7 @@ class _InvoicesScreenState extends ConsumerState<InvoicesScreen> {
           // Wrap لا Row: شريط الفلاتر يفيض على عرض الهاتف. الالتفاف يبقي
           // كل فلتر ظاهراً وقابلاً للنقر بدل قصّ آخره بصمت.
           Wrap(
+            spacing: 8,
             runSpacing: 8,
             crossAxisAlignment: WrapCrossAlignment.center,
             children: [

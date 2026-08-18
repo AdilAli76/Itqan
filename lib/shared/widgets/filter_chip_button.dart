@@ -33,8 +33,12 @@ class FilterChipButton extends StatelessWidget {
       onTap: onTap,
       borderRadius: BorderRadius.circular(8),
       child: Container(
+        // بلا alignment: Container مع alignment وبلا عرض محدَّد يتمدّد ليملأ
+        // قيود أبيه (سلوك موثَّق في Flutter). وداخل Wrap تكون تلك القيود
+        // عرض السطر كاملاً، فتصبح كل شريحة بعرض الشاشة وتنزل وحدها في سطر —
+        // وهو ما جعل فلاتر المشتريات والتقارير تظهر قائمة رأسية لا شرائح.
+        // الحشو وحده يوسّط النصّ ويُعطي العرض الطبيعي للمحتوى.
         constraints: const BoxConstraints(minHeight: minTouchHeight),
-        alignment: Alignment.center,
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
         decoration: BoxDecoration(
           color: selected ? color.withValues(alpha: 0.1) : Colors.transparent,

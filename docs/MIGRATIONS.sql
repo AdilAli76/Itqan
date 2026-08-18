@@ -243,25 +243,43 @@ GO
 --  ويعيد إرساله مع كل محاولة مزامنة، فتُنشأ الفاتورة مرّة واحدة مهما تكرّر
 --  الإرسال. الفهرس الفريد هو الضمانة النهائية ضد الازدواج عند التزامن.
 --
---  الفلتر يسمح بتعدّد NULL: الفواتير المُنشأة أونلاين مباشرةً بلا مفتاح.
+--  الاسم snake_case إلزاماً لا اختياراً: AppDbContext يستعمل
+--  UseSnakeCaseNamingConvention، فالخاصية ClientRequestId في الكيان تُترجَم
+--  إلى client_request_id. إنشاء العمود بصيغة PascalCase يجعل EF يبحث عن
+--  اسم غير موجود، فيفشل *كل* استعلام يمسّ جدول الفواتير — لا استعلام
+--  البيع دون اتصال وحده. أي أن خطأ حرف واحد هنا يُعطّل لوحة التحكم
+--  والفواتير والتقارير والبحث عن الأصناف معاً.
 -- ============================================================================
 IF NOT EXISTS (
     SELECT 1 FROM sys.columns
-    WHERE object_id = OBJECT_ID('dbo.invoices') AND name = 'ClientRequestId')
+    WHERE object_id = OBJECT_ID('dbo.invoices') AND name = 'client_request_id')
 BEGIN
-    ALTER TABLE dbo.invoices ADD ClientRequestId NVARCHAR(64) NULL;
-    PRINT N'أُضيف عمود ClientRequestId إلى invoices';
+    -- ترقية من نسخة سابقة أنشأت العمود بالصيغة الخاطئة
+    IF EXISTS (
+        SELECT 1 FROM sys.columns
+        WHERE object_id = OBJECT_ID('dbo.invoices') AND name = 'ClientRequestId')
+    BEGIN
+        IF EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'UX_invoices_ClientRequestId')
+            DROP INDEX UX_invoices_ClientRequestId ON dbo.invoices;
+        EXEC sp_rename 'dbo.invoices.ClientRequestId', 'client_request_id', 'COLUMN';
+        PRINT N'أُعيد تسمية ClientRequestId إلى client_request_id';
+    END
+    ELSE
+    BEGIN
+        ALTER TABLE dbo.invoices ADD client_request_id NVARCHAR(64) NULL;
+        PRINT N'أُضيف عمود client_request_id إلى invoices';
+    END
 END
 GO
 
 IF NOT EXISTS (
     SELECT 1 FROM sys.indexes
-    WHERE object_id = OBJECT_ID('dbo.invoices') AND name = 'UX_invoices_ClientRequestId')
+    WHERE object_id = OBJECT_ID('dbo.invoices') AND name = 'UX_invoices_client_request_id')
 BEGIN
-    CREATE UNIQUE INDEX UX_invoices_ClientRequestId
-        ON dbo.invoices (ClientRequestId)
-        WHERE ClientRequestId IS NOT NULL;
-    PRINT N'أُنشئ الفهرس الفريد UX_invoices_ClientRequestId';
+    CREATE UNIQUE INDEX UX_invoices_client_request_id
+        ON dbo.invoices (client_request_id)
+        WHERE client_request_id IS NOT NULL;
+    PRINT N'أُنشئ الفهرس الفريد UX_invoices_client_request_id';
 END
 GO
 

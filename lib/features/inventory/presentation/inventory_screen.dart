@@ -673,64 +673,69 @@ class _StockAdjustmentDialogState extends State<_StockAdjustmentDialog> {
         key: _formKey,
         child: SizedBox(
           width: 360,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(
-                'الكمية الحالية: ${NumberFormat('#,##0.###', 'en').format((widget.product['quantity'] as num?) ?? 0)}',
-                style: AppTextStyles.bodyMd(),
-              ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: _quantityController,
-                keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
-                decoration: const InputDecoration(
-                  labelText: 'الفرق (+ للإضافة، - للخصم)',
-                  hintText: 'مثال: 20 أو -5',
+          child: SingleChildScrollView(
+            // بلا تمرير يفيض الحوار على أي شاشة أقصر من محتواه،
+            // فيخرج زرّا الحفظ والإلغاء عن المتناول ويصبح الحوار
+            // مصيدة لا مخرج منها. أربعة حقول تكفي لذلك على الهاتف.
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  'الكمية الحالية: ${NumberFormat('#,##0.###', 'en').format((widget.product['quantity'] as num?) ?? 0)}',
+                  style: AppTextStyles.bodyMd(),
                 ),
-                validator: (v) {
-                  if (v == null || v.trim().isEmpty) return 'حقل إلزامي';
-                  return double.tryParse(v) == null ? 'قيمة غير صحيحة' : null;
-                },
-              ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: _batchController,
-                decoration: const InputDecoration(labelText: 'رقم الدفعة (اختياري)'),
-              ),
-              if (trackExpiry) ...[
                 const SizedBox(height: 12),
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        _expiryDate == null
-                            ? 'بدون تاريخ صلاحية'
-                            : 'ينتهي: ${DateFormat('yyyy-MM-dd').format(_expiryDate!)}',
-                        style: AppTextStyles.bodyMd(),
-                      ),
-                    ),
-                    TextButton(
-                      onPressed: () async {
-                        final picked = await showDatePicker(
-                          context: context,
-                          initialDate: DateTime.now().add(const Duration(days: 30)),
-                          firstDate: DateTime.now(),
-                          lastDate: DateTime.now().add(const Duration(days: 3650)),
-                        );
-                        if (picked != null) setState(() => _expiryDate = picked);
-                      },
-                      child: const Text('اختيار تاريخ'),
-                    ),
-                  ],
+                TextFormField(
+                  controller: _quantityController,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
+                  decoration: const InputDecoration(
+                    labelText: 'الفرق (+ للإضافة، - للخصم)',
+                    hintText: 'مثال: 20 أو -5',
+                  ),
+                  validator: (v) {
+                    if (v == null || v.trim().isEmpty) return 'حقل إلزامي';
+                    return double.tryParse(v) == null ? 'قيمة غير صحيحة' : null;
+                  },
                 ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: _batchController,
+                  decoration: const InputDecoration(labelText: 'رقم الدفعة (اختياري)'),
+                ),
+                if (trackExpiry) ...[
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          _expiryDate == null
+                              ? 'بدون تاريخ صلاحية'
+                              : 'ينتهي: ${DateFormat('yyyy-MM-dd').format(_expiryDate!)}',
+                          style: AppTextStyles.bodyMd(),
+                        ),
+                      ),
+                      TextButton(
+                        onPressed: () async {
+                          final picked = await showDatePicker(
+                            context: context,
+                            initialDate: DateTime.now().add(const Duration(days: 30)),
+                            firstDate: DateTime.now(),
+                            lastDate: DateTime.now().add(const Duration(days: 3650)),
+                          );
+                          if (picked != null) setState(() => _expiryDate = picked);
+                        },
+                        child: const Text('اختيار تاريخ'),
+                      ),
+                    ],
+                  ),
+                ],
+                if (_error != null) ...[
+                  const SizedBox(height: 8),
+                  Text(_error!, style: AppTextStyles.bodyMd(color: AppColors.danger)),
+                ],
               ],
-              if (_error != null) ...[
-                const SizedBox(height: 8),
-                Text(_error!, style: AppTextStyles.bodyMd(color: AppColors.danger)),
-              ],
-            ],
+            ),
           ),
         ),
       ),
@@ -899,37 +904,42 @@ class _SupplierFormDialogState extends State<_SupplierFormDialog> {
         key: _formKey,
         child: SizedBox(
           width: 360,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              TextFormField(
-                controller: _nameController,
-                decoration: const InputDecoration(labelText: 'اسم المورد'),
-                validator: (v) => (v == null || v.trim().isEmpty) ? 'حقل إلزامي' : null,
-              ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: _phoneController,
-                keyboardType: TextInputType.phone,
-                decoration: const InputDecoration(labelText: 'الهاتف'),
-              ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: _balanceController,
-                keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
-                decoration:
-                    const InputDecoration(labelText: 'الرصيد الحالي', helperText: 'موجب = نحن مدينون له'),
-                validator: (v) {
-                  if (v == null || v.trim().isEmpty) return 'حقل إلزامي';
-                  return double.tryParse(v) == null ? 'قيمة غير صحيحة' : null;
-                },
-              ),
-              if (_error != null) ...[
-                const SizedBox(height: 8),
-                Text(_error!, style: AppTextStyles.bodyMd(color: AppColors.danger)),
+          child: SingleChildScrollView(
+            // بلا تمرير يفيض الحوار على أي شاشة أقصر من محتواه،
+            // فيخرج زرّا الحفظ والإلغاء عن المتناول ويصبح الحوار
+            // مصيدة لا مخرج منها. أربعة حقول تكفي لذلك على الهاتف.
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                TextFormField(
+                  controller: _nameController,
+                  decoration: const InputDecoration(labelText: 'اسم المورد'),
+                  validator: (v) => (v == null || v.trim().isEmpty) ? 'حقل إلزامي' : null,
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: _phoneController,
+                  keyboardType: TextInputType.phone,
+                  decoration: const InputDecoration(labelText: 'الهاتف'),
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: _balanceController,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
+                  decoration:
+                      const InputDecoration(labelText: 'الرصيد الحالي', helperText: 'موجب = نحن مدينون له'),
+                  validator: (v) {
+                    if (v == null || v.trim().isEmpty) return 'حقل إلزامي';
+                    return double.tryParse(v) == null ? 'قيمة غير صحيحة' : null;
+                  },
+                ),
+                if (_error != null) ...[
+                  const SizedBox(height: 8),
+                  Text(_error!, style: AppTextStyles.bodyMd(color: AppColors.danger)),
+                ],
               ],
-            ],
+            ),
           ),
         ),
       ),
