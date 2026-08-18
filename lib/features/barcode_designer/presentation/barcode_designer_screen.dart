@@ -18,6 +18,7 @@ import '../../../core/theme/branding_provider.dart';
 import '../data/barcode_template_providers.dart';
 import '../../../shared/widgets/icon_action.dart';
 import '../../../shared/widgets/app_surface.dart';
+import '../../../shared/widgets/pagination_bar.dart';
 
 // ux-audit: ignore RT-06 — القيمة المالية الوحيدة هنا سعرٌ مطبوع على ملصق
 // 30×20 مم، وتنسيقه toStringAsFixed(2) هو الصحيح لا NumberFormat: فواصل
@@ -145,7 +146,7 @@ class _DesignerBodyState extends ConsumerState<_DesignerBody> {
     if (code.isEmpty) return;
     try {
       final response = await ApiClient.instance.dio.get('/products/inventory', queryParameters: {'search': code});
-      final results = List<Map<String, dynamic>>.from(response.data as List);
+      final results = PagedResult.fromJson(response.data as Map<String, dynamic>).items;
       final exact = results.where((p) => p['barcode'] == code || p['sku'] == code).toList();
       final match = exact.length == 1 ? exact.first : (results.length == 1 ? results.first : null);
       if (match != null) {

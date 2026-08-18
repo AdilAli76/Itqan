@@ -10,10 +10,14 @@ final posProductResultsProvider =
     FutureProvider.autoDispose<List<Map<String, dynamic>>>((ref) async {
   final search = ref.watch(posProductSearchProvider).trim();
   if (search.isEmpty) return [];
+  // بحث فوري لا تصفّح: عشرون مطابقة تملأ القائمة المنسدلة، وما بعدها
+  // يُضيّقه الكاشير بحرف إضافي لا بصفحة تالية.
   final response = await ApiClient.instance.dio.get('/products/inventory', queryParameters: {
     'search': search,
+    'page': 1,
+    'pageSize': 20,
   });
-  return List<Map<String, dynamic>>.from(response.data as List);
+  return PagedResult.fromJson(response.data as Map<String, dynamic>).items;
 });
 
 final posCustomerSearchProvider = StateProvider.autoDispose<String>((ref) => '');

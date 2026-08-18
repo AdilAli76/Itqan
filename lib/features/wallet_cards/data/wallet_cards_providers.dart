@@ -33,8 +33,11 @@ final customersWithoutCardProvider =
     'pageSize': 200,
   });
   final customers = PagedResult.fromJson(customersResponse.data as Map<String, dynamic>).items;
-  final cardsResponse = await ApiClient.instance.dio.get('/wallet-cards');
-  final carded = List<Map<String, dynamic>>.from(cardsResponse.data as List)
+  final cardsResponse = await ApiClient.instance.dio.get('/wallet-cards', queryParameters: {
+    'page': 1,
+    'pageSize': 200,
+  });
+  final carded = PagedResult.fromJson(cardsResponse.data as Map<String, dynamic>).items
       .map((c) => c['customerId'] as String)
       .toSet();
   return customers.where((c) => !carded.contains(c['id'] as String)).toList();

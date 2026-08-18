@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/network/api_client.dart';
+import '../../../shared/widgets/pagination_bar.dart';
 
 final barcodeTemplateProvider = FutureProvider.autoDispose<Map<String, dynamic>>((ref) async {
   final response = await ApiClient.instance.dio.get('/organizations/me/barcode-template');
@@ -14,6 +15,8 @@ final barcodeProductResultsProvider =
   if (search.isEmpty) return [];
   final response = await ApiClient.instance.dio.get('/products/inventory', queryParameters: {
     'search': search,
+    'page': 1,
+    'pageSize': 20,
   });
-  return List<Map<String, dynamic>>.from(response.data as List);
+  return PagedResult.fromJson(response.data as Map<String, dynamic>).items;
 });

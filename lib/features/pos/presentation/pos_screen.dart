@@ -22,6 +22,7 @@ import 'cash_payment_dialog.dart';
 import '../../../shared/widgets/icon_action.dart';
 import '../../../core/network/offline_queue.dart';
 import '../../../shared/widgets/app_surface.dart';
+import '../../../shared/widgets/pagination_bar.dart';
 
 class _CartLine {
   _CartLine({
@@ -107,7 +108,7 @@ class _PosScreenState extends ConsumerState<PosScreen> {
       final response = await ApiClient.instance.dio.get('/products/inventory', queryParameters: {
         'search': code,
       });
-      final results = List<Map<String, dynamic>>.from(response.data as List);
+      final results = PagedResult.fromJson(response.data as Map<String, dynamic>).items;
       final exact = results.where((p) => p['barcode'] == code || p['sku'] == code).toList();
       final match = exact.length == 1 ? exact.first : (results.length == 1 ? results.first : null);
       if (match != null) {

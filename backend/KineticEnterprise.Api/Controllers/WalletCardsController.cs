@@ -56,7 +56,17 @@ public class WalletCardsController : ControllerBase
         pageSize = Math.Clamp(pageSize, 1, 200);
 
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
-        var cardQuery = _db.CustomerCardIndexes.AsQueryable();
+
+        // فلترة المنظمة صراحةً قبل العدّ والتقطيع.
+        //
+        // customer_card_index من الجداول القليلة التي لا تحملها سياسة عزل
+        // (راجع DATABASE_SCHEMA_SQLSERVER.sql)، فالفلترة هنا مسؤولية
+        // الـController لا قاعدة البيانات. وكان الترشيح يقع بعد التقطيع —
+        // عبر مطابقة العملاء المرئيين أدناه — فيُنتج خطأين معاً: عدّ كلي
+        // يشمل بطاقات منظمات أخرى، وصفحة تعود ناقصة لأن جزءاً من الخمسين
+        // المقطوعة يسقط في الترشيح اللاحق.
+        var orgId = Guid.Parse(User.FindFirstValue("organization_id")!);
+        var cardQuery = _db.CustomerCardIndexes.Where(c => c.OrganizationId == orgId);
         if (!string.IsNullOrWhiteSpace(state)) cardQuery = cardQuery.Where(c => c.State == state);
 
         // البحث يمسّ اسم العميل وهاتفه أيضاً، لا رمز البطاقة وحده، فيحتاج

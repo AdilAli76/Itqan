@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import '../../../core/network/api_client.dart';
+import '../../../shared/widgets/pagination_bar.dart';
 
 /// هل يُسمح ببيع الأصناف مفتوحة القيمة في نقطة البيع؟
 ///
@@ -25,8 +26,13 @@ final posAllowOpenProductProvider = FutureProvider.autoDispose<bool>((ref) async
 /// ليس سطراً بلا صنف: هو صنف في الكتالوج لا يتبع المخزون وتُكتب قيمته عند
 /// البيع. لذلك تُعرَض قائمة هذه الأصناف بدل زر واحد مجهول المرجع.
 final posOpenProductsProvider = FutureProvider.autoDispose<List<Map<String, dynamic>>>((ref) async {
-  final response = await ApiClient.instance.dio.get('/products/inventory');
-  final all = List<Map<String, dynamic>>.from(response.data as List);
+  // pageSize الأقصى: هذه أصناف الخدمات (بلا تتبّع مخزون) وهي قلّة دائماً،
+  // لكن الترشيح يقع في الواجهة فيلزم جلب ما يكفي للعثور عليها.
+  final response = await ApiClient.instance.dio.get('/products/inventory', queryParameters: {
+    'page': 1,
+    'pageSize': 200,
+  });
+  final all = PagedResult.fromJson(response.data as Map<String, dynamic>).items;
   return all.where((p) => (p['tracksStock'] as bool? ?? true) == false).toList();
 });
 

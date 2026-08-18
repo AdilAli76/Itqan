@@ -16,6 +16,7 @@ import '../../../shared/widgets/filter_chip_button.dart';
 import '../../../shared/widgets/skeleton.dart';
 import '../../../shared/widgets/icon_action.dart';
 import '../../../shared/widgets/app_surface.dart';
+import '../../../shared/widgets/pagination_bar.dart';
 
 const _statusLabels = {
   'draft': 'مسودة',
@@ -500,7 +501,7 @@ class _CreatePurchaseOrderDialogState extends ConsumerState<_CreatePurchaseOrder
     try {
       final response =
           await ApiClient.instance.dio.get('/products/inventory', queryParameters: {'search': code});
-      final results = List<Map<String, dynamic>>.from(response.data as List);
+      final results = PagedResult.fromJson(response.data as Map<String, dynamic>).items;
       final exact = results.where((p) => p['barcode'] == code || p['sku'] == code).toList();
       final match = exact.length == 1 ? exact.first : (results.length == 1 ? results.first : null);
       if (match != null) {
