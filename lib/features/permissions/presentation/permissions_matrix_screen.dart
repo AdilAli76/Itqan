@@ -9,6 +9,7 @@ import '../../../core/theme/app_text_styles.dart';
 import '../../../shared/widgets/section_card.dart';
 import '../data/permissions_providers.dart';
 import '../../../core/auth/permissions.dart';
+import '../../../shared/widgets/app_surface.dart';
 
 String _dioErrorMessage(Object error, String fallback) {
   if (error is DioException) {
@@ -81,13 +82,8 @@ class _PermissionsMatrixScreenState extends ConsumerState<PermissionsMatrixScree
       body: _isSuperAdmin == null
           ? const Padding(padding: EdgeInsets.all(48), child: Center(child: CircularProgressIndicator()))
           : _isSuperAdmin == false
-              ? Container(
-                  padding: const EdgeInsets.all(32),
-                  decoration: BoxDecoration(
-                    color: AppColors.surface,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: AppColors.border),
-                  ),
+              ? AppSurface(
+      padding: const EdgeInsets.all(32),
                   child: Text('هذه الصفحة مخصَّصة للمدير العام فقط.', style: AppTextStyles.bodyMd(color: AppColors.danger)),
                 )
               : _MatrixBody(

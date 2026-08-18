@@ -21,6 +21,7 @@ import '../data/pos_settings_provider.dart';
 import 'cash_payment_dialog.dart';
 import '../../../shared/widgets/icon_action.dart';
 import '../../../core/network/offline_queue.dart';
+import '../../../shared/widgets/app_surface.dart';
 
 class _CartLine {
   _CartLine({
@@ -698,13 +699,8 @@ class _PosScreenState extends ConsumerState<PosScreen> {
       value == value.truncateToDouble() ? value.toStringAsFixed(0) : value.toString();
 
   Widget _cartBuilder(BuildContext context, bool touch) {
-    return Container(
+    return AppSurface(
       padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppColors.border),
-      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -855,13 +851,8 @@ class _ProductTile extends StatelessWidget {
     return InkWell(
       onTap: sellable ? onTap : null,
       borderRadius: BorderRadius.circular(12),
-      child: Container(
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: AppColors.surface,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: AppColors.border),
-        ),
+      child: AppSurface(
+      padding: const EdgeInsets.all(12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [

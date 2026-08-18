@@ -14,6 +14,7 @@ import '../data/inventory_providers.dart';
 import 'import_products_dialog.dart';
 import '../../../shared/widgets/skeleton.dart';
 import '../../../shared/widgets/pagination_bar.dart';
+import '../../../shared/widgets/app_surface.dart';
 
 /// شاشة "المخزون والموردين" — تجمع الموديولين لأن هذا نمط الشاشة الوحيد
 /// المسجَّل في القائمة الجانبية (راجع app_sidebar.dart)، بدل تقسيمهما إلى
@@ -324,13 +325,8 @@ class _ErrorBox extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
+    return AppSurface(
       padding: const EdgeInsets.all(32),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppColors.border),
-      ),
       child: Column(
         children: [
           Text(message, style: AppTextStyles.bodyMd(color: AppColors.danger)),

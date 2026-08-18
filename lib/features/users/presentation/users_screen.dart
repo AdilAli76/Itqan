@@ -12,6 +12,7 @@ import '../../../shared/widgets/data_table_widget.dart';
 import '../../branches/data/branches_providers.dart';
 import '../data/users_providers.dart';
 import '../../../shared/widgets/skeleton.dart';
+import '../../../shared/widgets/app_surface.dart';
 
 // ux-audit: ignore UX-03 — مستخدمو المنظمة عشرات لا آلاف، وعددهم مقيَّد
 // بالتراخيص أصلاً (راجع شاشة الترخيص). البحث الموجود يكفي.
@@ -136,13 +137,8 @@ class _ErrorBox extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
+    return AppSurface(
       padding: const EdgeInsets.all(32),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppColors.border),
-      ),
       child: Column(
         children: [
           Text(message, style: AppTextStyles.bodyMd(color: AppColors.danger)),

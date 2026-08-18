@@ -17,6 +17,7 @@ import '../../../core/theme/app_text_styles.dart';
 import '../../../core/theme/branding_provider.dart';
 import '../data/barcode_template_providers.dart';
 import '../../../shared/widgets/icon_action.dart';
+import '../../../shared/widgets/app_surface.dart';
 
 // ux-audit: ignore RT-06 — القيمة المالية الوحيدة هنا سعرٌ مطبوع على ملصق
 // 30×20 مم، وتنسيقه toStringAsFixed(2) هو الصحيح لا NumberFormat: فواصل
@@ -69,13 +70,8 @@ class _BarcodeDesignerScreenState extends ConsumerState<BarcodeDesignerScreen> {
                 padding: EdgeInsets.all(48),
                 child: Center(child: CircularProgressIndicator()),
               ),
-              error: (err, _) => Container(
-                padding: const EdgeInsets.all(32),
-                decoration: BoxDecoration(
-                  color: AppColors.surface,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: AppColors.border),
-                ),
+              error: (err, _) => AppSurface(
+      padding: const EdgeInsets.all(32),
                 child: Column(
                   children: [
                     Text('تعذّر تحميل إعداد الملصق', style: AppTextStyles.bodyMd(color: AppColors.danger)),
@@ -194,13 +190,7 @@ class _DesignerBodyState extends ConsumerState<_DesignerBody> {
     final branding = ref.watch(brandingProvider).valueOrNull;
     final currencySymbol = branding?.currencySymbol ?? 'د.ل';
 
-    final settingsPanel = Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppColors.border),
-      ),
+    final settingsPanel = AppSurface(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -274,13 +264,7 @@ class _DesignerBodyState extends ConsumerState<_DesignerBody> {
       ),
     );
 
-    final printPanel = Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppColors.border),
-      ),
+    final printPanel = AppSurface(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [

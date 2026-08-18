@@ -15,6 +15,7 @@ import '../data/customers_providers.dart';
 import '../../../shared/widgets/skeleton.dart';
 import '../../../shared/widgets/pagination_bar.dart';
 import '../../../core/auth/permissions.dart';
+import '../../../shared/widgets/app_surface.dart';
 
 class CustomersScreen extends ConsumerStatefulWidget {
   const CustomersScreen({super.key});
@@ -227,13 +228,8 @@ class _ErrorBox extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
+    return AppSurface(
       padding: const EdgeInsets.all(32),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppColors.border),
-      ),
       child: Column(
         children: [
           Text(message, style: AppTextStyles.bodyMd(color: AppColors.danger)),

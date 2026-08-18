@@ -15,6 +15,7 @@ import '../data/purchase_orders_providers.dart';
 import '../../../shared/widgets/filter_chip_button.dart';
 import '../../../shared/widgets/skeleton.dart';
 import '../../../shared/widgets/icon_action.dart';
+import '../../../shared/widgets/app_surface.dart';
 
 const _statusLabels = {
   'draft': 'مسودة',
@@ -113,13 +114,8 @@ class PurchaseOrdersScreen extends ConsumerWidget {
           const SizedBox(height: 16),
           ordersAsync.when(
             loading: () => const TableSkeleton(),
-            error: (err, _) => Container(
-              padding: const EdgeInsets.all(32),
-              decoration: BoxDecoration(
-                color: AppColors.surface,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: AppColors.border),
-              ),
+            error: (err, _) => AppSurface(
+      padding: const EdgeInsets.all(32),
               child: Column(
                 children: [
                   Text('تعذّر تحميل أوامر الشراء', style: AppTextStyles.bodyMd(color: AppColors.danger)),

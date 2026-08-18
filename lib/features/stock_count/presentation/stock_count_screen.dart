@@ -12,6 +12,7 @@ import '../data/stock_count_providers.dart';
 import '../../../shared/widgets/filter_chip_button.dart';
 import '../../../shared/widgets/skeleton.dart';
 import '../../../core/auth/permissions.dart';
+import '../../../shared/widgets/app_surface.dart';
 
 // ux-audit: ignore UX-03 — أسطر جلسة جرد واحدة، محدودة بما يجرده الموظف
 // فعلياً في الجلسة، ويجب أن تبقى كلها مرئية أمامه دفعةً واحدة: تقسيمها
@@ -104,13 +105,8 @@ class StockCountScreen extends ConsumerWidget {
           const SizedBox(height: 16),
           countsAsync.when(
             loading: () => const TableSkeleton(),
-            error: (err, _) => Container(
-              padding: const EdgeInsets.all(32),
-              decoration: BoxDecoration(
-                color: AppColors.surface,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: AppColors.border),
-              ),
+            error: (err, _) => AppSurface(
+      padding: const EdgeInsets.all(32),
               child: Column(
                 children: [
                   Text('تعذّر تحميل عمليات الجرد', style: AppTextStyles.bodyMd(color: AppColors.danger)),

@@ -11,6 +11,7 @@ import '../../../shared/widgets/data_table_widget.dart';
 import '../../../shared/widgets/section_card.dart';
 import '../data/branches_providers.dart';
 import '../../../shared/widgets/skeleton.dart';
+import '../../../shared/widgets/app_surface.dart';
 
 // ux-audit: ignore UX-03 — قائمة فروع المنظمة محدودة بطبيعة العمل (وحدات
 // إلى عشرات، لا آلاف). الترقيم هنا يضيف شريطاً لا يظهر أبداً وحالة صفحة
@@ -107,13 +108,8 @@ class _ErrorBox extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
+    return AppSurface(
       padding: const EdgeInsets.all(32),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppColors.border),
-      ),
       child: Column(
         children: [
           Text(message, style: AppTextStyles.bodyMd(color: AppColors.danger)),

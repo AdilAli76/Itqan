@@ -36,5 +36,12 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
-  assets:
-    - assets/icons/
+  # لا أصول مجمَّعة حالياً.
+  #
+  # كان هنا إعلان assets/icons/ لمجلد غير موجود ولا يشير إليه أي كود، فكان
+  # Flutter يطبع خطأً مع كل أمر build وtest ("unable to find directory
+  # entry"). والمجلد لم يكن متتبَّعاً في Git أصلاً — Git لا يحفظ المجلدات
+  # الفارغة — فلم يكن موجوداً لدى أي شخص يستنسخ المستودع.
+  #
+  # عند تضمين خط IBM Plex Sans Arabic لاحقاً (بدل تنزيله من Google وقت
+  # التشغيل) يُضاف هنا قسم fonts: لا assets:.

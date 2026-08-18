@@ -54,23 +54,50 @@ class AdaptiveScaffold extends ConsumerWidget {
     final isDesktop = Breakpoints.isDesktop(context);
     final insideShell = ShellScope.isActive(context);
 
+    // الشريط يُرسَم على كل المقاسات عمداً (راجع تعليق insideShell أدناه)،
+    // فيجب أن يضيق لا أن يفيض. عنوان مثل «إدارة المخزون والموردين» مع زرَّي
+    // إجراء يتجاوز عرض الهاتف بنحو سبعين بكسل — وهو ما كان يكسر التخطيط.
+    //
+    // ترتيب التنازل مقصود: العنوان يتقلّص أولاً لأنه معروف من التبويب
+    // النشط ومن محتوى الشاشة، ثم تتمرّر الأزرار أفقياً إن ضاق العرض أكثر —
+    // فلا يختفي زر إجراء أبداً، وهو الشرط الذي بُني عليه هذا الشريط أصلاً.
     final header = Container(
       height: 64,
-      padding: const EdgeInsets.symmetric(horizontal: 24),
+      padding: EdgeInsets.symmetric(horizontal: isDesktop ? 24 : 12),
       decoration: BoxDecoration(
         color: AppColors.surface,
         border: Border(bottom: BorderSide(color: AppColors.border)),
       ),
       child: Row(
         children: [
-          Text(title, style: Theme.of(context).textTheme.headlineMedium),
+          Flexible(
+            child: Text(
+              title,
+              style: Theme.of(context).textTheme.headlineMedium,
+              overflow: TextOverflow.ellipsis,
+              maxLines: 1,
+            ),
+          ),
           const SizedBox(width: 12),
           // يظهر فقط عند انقطاع الاتصال اللحظي أو إعادته — ملاصقاً للعنوان
           // لا في طرف الشريط، لأنه تحذير عن صحّة البيانات المعروضة نفسها.
           const RealtimeIndicator(),
           const OfflineQueueIndicator(),
           const Spacer(),
-          if (actions != null) ...actions!,
+          if (actions != null)
+            Flexible(
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                // reverse: يبدأ التمرير من نهاية الصف، أي أن آخر زر —
+                // وهو الإجراء الأساسي دائماً («إضافة صنف») — يبقى ظاهراً
+                // بلا تمرير، ويُخفى الثانوي أولاً.
+                reverse: true,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: actions!.reversed.toList(),
+                ),
+              ),
+            ),
           if (insideShell && isDesktop) ...[
             if (actions != null && actions!.isNotEmpty) ...[
               const SizedBox(width: 16),
@@ -135,10 +162,11 @@ class AdaptiveScaffold extends ConsumerWidget {
       backgroundColor: AppColors.paper,
       appBar: isDesktop
           ? null
-          : AppBar(
-              title: Text(title),
-              actions: actions,
-            ),
+          // بلا actions هنا: أزرار الإجراءات في هذا النظام أزرار بنصوص
+          // كاملة («استيراد من ملف»، «إضافة صنف») لا أيقونات مجرّدة، وصفّ
+          // AppBar لا يتّسع لها مع العنوان على عرض هاتف — فتفيض. تُرسَم
+          // أسفله في header الذي يتقلّص ويتمرّر بدل أن ينكسر.
+          : AppBar(title: Text(title, overflow: TextOverflow.ellipsis)),
       drawer: isDesktop ? null : Drawer(child: AppSidebar(activeRoute: activeRoute)),
       floatingActionButton: floatingActionButton,
       body: useSidebar
@@ -165,9 +193,20 @@ class AdaptiveScaffold extends ConsumerWidget {
                     content,
                   ],
                 )
-              : SingleChildScrollView(
-                  padding: const EdgeInsets.all(16),
-                  child: body,
+              // المسار الضيّق: الشريط العلوي يحمل العنوان والدرج، وheader
+              // أسفله يحمل الإجراءات. كانت الإجراءات تُفقَد هنا كلياً لأن
+              // body وحده كان يُعرض.
+              : Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    if (actions != null && actions!.isNotEmpty) header,
+                    Expanded(
+                      child: SingleChildScrollView(
+                        padding: const EdgeInsets.all(16),
+                        child: body,
+                      ),
+                    ),
+                  ],
                 ),
     );
   }

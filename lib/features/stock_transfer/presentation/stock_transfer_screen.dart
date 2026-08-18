@@ -15,6 +15,7 @@ import '../../../shared/widgets/filter_chip_button.dart';
 import '../../../shared/widgets/skeleton.dart';
 import '../../../shared/widgets/icon_action.dart';
 import '../../../core/auth/permissions.dart';
+import '../../../shared/widgets/app_surface.dart';
 
 const _statusLabels = {
   'pending': 'معلّق',
@@ -114,13 +115,8 @@ class StockTransferScreen extends ConsumerWidget {
           const SizedBox(height: 16),
           transfersAsync.when(
             loading: () => const TableSkeleton(),
-            error: (err, _) => Container(
-              padding: const EdgeInsets.all(32),
-              decoration: BoxDecoration(
-                color: AppColors.surface,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: AppColors.border),
-              ),
+            error: (err, _) => AppSurface(
+      padding: const EdgeInsets.all(32),
               child: Column(
                 children: [
                   Text('تعذّر تحميل تحويلات المخزون', style: AppTextStyles.bodyMd(color: AppColors.danger)),
