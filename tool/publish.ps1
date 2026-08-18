@@ -35,7 +35,10 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$ApiUrl,
     [string]$Output,
-    [switch]$SkipWeb
+    [switch]$SkipWeb,
+    # للتجربة الأولى على عنوان IP قبل توفّر النطاق والشهادة. لا يُستعمل
+    # لتسليم حقيقي: التوكنات وكلمات المرور تمرّ نصاً واضحاً على الشبكة.
+    [switch]$AllowInsecure
 )
 
 $ErrorActionPreference = 'Stop'
@@ -49,8 +52,18 @@ function Step($n, $t) { Write-Host "`n[$n] $t" -ForegroundColor Cyan }
 function Ok($t) { Write-Host "    $t" -ForegroundColor Green }
 
 if ($ApiUrl -notmatch '^https://') {
-    # HTTP يعني توكن JWT وكلمات مرور تمرّ بنصّ ظاهر على الشبكة.
-    throw "ApiUrl يجب أن يبدأ بـ https:// — لا تشغّل نظاماً مالياً على HTTP."
+    if (-not $AllowInsecure) {
+        # HTTP يعني توكن JWT وكلمات مرور تمرّ بنصّ ظاهر على الشبكة.
+        throw "ApiUrl يجب أن يبدأ بـ https:// — أو مرّر -AllowInsecure لتجربة أولى على IP."
+    }
+    Write-Host ''
+    Write-Host '  ############################################################' -ForegroundColor Red
+    Write-Host '  #  حزمة غير آمنة — للتجربة وحدها                          #' -ForegroundColor Red
+    Write-Host '  #  HTTP يعني أن توكن الدخول وكلمات المرور تمرّ نصاً        #' -ForegroundColor Red
+    Write-Host '  #  واضحاً على الشبكة. لا تُسلَّم لعميل ولا تُترك تعمل.      #' -ForegroundColor Red
+    Write-Host '  #  وتطبيق أندرويد لن يتصل بها إطلاقاً (سياسة الشبكة).      #' -ForegroundColor Red
+    Write-Host '  ############################################################' -ForegroundColor Red
+    Write-Host ''
 }
 if ($ApiUrl -notmatch '/api/?$') {
     throw "ApiUrl يجب أن ينتهي بـ /api — هذا ما يتوقّعه ApiClient.baseUrl."
