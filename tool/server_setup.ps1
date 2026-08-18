@@ -288,6 +288,44 @@ if ($Stage -eq 'iis') {
     Set-ItemProperty "IIS:\AppPools\$poolName" -Name startMode -Value 'AlwaysRunning'
     Ok "مجمع $poolName جاهز (No Managed Code، تشغيل دائم)"
 
+    # منح هوية المجمّع دخولاً على قاعدة البيانات.
+    #
+    # هذه أكثر عقبة تُربك أول نشر: التطبيق يعمل بهوية IIS APPPOOL\KineticApi
+    # لا بحساب المسؤول الذي شغّل المُثبِّت. فسلسلة اتصال بمصادقة ويندوز تبدو
+    # صحيحة تماماً وتفشل بـ"Login failed for user 'IIS APPPOOL\KineticApi'" —
+    # رسالة لا تدلّ على أن الحلّ إنشاء تسجيل دخول لا تصحيح السلسلة.
+    #
+    # الحساب افتراضي (Virtual Account) ينشئه ويندوز مع المجمّع، فلا كلمة مرور
+    # له ولا تنتهي صلاحيتها — وهذا أأمن من تضمين كلمة مرور SQL في ملف نصّي.
+    $poolIdentity = "IIS APPPOOL\$poolName"
+    try {
+        $conn = New-Object System.Data.SqlClient.SqlConnection(
+            "Server=$SqlInstance;Database=master;Integrated Security=true;TrustServerCertificate=true")
+        $conn.Open()
+        $sql = @"
+IF NOT EXISTS (SELECT 1 FROM sys.server_principals WHERE name = N'$poolIdentity')
+    CREATE LOGIN [$poolIdentity] FROM WINDOWS;
+USE [$Database];
+IF NOT EXISTS (SELECT 1 FROM sys.database_principals WHERE name = N'$poolIdentity')
+    CREATE USER [$poolIdentity] FOR LOGIN [$poolIdentity];
+ALTER ROLE db_datareader ADD MEMBER [$poolIdentity];
+ALTER ROLE db_datawriter ADD MEMBER [$poolIdentity];
+GRANT EXECUTE TO [$poolIdentity];
+"@
+        foreach ($batch in ($sql -split "(?im)^\s*GO\s*$")) {
+            if ([string]::IsNullOrWhiteSpace($batch)) { continue }
+            $cmd = $conn.CreateCommand()
+            $cmd.CommandText = $batch
+            [void]$cmd.ExecuteNonQuery()
+        }
+        $conn.Close()
+        Ok "مُنح $poolIdentity قراءةً وكتابةً على $Database"
+        Write-Host '        (بلا db_owner — الحدّ الأدنى الذي يحتاجه التطبيق)' -ForegroundColor Gray
+    } catch {
+        Miss "تعذّر منح هوية المجمّع دخولاً: $($_.Exception.Message.Split([char]10)[0])"
+        Write-Host '        نفّذه يدوياً في SSMS، وإلا فشل الاتصال بـ Login failed.' -ForegroundColor Gray
+    }
+
     Head 'المواقع'
     # عنوان IP لا يصلح host header: الترويسة تطابق اسم المضيف في الطلب،
     # والطلب إلى IP لا يحمل اسماً. تركها فارغة يجعل الموقع يستقبل كل ما
