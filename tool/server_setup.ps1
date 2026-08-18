@@ -293,6 +293,26 @@ if ($Stage -eq 'iis') {
     # والطلب إلى IP لا يحمل اسماً. تركها فارغة يجعل الموقع يستقبل كل ما
     # يصل المنفذ — وهو المطلوب قبل توفّر النطاق.
     $isIp = $Domain -match '^\d{1,3}(\.\d{1,3}){3}$'
+
+    # Default Web Site يحجز المنفذ 80 بلا ترويسة مضيف على كل العناوين، وهو
+    # ارتباط حصري: أي موقع ثانٍ بالارتباط نفسه يفشل إنشاؤه. IIS ينشئه دائماً
+    # عند التثبيت، فالتعارض هو الحالة الافتراضية لا الاستثناء — وبلا معالجته
+    # تفشل هذه المرحلة على كل خادم جديد.
+    #
+    # يُوقَف ولا يُحذف: قد يخدم شيئاً آخر على الخادم، وإيقافه قابل للتراجع
+    # بأمر واحد بينما الحذف لا.
+    $default = Get-Website -Name 'Default Web Site' -ErrorAction SilentlyContinue
+    if ($default -and $default.State -eq 'Started') {
+        $conflict = $default.Bindings.Collection | Where-Object {
+            $_.protocol -eq 'http' -and $_.bindingInformation -match ':80:$'
+        }
+        if ($conflict) {
+            Stop-Website -Name 'Default Web Site'
+            Warn 'أُوقف Default Web Site — كان يحجز المنفذ 80 بلا ترويسة مضيف.'
+            Warn 'لإعادته لاحقاً: Start-Website -Name "Default Web Site"'
+        }
+    }
+
     if (-not (Get-Website -Name 'KineticWeb' -ErrorAction SilentlyContinue)) {
         if ($isIp) {
             New-Website -Name 'KineticWeb' -PhysicalPath $webPath -Port 80 | Out-Null
