@@ -36,7 +36,7 @@
 #>
 [CmdletBinding()]
 param(
-    [ValidateSet('check', 'db', 'iis', 'verify')]
+    [ValidateSet('check', 'db', 'iis', 'https', 'verify')]
     [string]$Stage = 'check',
     [string]$Domain,
     [string]$PackagePath = 'C:\kinetic',
@@ -421,6 +421,84 @@ GRANT EXECUTE TO [$poolIdentity];
     Write-Host '       يُصدر شهادة Let''s Encrypt ويربطها بالمنفذ 443 ويجدّدها تلقائياً.' -ForegroundColor Gray
     Write-Host '    3) ثم:  .\server_setup.ps1 -Stage verify -Domain ' -NoNewline -ForegroundColor Gray
     Write-Host $Domain -ForegroundColor Gray
+}
+
+# ══════════════════════════════ https ═══════════════════════════════════
+if ($Stage -eq 'https') {
+    if (-not $Domain) { throw 'مرّر -Domain (نطاقاً حقيقياً، لا عنوان IP)' }
+    if ($Domain -match '^\d{1,3}(\.\d{1,3}){3}$') {
+        throw 'الشهادة تُصدَر لنطاق لا لعنوان IP. سلطات الشهادات المجانية لا تُصدر لعناوين IP إطلاقاً.'
+    }
+    if (-not (Test-Admin)) { throw 'شغّل PowerShell كمسؤول' }
+    Import-Module WebAdministration
+
+    Head 'الارتباطات الحالية'
+    $site = Get-Website -Name 'Kinetic' -ErrorAction SilentlyContinue
+    if (-not $site) { throw 'موقع Kinetic غير موجود — نفّذ -Stage iis أولاً' }
+    foreach ($b in $site.Bindings.Collection) {
+        Ok "$($b.protocol) $($b.bindingInformation)"
+    }
+
+    Head 'ترويسة المضيف'
+    # الشهادة تُصدَر للنطاق، والتحقّق يمرّ عبر طلب HTTP إلى ذلك النطاق —
+    # فالموقع يجب أن يستقبله باسمه لا كعنوان مجرّد.
+    $hasHost = $site.Bindings.Collection | Where-Object { $_.bindingInformation -like "*:80:$Domain" }
+    if (-not $hasHost) {
+        New-WebBinding -Name 'Kinetic' -Protocol http -Port 80 -HostHeader $Domain
+        Ok "أُضيف ارتباط http على $Domain"
+    } else {
+        Ok "ارتباط $Domain موجود"
+    }
+
+    Head 'الشهادة'
+    $cert = Get-ChildItem Cert:\LocalMachine\My -ErrorAction SilentlyContinue |
+            Where-Object { $_.Subject -like "*$Domain*" -or $_.DnsNameList -contains $Domain }
+    if ($cert) {
+        Ok "شهادة موجودة تنتهي $($cert[0].NotAfter.ToString('yyyy-MM-dd'))"
+        $https = $site.Bindings.Collection | Where-Object { $_.protocol -eq 'https' }
+        if (-not $https) {
+            New-WebBinding -Name 'Kinetic' -Protocol https -Port 443 -HostHeader $Domain -SslFlags 1
+            $binding = Get-WebBinding -Name 'Kinetic' -Protocol https
+            $binding.AddSslCertificate($cert[0].GetCertHashString(), 'My')
+            Ok 'أُضيف ارتباط https على 443'
+        } else {
+            Ok 'ارتباط https موجود'
+        }
+    } else {
+        Miss "لا شهادة لـ$Domain في المخزن"
+        Write-Host ''
+        Write-Host '  أصدرها بـ win-acme (مجانية، وتُجدَّد تلقائياً):' -ForegroundColor Yellow
+        Write-Host '    1) تأكّد أن سجل DNS من نوع A يشير إلى IP هذا الخادم' -ForegroundColor Gray
+        Write-Host '    2) افتح المنفذين 80 و443 (ويندوز + جدار المزوّد)' -ForegroundColor Gray
+        Write-Host '    3) نزّل https://www.win-acme.com ثم:' -ForegroundColor Gray
+        Write-Host '         .\wacs.exe --target iis --siteid ' -NoNewline -ForegroundColor White
+        Write-Host "$($site.Id)" -ForegroundColor White
+        Write-Host '    4) أعد تشغيل هذه المرحلة' -ForegroundColor Gray
+        Write-Host ''
+        Write-Host '  المنفذ 80 يبقى مفتوحاً بعد الشهادة: تجديد Let''s Encrypt' -ForegroundColor Gray
+        Write-Host '  يتحقّق عبره كل ستين يوماً. إغلاقه يوقف التجديد بصمت.' -ForegroundColor Gray
+        return
+    }
+
+    Head 'تفعيل التحويل إلى HTTPS'
+    $settings = Join-Path (Join-Path $PackagePath 'backend') 'appsettings.Production.json'
+    if (Test-Path $settings) {
+        $json = Get-Content $settings -Raw | ConvertFrom-Json
+        if (-not $json.PSObject.Properties.Name.Contains('UseHttpsRedirection') -or
+            -not $json.UseHttpsRedirection) {
+            $json | Add-Member -NotePropertyName 'UseHttpsRedirection' -NotePropertyValue $true -Force
+            $json | ConvertTo-Json -Depth 6 | Set-Content $settings -Encoding UTF8
+            Ok 'فُعِّل UseHttpsRedirection — أعد تشغيل المجمّع ليسري'
+            Restart-WebAppPool -Name 'KineticApi' -ErrorAction SilentlyContinue
+        } else {
+            Ok 'UseHttpsRedirection مفعَّل'
+        }
+    }
+
+    Write-Host ''
+    Write-Host "  التالي: أعد بناء الحزمة بعنوان https ثم انشرها:" -ForegroundColor Green
+    Write-Host "    .\publish.ps1 -ApiUrl https://$Domain/api" -ForegroundColor White
+    Write-Host '  العنوان مخبوز في نسخة الويب وقت البناء، فلا يكفي تغيير الإعدادات.' -ForegroundColor Gray
 }
 
 # ══════════════════════════════ verify ══════════════════════════════════
