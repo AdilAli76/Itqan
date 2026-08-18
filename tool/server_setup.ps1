@@ -215,13 +215,33 @@ if ($Stage -eq 'db') {
     $exists = ([int]$cmd.ExecuteScalar()) -gt 0
     $c.Close()
 
-    if ($exists) {
-        Warn "$Database موجودة — لن تُنشأ من جديد. الترحيلات ستُنفَّذ عليها."
-    } else {
+    if (-not $exists) {
         Invoke-Sql -Db 'master' -Query "CREATE DATABASE [$Database];"
         Ok "أُنشئت $Database"
+    }
+
+    # وجود القاعدة لا يعني تطبيق المخطط.
+    #
+    # قاعدة أُنشئت وبقيت فارغة حالة شائعة: تشغيل سابق تعثّر بعد CREATE
+    # DATABASE وقبل المخطط، أو قاعدة أنشأها أحد يدوياً. وشرط «إن لم توجد»
+    # وحده كان يقفز فوق المخطط ثم تفشل الترحيلات على جداول غير موجودة —
+    # برسالة «Cannot find the object dbo.organizations» التي لا تدلّ على أن
+    # الناقص هو المخطط كله. العدّ الفعلي للجداول هو الفحص الصحيح.
+    $tableCount = 0
+    $probe = New-Object System.Data.SqlClient.SqlConnection(
+        "Server=$SqlInstance;Database=$Database;Integrated Security=true;TrustServerCertificate=true")
+    $probe.Open()
+    $pc = $probe.CreateCommand()
+    $pc.CommandText = "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE = 'BASE TABLE'"
+    $tableCount = [int]$pc.ExecuteScalar()
+    $probe.Close()
+
+    if ($tableCount -eq 0) {
+        if ($exists) { Warn "$Database موجودة لكنها فارغة — يُطبَّق المخطط الآن." }
         Invoke-Sql -Db $Database -File (Join-Path $sqlDir 'DATABASE_SCHEMA_SQLSERVER.sql')
         Ok 'نُفِّذ المخطط الأساسي (الجداول وسياسات العزل)'
+    } else {
+        Ok "$Database تحوي $tableCount جدولاً — يُتخطّى المخطط، وتُنفَّذ الترحيلات."
     }
 
     # كلاهما آمن للإعادة (IF NOT EXISTS حول كل تغيير) فيُنفَّذان دائماً.
