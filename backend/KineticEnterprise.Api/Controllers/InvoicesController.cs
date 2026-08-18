@@ -288,6 +288,14 @@ public class InvoicesController : ControllerBase
             BranchId = request.BranchId,
             CustomerId = request.CustomerId,
             InvoiceNumber = $"INV-{DateTime.UtcNow:yyyyMMddHHmmssfff}",
+            // مفتاح العملية يُحفَظ مع الفاتورة، وهو ما يجعل فحص التكرار في
+            // أعلى هذه الدالة ذا معنى: بلا حفظه لا يطابق الفحص شيئاً أبداً،
+            // فتُنشئ كل إعادة إرسال فاتورة جديدة ويُخصَم المخزون مرّتين —
+            // أي عكس الغرض الذي وُضع له تماماً. (كان غائباً فعلاً حتى كشفه
+            // اختبار إعادة الإرسال.)
+            ClientRequestId = string.IsNullOrWhiteSpace(request.ClientRequestId)
+                ? null
+                : request.ClientRequestId,
             // من الأسعار المُثبَّتة في السيرفر لا من الطلب.
             Subtotal = resolvedLines.Sum(l => l.Quantity * l.UnitPrice),
             // لم تكن تُضبَط أصلاً — بلا هذا الحقل تعرض "أداء الكاشير" في

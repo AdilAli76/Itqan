@@ -116,6 +116,52 @@ foreach ($entity in ($entityToTable.Keys | Sort-Object)) {
     }
 }
 
+
+# ═══════════════════ فحص تغطية سياسات العزل ═══════════════════════════════
+Write-Host ''
+Write-Host '=== تغطية سياسات العزل (Row-Level Security) ===' -ForegroundColor White
+
+# معفاة عمداً وبمبرّر موثَّق في المخطط — لا تُضاف لها سياسة أبداً:
+#   app_users            : AuthController يبحث بالبريد قبل معرفة المنظمة،
+#                          فلا سبيل لضبط السياق قبل تحديد المستخدم.
+#   customer_card_index  : بوابة العميل تحدّد المنظمة من رمز البطاقة نفسه
+#                          قبل وجود أي سياق.
+#   permissions          : كتالوج عام لا يخصّ منظمة.
+#   platform_*           : مستوى المنصّة لا مستوى العميل.
+$rlsExempt = @('app_users', 'customer_card_index', 'permissions',
+               'platform_organizations', 'platform_settings')
+
+$conn2 = New-Object System.Data.SqlClient.SqlConnection(
+    "Server=$SqlInstance;Database=$Database;Integrated Security=true;TrustServerCertificate=true;Connection Timeout=15")
+$conn2.Open()
+$cmd2 = $conn2.CreateCommand()
+$cmd2.CommandText = @"
+SELECT t.name,
+       CASE WHEN EXISTS (SELECT 1 FROM sys.security_predicates sp
+                         WHERE sp.target_object_id = t.object_id) THEN 1 ELSE 0 END
+FROM sys.tables t ORDER BY t.name
+"@
+$rd = $cmd2.ExecuteReader()
+$unprotected = @()
+$protected = 0
+while ($rd.Read()) {
+    if ([int]$rd[1] -eq 1) { $protected++ }
+    elseif ($rlsExempt -notcontains $rd[0]) { $unprotected += $rd[0] }
+}
+$rd.Close()
+$conn2.Close()
+
+Write-Host "  محميّة: $protected جدولاً" -ForegroundColor Green
+if ($unprotected.Count -gt 0) {
+    Write-Host "  بلا سياسة وبلا إعفاء موثَّق:" -ForegroundColor Red
+    foreach ($t in $unprotected) { Write-Host "      - $t" -ForegroundColor Red }
+    Write-Host '  كل واحد منها يعني أن بيانات عميل تُقرأ من سياق عميل آخر.' -ForegroundColor Gray
+    Write-Host '  إن كان الإعفاء مقصوداً فأضفه إلى $rlsExempt مع سببه.' -ForegroundColor Gray
+    exit 1
+} else {
+    Write-Host '  لا جدول بلا حماية ولا إعفاء موثَّق' -ForegroundColor Green
+}
+
 Write-Host ''
 if ($problems -eq 0) {
     Write-Host "  متطابق: $checked خاصية في $($entityToTable.Count) جدول" -ForegroundColor Green

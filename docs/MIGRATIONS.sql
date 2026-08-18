@@ -283,6 +283,163 @@ BEGIN
 END
 GO
 
+-- ============================================================================
+--  سياسات العزل الناقصة
+--
+--  الجداول المعفاة عمداً — لا تُضاف لها سياسة أبداً:
+--
+--    app_users            : AuthController يبحث بالبريد *قبل* معرفة المنظمة.
+--                           لا سبيل لضبط السياق قبل تحديد المستخدم، وأي
+--                           FILTER هنا يجعل تسجيل الدخول مستحيلاً.
+--    customer_card_index  : بوابة العميل تحدّد المنظمة من رمز البطاقة نفسه
+--                           قبل وجود أي سياق (راجع تعليق الجدول في المخطط).
+--
+--  الجداول المضافة هنا وسببها:
+--
+--    customer_pin_attempts: آمن للحماية لأن كل مسار يلمسه يضبط السياق أولاً —
+--                           InvoicesController عبر التوكن، وبوابة العميل
+--                           تضبطه يدوياً فور إيجاد البطاقة وقبل فحص الرقم
+--                           السري (CustomerPortalController).
+--    pos_shifts           : غير مستعمل في الكود بعد؛ حمايته الآن مجانية
+--                           وتمنع ثغرة عند أول استعمال.
+--    login_history        : FILTER فقط بلا BLOCK — الإدراج يقع أثناء تسجيل
+--                           الدخول قبل وجود السياق، وBLOCK AFTER INSERT كان
+--                           سيرفضه فيمنع الدخول كلياً. وFILTER لا يمسّ
+--                           الإدراج، فيحمي القراءة وحدها وهو المطلوب.
+--
+--  والجداول الأبناء (بنود الفواتير وأوامر الشراء والجرد والتحويلات): لا
+--  تحمل organization_id، فتُعزَل عبر جدولها الأب. كان اعتمادها على أن كل
+--  استعلام يمرّ بالأب — حماية بالمصادفة لا بالتصميم، وأول استعلام مباشر
+--  يكسرها. القياس أثبت ذلك: purchase_order_items كان يُظهر الصفوف الخمسة
+--  نفسها من سياق كل منظمة.
+-- ============================================================================
+
+-- ── دالة الأبناء: تتحقّق عبر الأب ───────────────────────────────────────
+IF OBJECT_ID('Security.fn_InvoiceChild', 'IF') IS NULL
+EXEC('
+CREATE FUNCTION Security.fn_InvoiceChild(@InvoiceId UNIQUEIDENTIFIER)
+RETURNS TABLE
+WITH SCHEMABINDING
+AS
+RETURN SELECT 1 AS fn_result
+WHERE EXISTS (
+    SELECT 1 FROM dbo.invoices i
+    WHERE i.id = @InvoiceId
+      AND i.organization_id = CAST(SESSION_CONTEXT(N''organization_id'') AS UNIQUEIDENTIFIER)
+);');
+GO
+
+IF OBJECT_ID('Security.fn_PurchaseOrderChild', 'IF') IS NULL
+EXEC('
+CREATE FUNCTION Security.fn_PurchaseOrderChild(@PurchaseOrderId UNIQUEIDENTIFIER)
+RETURNS TABLE
+WITH SCHEMABINDING
+AS
+RETURN SELECT 1 AS fn_result
+WHERE EXISTS (
+    SELECT 1 FROM dbo.purchase_orders p
+    WHERE p.id = @PurchaseOrderId
+      AND p.organization_id = CAST(SESSION_CONTEXT(N''organization_id'') AS UNIQUEIDENTIFIER)
+);');
+GO
+
+IF OBJECT_ID('Security.fn_StockCountChild', 'IF') IS NULL
+EXEC('
+CREATE FUNCTION Security.fn_StockCountChild(@StockCountId UNIQUEIDENTIFIER)
+RETURNS TABLE
+WITH SCHEMABINDING
+AS
+RETURN SELECT 1 AS fn_result
+WHERE EXISTS (
+    SELECT 1 FROM dbo.stock_counts s
+    WHERE s.id = @StockCountId
+      AND s.organization_id = CAST(SESSION_CONTEXT(N''organization_id'') AS UNIQUEIDENTIFIER)
+);');
+GO
+
+IF OBJECT_ID('Security.fn_StockTransferChild', 'IF') IS NULL
+EXEC('
+CREATE FUNCTION Security.fn_StockTransferChild(@TransferId UNIQUEIDENTIFIER)
+RETURNS TABLE
+WITH SCHEMABINDING
+AS
+RETURN SELECT 1 AS fn_result
+WHERE EXISTS (
+    SELECT 1 FROM dbo.stock_transfers t
+    WHERE t.id = @TransferId
+      AND t.organization_id = CAST(SESSION_CONTEXT(N''organization_id'') AS UNIQUEIDENTIFIER)
+);');
+GO
+
+-- ── سياسات الجداول ذات organization_id ──────────────────────────────────
+IF NOT EXISTS (SELECT 1 FROM sys.security_policies WHERE name = 'CustomerPinAttemptsPolicy')
+EXEC('
+CREATE SECURITY POLICY Security.CustomerPinAttemptsPolicy
+  ADD FILTER PREDICATE Security.fn_OrgOnlyPredicate(organization_id) ON dbo.customer_pin_attempts,
+  ADD BLOCK PREDICATE Security.fn_OrgOnlyPredicate(organization_id) ON dbo.customer_pin_attempts AFTER INSERT
+  WITH (STATE = ON);');
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.security_policies WHERE name = 'PosShiftsPolicy')
+EXEC('
+CREATE SECURITY POLICY Security.PosShiftsPolicy
+  ADD FILTER PREDICATE Security.fn_OrgOnlyPredicate(organization_id) ON dbo.pos_shifts,
+  ADD BLOCK PREDICATE Security.fn_OrgOnlyPredicate(organization_id) ON dbo.pos_shifts AFTER INSERT
+  WITH (STATE = ON);');
+GO
+
+-- FILTER بلا BLOCK — راجع السبب أعلى الملف.
+IF NOT EXISTS (SELECT 1 FROM sys.security_policies WHERE name = 'LoginHistoryPolicy')
+EXEC('
+CREATE SECURITY POLICY Security.LoginHistoryPolicy
+  ADD FILTER PREDICATE Security.fn_OrgOnlyPredicate(organization_id) ON dbo.login_history
+  WITH (STATE = ON);');
+GO
+
+-- ── سياسات الجداول الأبناء ──────────────────────────────────────────────
+IF NOT EXISTS (SELECT 1 FROM sys.security_policies WHERE name = 'InvoiceItemsPolicy')
+EXEC('
+CREATE SECURITY POLICY Security.InvoiceItemsPolicy
+  ADD FILTER PREDICATE Security.fn_InvoiceChild(invoice_id) ON dbo.invoice_items,
+  ADD BLOCK PREDICATE Security.fn_InvoiceChild(invoice_id) ON dbo.invoice_items AFTER INSERT
+  WITH (STATE = ON);');
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.security_policies WHERE name = 'InvoicePaymentsPolicy')
+EXEC('
+CREATE SECURITY POLICY Security.InvoicePaymentsPolicy
+  ADD FILTER PREDICATE Security.fn_InvoiceChild(invoice_id) ON dbo.invoice_payments,
+  ADD BLOCK PREDICATE Security.fn_InvoiceChild(invoice_id) ON dbo.invoice_payments AFTER INSERT
+  WITH (STATE = ON);');
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.security_policies WHERE name = 'PurchaseOrderItemsPolicy')
+EXEC('
+CREATE SECURITY POLICY Security.PurchaseOrderItemsPolicy
+  ADD FILTER PREDICATE Security.fn_PurchaseOrderChild(purchase_order_id) ON dbo.purchase_order_items,
+  ADD BLOCK PREDICATE Security.fn_PurchaseOrderChild(purchase_order_id) ON dbo.purchase_order_items AFTER INSERT
+  WITH (STATE = ON);');
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.security_policies WHERE name = 'StockCountItemsPolicy')
+EXEC('
+CREATE SECURITY POLICY Security.StockCountItemsPolicy
+  ADD FILTER PREDICATE Security.fn_StockCountChild(stock_count_id) ON dbo.stock_count_items,
+  ADD BLOCK PREDICATE Security.fn_StockCountChild(stock_count_id) ON dbo.stock_count_items AFTER INSERT
+  WITH (STATE = ON);');
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.security_policies WHERE name = 'StockTransferItemsPolicy')
+EXEC('
+CREATE SECURITY POLICY Security.StockTransferItemsPolicy
+  ADD FILTER PREDICATE Security.fn_StockTransferChild(transfer_id) ON dbo.stock_transfer_items,
+  ADD BLOCK PREDICATE Security.fn_StockTransferChild(transfer_id) ON dbo.stock_transfer_items AFTER INSERT
+  WITH (STATE = ON);');
+GO
+
+PRINT N'سياسات العزل الناقصة مُطبَّقة';
+GO
+
 -- ----------------------------------------------------------------------------
 --  فهارس الأداء — ملف منفصل لأنه يُنفَّذ ويُعاد بلا خطر
 -- ----------------------------------------------------------------------------
