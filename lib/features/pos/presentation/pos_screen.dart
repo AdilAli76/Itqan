@@ -292,8 +292,8 @@ class _PosScreenState extends ConsumerState<PosScreen> {
   /// المفتوحة، ويُختار منها.
   Future<void> _addOpenProduct() async {
     final products = await ref.read(posOpenProductsProvider.future).catchError(
-      (_) => <Map<String, dynamic>>[],
-    );
+          (_) => <Map<String, dynamic>>[],
+        );
 
     if (!mounted) return;
 
@@ -441,15 +441,13 @@ class _PosScreenState extends ConsumerState<PosScreen> {
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(
-                content: Text(
-                    'لا يوجد اتصال — حُفظت العملية وستُرسَل تلقائياً عند عودة الشبكة'),
+                content: Text('لا يوجد اتصال — حُفظت العملية وستُرسَل تلقائياً عند عودة الشبكة'),
                 duration: Duration(seconds: 5),
               ),
             );
           }
         } else {
-          setState(() => _error =
-              'طابور العمليات المؤجَّلة ممتلئ (${OfflineQueueNotifier.maxQueued}) — '
+          setState(() => _error = 'طابور العمليات المؤجَّلة ممتلئ (${OfflineQueueNotifier.maxQueued}) — '
               'راجع الاتصال قبل متابعة البيع');
         }
       } else {
@@ -486,7 +484,8 @@ class _PosScreenState extends ConsumerState<PosScreen> {
       );
     } catch (_) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تعذّر تحضير الإيصال للطباعة')));
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('تعذّر تحضير الإيصال للطباعة')));
       }
     }
   }
@@ -599,20 +598,41 @@ class _PosScreenState extends ConsumerState<PosScreen> {
               return Padding(
                 padding: const EdgeInsets.all(16),
                 child: Text(
-                  _searchController.text.trim().isEmpty ? 'اكتب اسم الصنف أو امسح الباركود لبدء البيع' : 'لا توجد نتائج',
+                  _searchController.text.trim().isEmpty
+                      ? 'اكتب اسم الصنف أو امسح الباركود لبدء البيع'
+                      : 'لا توجد نتائج',
                   style: AppTextStyles.bodyMd(),
                 ),
               );
             }
             // بطاقات أقل في الصف وأكبر حجماً في وضع اللمس — الهدف أن تُنقَر
             // بالإصبع دون تكبير ولا دقة، لا أن تُعرَض أكبر عدد ممكن.
-            return GridView.count(
-              crossAxisCount: touch ? 2 : 3,
+            // ارتفاع خلية ثابت (mainAxisExtent) لا نسبة أبعاد.
+            //
+            // childAspectRatio يجعل ارتفاع الخلية تابعاً لعرضها: على شاشة
+            // أضيق تضيق الخلية فيقصر ارتفاعها، بينما محتواها ثابت (أيقونة
+            // واسم سطرين وسعر وحالة مخزون) — فيفيض. وهذا ما كان يحدث على
+            // الجهاز اللوحي والهاتف بأربعين بكسل.
+            //
+            // ارتفاع المحتوى لا علاقة له بالعرض أصلاً، فتثبيته يُنهي تبعية
+            // لم يكن لها مبرّر.
+            return GridView(
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
-              mainAxisSpacing: 12,
-              crossAxisSpacing: 12,
-              childAspectRatio: touch ? 1.1 : 1.3,
+              // عرض أقصى للبطاقة بدل عدد أعمدة ثابت: ثلاثة أعمدة على هاتف
+              // بعرض 420 تعطي بطاقة بـ120 بكسل — يضيق فيها اسم الصنف إلى
+              // سطرين فيفيض المحتوى، وهي ضيّقة على الإصبع أصلاً. اشتقاق
+              // العدد من عرض أدنى معقول يجعل الشاشة الضيقة تعرض عمودين
+              // مقروءين بدل ثلاثة مزدحمة، والعريضة تعرض أكثر تلقائياً.
+              gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
+                maxCrossAxisExtent: touch ? 280 : 220,
+                mainAxisSpacing: 12,
+                crossAxisSpacing: 12,
+                // ارتفاع ثابت لا نسبة أبعاد: ارتفاع المحتوى (أيقونة واسم
+                // سطرين وسعر وحالة) لا علاقة له بعرض البطاقة، وربطه به
+                // يجعل كل تضييق للشاشة فيضاً.
+                mainAxisExtent: touch ? 200 : 176,
+              ),
               children: products
                   .map((p) => _ProductTile(product: p, touch: touch, onTap: () => _addProduct(p)))
                   .toList(),
@@ -698,7 +718,8 @@ class _PosScreenState extends ConsumerState<PosScreen> {
             child: FilledButton.icon(
               onPressed: (line == null || _padValue.isEmpty) ? null : _applyPadQuantity,
               icon: const Icon(Icons.check, size: 20),
-              label: Text('تثبيت الكمية', style: touch ? AppTextStyles.headlineMd(color: Colors.white) : null),
+              label:
+                  Text('تثبيت الكمية', style: touch ? AppTextStyles.headlineMd(color: Colors.white) : null),
             ),
           ),
         ],
@@ -821,7 +842,8 @@ class _PosScreenState extends ConsumerState<PosScreen> {
                     onPressed: (_placingOrder || _loadingBranch) ? null : _startWalletCheckout,
                     child: _placingOrder
                         ? const SizedBox(
-                            width: 18, height: 18,
+                            width: 18,
+                            height: 18,
                             child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
                           )
                         : Text(
@@ -863,7 +885,7 @@ class _ProductTile extends StatelessWidget {
       onTap: sellable ? onTap : null,
       borderRadius: BorderRadius.circular(12),
       child: AppSurface(
-      padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.all(12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -945,57 +967,57 @@ class _CartLineRow extends StatelessWidget {
           ),
         ),
         child: Row(
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  line.name,
-                  style: touch
-                      ? AppTextStyles.headlineMd(color: AppColors.textPrimary)
-                      : AppTextStyles.bodyMd(color: AppColors.textPrimary),
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    line.name,
+                    style: touch
+                        ? AppTextStyles.headlineMd(color: AppColors.textPrimary)
+                        : AppTextStyles.bodyMd(color: AppColors.textPrimary),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  CurrencyBadge(amount: line.lineTotal),
+                ],
+              ),
+            ),
+            _QtyButton(icon: Icons.remove, size: btn, iconSize: iconSize, onTap: onDecrement),
+            // الكمية نفسها زر: النقر عليها يفتح لوحة الأرقام لكتابتها مباشرة،
+            // فبيع 24 قطعة لا يحتاج 23 نقرة على زر الزيادة.
+            InkWell(
+              onTap: onEditQuantity,
+              borderRadius: BorderRadius.circular(8),
+              child: Container(
+                width: touch ? 68 : 44,
+                height: btn,
+                alignment: Alignment.center,
+                margin: const EdgeInsets.symmetric(horizontal: 4),
+                decoration: BoxDecoration(
+                  color: AppColors.surfaceAlt,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: AppColors.border),
                 ),
-                CurrencyBadge(amount: line.lineTotal),
-              ],
-            ),
-          ),
-          _QtyButton(icon: Icons.remove, size: btn, iconSize: iconSize, onTap: onDecrement),
-          // الكمية نفسها زر: النقر عليها يفتح لوحة الأرقام لكتابتها مباشرة،
-          // فبيع 24 قطعة لا يحتاج 23 نقرة على زر الزيادة.
-          InkWell(
-            onTap: onEditQuantity,
-            borderRadius: BorderRadius.circular(8),
-            child: Container(
-              width: touch ? 68 : 44,
-              height: btn,
-              alignment: Alignment.center,
-              margin: const EdgeInsets.symmetric(horizontal: 4),
-              decoration: BoxDecoration(
-                color: AppColors.surfaceAlt,
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: AppColors.border),
-              ),
-              child: Text(
-                _quantityLabel,
-                style: touch
-                    ? AppTextStyles.displayLg(color: AppColors.textPrimary)
-                    : AppTextStyles.headlineMd(color: AppColors.textPrimary),
+                child: Text(
+                  _quantityLabel,
+                  style: touch
+                      ? AppTextStyles.displayLg(color: AppColors.textPrimary)
+                      : AppTextStyles.headlineMd(color: AppColors.textPrimary),
+                ),
               ),
             ),
-          ),
-          _QtyButton(icon: Icons.add, size: btn, iconSize: iconSize, onTap: onIncrement),
-          const SizedBox(width: 4),
-          _QtyButton(
-            icon: Icons.delete_outline,
-            size: btn,
-            iconSize: touch ? 26 : 18,
-            color: AppColors.danger,
-            onTap: onRemove,
-          ),
-        ],
+            _QtyButton(icon: Icons.add, size: btn, iconSize: iconSize, onTap: onIncrement),
+            const SizedBox(width: 4),
+            _QtyButton(
+              icon: Icons.delete_outline,
+              size: btn,
+              iconSize: touch ? 26 : 18,
+              color: AppColors.danger,
+              onTap: onRemove,
+            ),
+          ],
         ),
       ),
     );
@@ -1073,7 +1095,8 @@ class _CustomerPickerDialogState extends ConsumerState<_CustomerPickerDialog> {
             TextField(
               autofocus: true,
               onChanged: _onSearch,
-              decoration: const InputDecoration(hintText: 'ابحث بالاسم أو الهاتف...', prefixIcon: Icon(Icons.search, size: 18)),
+              decoration: const InputDecoration(
+                  hintText: 'ابحث بالاسم أو الهاتف...', prefixIcon: Icon(Icons.search, size: 18)),
             ),
             const SizedBox(height: 12),
             Expanded(
@@ -1205,7 +1228,8 @@ class _OpenProductPickerDialog extends StatelessWidget {
             return ListTile(
               contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
               leading: const Icon(Icons.edit_note_outlined),
-              title: Text(p['name'] as String? ?? '', style: AppTextStyles.bodyMd(color: AppColors.textPrimary)),
+              title:
+                  Text(p['name'] as String? ?? '', style: AppTextStyles.bodyMd(color: AppColors.textPrimary)),
               subtitle: Text('قيمة حرة', style: AppTextStyles.labelMd()),
               onTap: () => Navigator.pop(context, p),
             );
