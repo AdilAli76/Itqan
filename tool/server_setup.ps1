@@ -67,6 +67,16 @@ function Invoke-Sql {
         # GO فاصل دفعات في أدوات مايكروسوفت لا أمر SQL — SqlClient لا يفهمه.
         foreach ($batch in [regex]::Split($text, '(?im)^\s*GO\s*$')) {
             if ([string]::IsNullOrWhiteSpace($batch)) { continue }
+
+            # تُتخطّى دفعات إدارة القاعدة نفسها.
+            #
+            # ملف المخطط مكتوب ليُنفَّذ في SSMS على خادم فارغ، فيبدأ بـ
+            # CREATE DATABASE ثم USE. لكن السكربت هنا يتصل بالقاعدة مباشرةً
+            # (وقد أنشأها بنفسه أو وجدها فارغة)، فـCREATE DATABASE يفشل
+            # بـ«already exists» وUSE لا لزوم له. تخطّيهما يجعل الملف الواحد
+            # صالحاً للحالتين: خادم فارغ من SSMS، وقاعدة قائمة من هنا.
+            if ($batch -match '(?im)^\s*CREATE\s+DATABASE') { continue }
+            if ($batch -match '(?im)^\s*USE\s+\[?\w+\]?\s*;?\s*$') { continue }
             $cmd = $conn.CreateCommand()
             $cmd.CommandText = $batch
             $cmd.CommandTimeout = 300
