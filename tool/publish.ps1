@@ -137,7 +137,7 @@ Step 6 'قالب الإعدادات'
   "// المفتاح": "ولّد مفتاحاً عشوائياً جديداً — لا تنسخ مفتاح جهاز التطوير. راجع DEPLOYMENT.md",
 
   "ConnectionStrings": {
-    "Default": "Server=.\\SQLEXPRESS;Database=KineticEnterprise;User Id=kinetic_app;Password=ضع-كلمة-مرور-قوية;TrustServerCertificate=true"
+    "Default": "Server=.\\SQLEXPRESS;Database=KineticEnterprise;Trusted_Connection=True;TrustServerCertificate=True;"
   },
   "Jwt": {
     "Key": "",
