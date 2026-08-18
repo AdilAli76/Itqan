@@ -278,12 +278,24 @@ if ($Stage -eq 'iis') {
     Ok "مجمع $poolName جاهز (No Managed Code، تشغيل دائم)"
 
     Head 'المواقع'
+    # عنوان IP لا يصلح host header: الترويسة تطابق اسم المضيف في الطلب،
+    # والطلب إلى IP لا يحمل اسماً. تركها فارغة يجعل الموقع يستقبل كل ما
+    # يصل المنفذ — وهو المطلوب قبل توفّر النطاق.
+    $isIp = $Domain -match '^\d{1,3}(\.\d{1,3}){3}$'
     if (-not (Get-Website -Name 'KineticWeb' -ErrorAction SilentlyContinue)) {
-        New-Website -Name 'KineticWeb' -PhysicalPath $webPath -Port 80 -HostHeader $Domain | Out-Null
+        if ($isIp) {
+            New-Website -Name 'KineticWeb' -PhysicalPath $webPath -Port 80 | Out-Null
+        } else {
+            New-Website -Name 'KineticWeb' -PhysicalPath $webPath -Port 80 -HostHeader $Domain | Out-Null
+        }
     } else {
         Set-ItemProperty 'IIS:\Sites\KineticWeb' -Name physicalPath -Value $webPath
     }
-    Ok "موقع KineticWeb -> $webPath (المنفذ 80، المضيف $Domain)"
+    Ok "موقع KineticWeb -> $webPath (المنفذ 80$(if ($isIp) { '' } else { "، المضيف $Domain" }))"
+    if ($isIp) {
+        Warn 'عنوان IP بلا نطاق: لا شهادة ممكنة، والاتصال سيبقى HTTP.'
+        Warn 'صالح للتجربة وحدها — راجع التحذير في نهاية هذه المرحلة.'
+    }
 
     if (-not (Get-WebApplication -Site 'KineticWeb' -Name 'api' -ErrorAction SilentlyContinue)) {
         New-WebApplication -Site 'KineticWeb' -Name 'api' -PhysicalPath $apiPath -ApplicationPool $poolName | Out-Null
@@ -314,19 +326,22 @@ if ($Stage -eq 'verify') {
     if (-not $Domain) { throw 'مرّر -Domain' }
     $fail = 0
 
-    Head 'HTTPS'
+    $isIp = $Domain -match '^\d{1,3}(\.\d{1,3}){3}$'
+    $scheme = if ($isIp) { 'http' } else { 'https' }
+
+    Head $(if ($isIp) { 'HTTP (بلا شهادة — عنوان IP)' } else { 'HTTPS' })
     try {
-        $r = Invoke-WebRequest -Uri "https://$Domain" -TimeoutSec 20 -UseBasicParsing
-        Ok "https://$Domain يستجيب ($($r.StatusCode))"
+        $r = Invoke-WebRequest -Uri "$scheme`://$Domain" -TimeoutSec 20 -UseBasicParsing
+        Ok "$scheme`://$Domain يستجيب ($($r.StatusCode))"
     } catch {
         $code = if ($_.Exception.Response) { [int]$_.Exception.Response.StatusCode } else { 0 }
-        if ($code -gt 0) { Ok "https://$Domain يستجيب ($code)" }
-        else { Miss "https://$Domain لا يستجيب — $($_.Exception.Message.Split([char]10)[0])"; $fail++ }
+        if ($code -gt 0) { Ok "$scheme`://$Domain يستجيب ($code)" }
+        else { Miss "$scheme`://$Domain لا يستجيب — $($_.Exception.Message.Split([char]10)[0])"; $fail++ }
     }
 
     Head 'الـAPI'
     try {
-        $null = Invoke-WebRequest -Uri "https://$Domain/api/platform-settings" -TimeoutSec 20 -UseBasicParsing
+        $null = Invoke-WebRequest -Uri "$scheme`://$Domain/api/platform-settings" -TimeoutSec 20 -UseBasicParsing
         Warn 'نقطة محمية ردّت 200 بلا توكن — راجع إعداد المصادقة'
         $fail++
     } catch {
@@ -337,6 +352,12 @@ if ($Stage -eq 'verify') {
     }
 
     Head 'HTTP لا يُقبَل'
+    if ($isIp) {
+        Warn 'مُتخطّى: لا شهادة على عنوان IP. النظام يعمل على HTTP بالكامل —'
+        Warn 'كلمات المرور وتوكن الدخول تمرّ نصاً واضحاً على الإنترنت.'
+        Warn 'احصل على نطاق وشهادة قبل أي استعمال حقيقي.'
+        $fail++
+    } else {
     try {
         $r = Invoke-WebRequest -Uri "http://$Domain/api/platform-settings" -TimeoutSec 15 -MaximumRedirection 0 -UseBasicParsing
         Warn "HTTP يردّ $($r.StatusCode) بلا تحويل — أضف قاعدة تحويل إلى HTTPS"
@@ -344,6 +365,7 @@ if ($Stage -eq 'verify') {
         $code = if ($_.Exception.Response) { [int]$_.Exception.Response.StatusCode } else { 0 }
         if ($code -in @(301, 302, 307, 308)) { Ok "HTTP يُحوَّل إلى HTTPS ($code)" }
         else { Warn "HTTP: $code — يُفضَّل تحويله إلى HTTPS" }
+    }
     }
 
     Head 'قاعدة البيانات'
