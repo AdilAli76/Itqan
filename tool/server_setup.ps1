@@ -291,9 +291,16 @@ if ($Stage -eq 'iis') {
     Import-Module WebAdministration
 
     $apiPath = Join-Path $PackagePath 'backend'
-    $webPath = Join-Path $PackagePath 'web'
-    foreach ($p in @($apiPath, $webPath)) {
-        if (-not (Test-Path $p)) { throw "مسار مفقود: $p" }
+    if (-not (Test-Path $apiPath)) { throw "مسار مفقود: $apiPath" }
+
+    # موقع واحد جذره الخادم، والخادم يخدم الويب من wwwroot.
+    #
+    # التقسيم إلى موقع للويب وتطبيق فرعي للـAPI تحت /api يبدو أنظف ويفشل:
+    # وحدات التحكم تحمل بادئة api/ في مساراتها، فيصبح المسار النهائي
+    # /api/api/... ويردّ كل طلب بـ404. حدث فعلاً على خادم الإنتاج.
+    if (-not (Test-Path (Join-Path $apiPath 'wwwroot'))) {
+        Warn 'لا مجلد wwwroot داخل backend — الويب لن يُخدَم.'
+        Warn 'أعد بناء الحزمة بـ tool\publish.ps1 (النسخة الحديثة تضعه هناك).'
     }
 
     $settings = Join-Path $apiPath 'appsettings.Production.json'
@@ -312,21 +319,16 @@ if ($Stage -eq 'iis') {
         New-WebAppPool -Name $poolName | Out-Null
     }
     # No Managed Code: التطبيق .NET Core يعمل خارج CLR الخاص بـIIS تماماً،
-    # وIIS يعمل وسيطاً عكسياً فقط. تركه على .NET CLR v4 يُحمّل وقت تشغيل
-    # لا يُستعمل ويُربك التشخيص عند الأخطاء.
+    # وIIS يعمل وسيطاً عكسياً فقط.
     Set-ItemProperty "IIS:\AppPools\$poolName" -Name managedRuntimeVersion -Value ''
     Set-ItemProperty "IIS:\AppPools\$poolName" -Name startMode -Value 'AlwaysRunning'
     Ok "مجمع $poolName جاهز (No Managed Code، تشغيل دائم)"
 
     # منح هوية المجمّع دخولاً على قاعدة البيانات.
     #
-    # هذه أكثر عقبة تُربك أول نشر: التطبيق يعمل بهوية IIS APPPOOL\KineticApi
-    # لا بحساب المسؤول الذي شغّل المُثبِّت. فسلسلة اتصال بمصادقة ويندوز تبدو
-    # صحيحة تماماً وتفشل بـ"Login failed for user 'IIS APPPOOL\KineticApi'" —
-    # رسالة لا تدلّ على أن الحلّ إنشاء تسجيل دخول لا تصحيح السلسلة.
-    #
-    # الحساب افتراضي (Virtual Account) ينشئه ويندوز مع المجمّع، فلا كلمة مرور
-    # له ولا تنتهي صلاحيتها — وهذا أأمن من تضمين كلمة مرور SQL في ملف نصّي.
+    # أكثر عقبة تُربك أول نشر: التطبيق يعمل بهوية IIS APPPOOL\KineticApi لا
+    # بحساب المسؤول الذي شغّل المُثبِّت. فسلسلة اتصال بمصادقة ويندوز تبدو
+    # صحيحة وتفشل بـ"Login failed for user 'IIS APPPOOL\KineticApi'".
     $poolIdentity = "IIS APPPOOL\$poolName"
     try {
         $conn = New-Object System.Data.SqlClient.SqlConnection(
@@ -356,52 +358,34 @@ GRANT EXECUTE TO [$poolIdentity];
         Write-Host '        نفّذه يدوياً في SSMS، وإلا فشل الاتصال بـ Login failed.' -ForegroundColor Gray
     }
 
-    Head 'المواقع'
-    # عنوان IP لا يصلح host header: الترويسة تطابق اسم المضيف في الطلب،
-    # والطلب إلى IP لا يحمل اسماً. تركها فارغة يجعل الموقع يستقبل كل ما
-    # يصل المنفذ — وهو المطلوب قبل توفّر النطاق.
-    $isIp = $Domain -match '^\d{1,3}(\.\d{1,3}){3}$'
-
-    # Default Web Site يحجز المنفذ 80 بلا ترويسة مضيف على كل العناوين، وهو
-    # ارتباط حصري: أي موقع ثانٍ بالارتباط نفسه يفشل إنشاؤه. IIS ينشئه دائماً
-    # عند التثبيت، فالتعارض هو الحالة الافتراضية لا الاستثناء — وبلا معالجته
-    # تفشل هذه المرحلة على كل خادم جديد.
-    #
-    # يُوقَف ولا يُحذف: قد يخدم شيئاً آخر على الخادم، وإيقافه قابل للتراجع
-    # بأمر واحد بينما الحذف لا.
+    Head 'الموقع'
+    # Default Web Site يحجز المنفذ 80 بلا ترويسة مضيف — ارتباط حصري.
     $default = Get-Website -Name 'Default Web Site' -ErrorAction SilentlyContinue
     if ($default -and $default.State -eq 'Started') {
-        $conflict = $default.Bindings.Collection | Where-Object {
-            $_.protocol -eq 'http' -and $_.bindingInformation -match ':80:$'
-        }
-        if ($conflict) {
-            Stop-Website -Name 'Default Web Site'
-            Warn 'أُوقف Default Web Site — كان يحجز المنفذ 80 بلا ترويسة مضيف.'
-            Warn 'لإعادته لاحقاً: Start-Website -Name "Default Web Site"'
-        }
+        Stop-Website -Name 'Default Web Site'
+        Warn 'أُوقف Default Web Site — كان يحجز المنفذ 80.'
     }
 
-    if (-not (Get-Website -Name 'KineticWeb' -ErrorAction SilentlyContinue)) {
-        if ($isIp) {
-            New-Website -Name 'KineticWeb' -PhysicalPath $webPath -Port 80 | Out-Null
-        } else {
-            New-Website -Name 'KineticWeb' -PhysicalPath $webPath -Port 80 -HostHeader $Domain | Out-Null
-        }
-    } else {
-        Set-ItemProperty 'IIS:\Sites\KineticWeb' -Name physicalPath -Value $webPath
+    $isIp = $Domain -match '^\d{1,3}(\.\d{1,3}){3}$'
+
+    # الموقع القديم (إن وُجد من نسخة سابقة) يُحذف: كان يقسم الويب والـAPI
+    # موقعين، وهي البنية التي تُنتج 404.
+    $old = Get-Website -Name 'KineticWeb' -ErrorAction SilentlyContinue
+    if ($old) {
+        Remove-Website -Name 'KineticWeb'
+        Warn 'أُزيل موقع KineticWeb السابق — يُعاد إنشاؤه بجذر الخادم.'
     }
-    Ok "موقع KineticWeb -> $webPath (المنفذ 80$(if ($isIp) { '' } else { "، المضيف $Domain" }))"
+
     if ($isIp) {
-        Warn 'عنوان IP بلا نطاق: لا شهادة ممكنة، والاتصال سيبقى HTTP.'
-        Warn 'صالح للتجربة وحدها — راجع التحذير في نهاية هذه المرحلة.'
-    }
-
-    if (-not (Get-WebApplication -Site 'KineticWeb' -Name 'api' -ErrorAction SilentlyContinue)) {
-        New-WebApplication -Site 'KineticWeb' -Name 'api' -PhysicalPath $apiPath -ApplicationPool $poolName | Out-Null
+        New-Website -Name 'Kinetic' -PhysicalPath $apiPath -Port 80 -ApplicationPool $poolName -Force | Out-Null
     } else {
-        Set-ItemProperty 'IIS:\Sites\KineticWeb\api' -Name physicalPath -Value $apiPath
+        New-Website -Name 'Kinetic' -PhysicalPath $apiPath -Port 80 -HostHeader $Domain -ApplicationPool $poolName -Force | Out-Null
     }
-    Ok "تطبيق /api -> $apiPath"
+    Ok "موقع Kinetic -> $apiPath (المنفذ 80)"
+    Ok 'الويب على / والـAPI على /api — من المصدر نفسه، فلا CORS'
+    if ($isIp) {
+        Warn 'عنوان IP بلا نطاق: لا شهادة ممكنة، والاتصال يبقى HTTP.'
+    }
 
     # ملف الأسرار يجب ألّا يُخدَم كملف ثابت لو أخطأ أحد في ترتيب المسارات.
     Head 'الحماية'

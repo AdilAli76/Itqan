@@ -116,8 +116,13 @@ if (-not $SkipWeb) {
         & flutter build web --release --dart-define=API_BASE_URL=$ApiUrl
         if ($LASTEXITCODE -ne 0) { throw 'flutter build web فشل' }
     } finally { Pop-Location }
-    Copy-Item -Path (Join-Path $root 'build\web') -Destination (Join-Path $Output 'web') -Recurse
-    Ok 'الويب جاهز'
+    # داخل wwwroot لا في مجلد منفصل: الخادم يخدم الويب من جذره (راجع
+    # UseStaticFiles في Program.cs)، فموقع IIS واحد يكفي — ولا تركيب تطبيق
+    # فرعي تحت /api يُضاعف بادئة المسار.
+    $wwwroot = Join-Path $backendOut 'wwwroot'
+    if (Test-Path $wwwroot) { Remove-Item $wwwroot -Recurse -Force }
+    Copy-Item -Path (Join-Path $root 'build\web') -Destination $wwwroot -Recurse
+    Ok 'الويب جاهز داخل backend\wwwroot'
 }
 
 # ── 5. ملفات SQL ────────────────────────────────────────────────────────

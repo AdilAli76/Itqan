@@ -108,6 +108,19 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
+// خدمة تطبيق الويب من الخادم نفسه.
+//
+// البديل — موقع IIS للويب وتطبيق فرعي للـAPI تحت /api — يبدو أنظف ويفشل
+// فعلياً: وحدات التحكم تحمل بادئة api/ في مساراتها أصلاً
+// ([Route("api/platform-settings")])، فتركيبها تحت /api يجعل المسار
+// النهائي /api/api/platform-settings ويردّ كل طلب بـ404. حدث ذلك على خادم
+// الإنتاج.
+//
+// ومصدر واحد للاثنين يُلغي CORS من المعادلة كلياً: لا نطاقات مسموحة تُضبط
+// ولا طلب مبدئي (preflight) ولا خطأ صامت حين يُنسى تحديث AllowedOrigins.
+app.UseDefaultFiles();
+app.UseStaticFiles();
+
 app.UseCors();
 app.UseAuthentication();
 
@@ -119,6 +132,11 @@ app.UseAuthorization();
 
 app.MapControllers();
 app.MapHub<NotificationsHub>("/hubs/notifications");
+
+// أي مسار غير معروف يعود إلى index.html — تطبيق Flutter يوجّه داخلياً،
+// فطلب /app?route=/pos مباشرةً يجب ألّا يعطي 404. ويأتي بعد MapControllers
+// حتى لا يبتلع مسارات الـAPI.
+app.MapFallbackToFile("index.html");
 
 app.Run();
 
