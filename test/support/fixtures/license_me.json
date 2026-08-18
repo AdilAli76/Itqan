@@ -1,0 +1,19 @@
+{
+  "id": "bb4b950e-46b5-43cb-986d-250e5a13ad1e",
+  "licenseKey": "KIN-ACAC4036-E6B1B639",
+  "planTier": "professional",
+  "status": "active",
+  "maxBranches": 10,
+  "maxUsers": 50,
+  "currentBranches": 1,
+  "currentUsers": 1,
+  "enabledModules": [
+    "inventory",
+    "pos",
+    "customers",
+    "reports"
+  ],
+  "issuedAt": "2026-08-11T12:45:15.9441612",
+  "expiresAt": "2027-08-11T12:45:15.9441612",
+  "daysRemaining": 358
+}

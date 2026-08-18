@@ -155,7 +155,7 @@ class _LicenseContent extends StatelessWidget {
           physics: const NeverScrollableScrollPhysics(),
           mainAxisSpacing: 16,
           crossAxisSpacing: 16,
-          childAspectRatio: 1.6,
+          mainAxisExtent: 168,
           children: [
             StatCard(
               label: 'الفروع المستخدَمة',

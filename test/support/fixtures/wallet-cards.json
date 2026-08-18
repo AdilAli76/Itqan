@@ -1,0 +1,63 @@
+{
+  "items": [
+    {
+      "cardCode": "VPTCELJD5D2F",
+      "customerId": "8408af66-a278-4e0c-8640-2effe34eb589",
+      "customerName": "?????? ???????",
+      "customerPhone": "0921111111",
+      "state": "active",
+      "isUsable": true,
+      "balance": 0.0,
+      "issuedAt": "2026-08-16T23:11:37.7819113",
+      "expiryDate": null,
+      "blockedReason": null,
+      "issuedByName": null,
+      "holderName": null
+    },
+    {
+      "cardCode": "VVV3ZPFQFX9L",
+      "customerId": "a3ca091f-f54a-4a64-8267-808159751bef",
+      "customerName": "???? ?????? ?????? ????????",
+      "customerPhone": "0910000888",
+      "state": "active",
+      "isUsable": true,
+      "balance": 300.0,
+      "issuedAt": "2026-08-16T22:43:30.9317139",
+      "expiryDate": null,
+      "blockedReason": null,
+      "issuedByName": null,
+      "holderName": null
+    },
+    {
+      "cardCode": "8NUGH37ZAESP",
+      "customerId": "387d6584-b57e-4843-a4b9-758559490037",
+      "customerName": "???? ?????? ???????",
+      "customerPhone": "0910000999",
+      "state": "active",
+      "isUsable": true,
+      "balance": 500.0,
+      "issuedAt": "2026-08-16T21:13:46.4696101",
+      "expiryDate": null,
+      "blockedReason": null,
+      "issuedByName": null,
+      "holderName": null
+    },
+    {
+      "cardCode": "9UJR27SGT5FV",
+      "customerId": "5c0675b9-d859-4763-935d-e1797f88d857",
+      "customerName": "عادل",
+      "customerPhone": "65665",
+      "state": "active",
+      "isUsable": true,
+      "balance": 100.0,
+      "issuedAt": "2026-08-16T20:06:51.9401453",
+      "expiryDate": "2027-08-17",
+      "blockedReason": null,
+      "issuedByName": "Adil Edris",
+      "holderName": "عادل ادريس"
+    }
+  ],
+  "totalCount": 4,
+  "page": 1,
+  "pageSize": 50
+}

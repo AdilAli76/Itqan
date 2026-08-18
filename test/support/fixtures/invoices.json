@@ -1,0 +1,79 @@
+{
+  "items": [
+    {
+      "id": "dabcd378-0710-4b09-a8da-60c50fad5fd3",
+      "invoiceNumber": "RET-20260816231153707",
+      "invoiceType": "return",
+      "status": "completed",
+      "customerId": "8408af66-a278-4e0c-8640-2effe34eb589",
+      "customerName": "?????? ???????",
+      "itemCount": 1,
+      "totalAmount": 60.0,
+      "paymentMethod": "customer_wallet",
+      "createdAt": "2026-08-16T23:11:53.70745"
+    },
+    {
+      "id": "b843f744-393f-40bd-84b6-d00d286e1720",
+      "invoiceNumber": "INV-20260816231138535",
+      "invoiceType": "sale",
+      "status": "refunded",
+      "customerId": "8408af66-a278-4e0c-8640-2effe34eb589",
+      "customerName": "?????? ???????",
+      "itemCount": 1,
+      "totalAmount": 60.0,
+      "paymentMethod": "customer_wallet",
+      "createdAt": "2026-08-16T23:11:38.5357029"
+    },
+    {
+      "id": "b78c1c86-a176-433f-8a0d-712068b77e1a",
+      "invoiceNumber": "RET-20260816224420610",
+      "invoiceType": "return",
+      "status": "completed",
+      "customerId": "387d6584-b57e-4843-a4b9-758559490037",
+      "customerName": "???? ?????? ???????",
+      "itemCount": 1,
+      "totalAmount": 10.0,
+      "paymentMethod": "customer_wallet",
+      "createdAt": "2026-08-16T22:44:20.6107276"
+    },
+    {
+      "id": "1f0e7377-d322-4d4a-89ae-f3e7181b0c45",
+      "invoiceNumber": "RET-20260816224402498",
+      "invoiceType": "return",
+      "status": "completed",
+      "customerId": "a3ca091f-f54a-4a64-8267-808159751bef",
+      "customerName": "???? ?????? ?????? ????????",
+      "itemCount": 1,
+      "totalAmount": 75.5,
+      "paymentMethod": "customer_wallet",
+      "createdAt": "2026-08-16T22:44:02.4981862"
+    },
+    {
+      "id": "31f73cb8-e903-48a0-8c8b-9eaeeec72c2c",
+      "invoiceNumber": "INV-20260816224349257",
+      "invoiceType": "sale",
+      "status": "refunded",
+      "customerId": "a3ca091f-f54a-4a64-8267-808159751bef",
+      "customerName": "???? ?????? ?????? ????????",
+      "itemCount": 1,
+      "totalAmount": 75.5,
+      "paymentMethod": "customer_wallet",
+      "createdAt": "2026-08-16T22:43:49.2576505"
+    },
+    {
+      "id": "0dfb790d-2853-42f1-b832-b3cd4adb60a6",
+      "invoiceNumber": "INV-20260816211428530",
+      "invoiceType": "sale",
+      "status": "refunded",
+      "customerId": "387d6584-b57e-4843-a4b9-758559490037",
+      "customerName": "???? ?????? ???????",
+      "itemCount": 1,
+      "totalAmount": 10.0,
+      "paymentMethod": "customer_wallet",
+      "createdAt": "2026-08-16T21:14:28.5300586"
+    }
+  ],
+  "totalCount": 6,
+  "page": 1,
+  "pageSize": 50
+}

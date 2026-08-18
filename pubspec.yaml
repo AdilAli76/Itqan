@@ -36,7 +36,30 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
-  # لا أصول مجمَّعة حالياً.
+  fonts:
+    # الخط مضمَّن لا مُنزَّل وقت التشغيل.
+    #
+    # كان المشروع يعتمد على google_fonts بالجلب الشبكي، وهو خيار خاطئ لهذا
+    # النظام تحديداً: يُنشَر على خادم داخل متجر (راجع DEPLOYMENT.md)، فأول
+    # تشغيل بلا إنترنت يسقط إلى خط النظام الافتراضي — وتظهر الواجهة العربية
+    # بخط مختلف عن المُصمَّم لها. وعلى الأندرويد الأثر أوضح.
+    #
+    # والتضمين يحلّ أيضاً تعذّر توليد لقطات الشاشة في الاختبارات: بلا خط
+    # حقيقي يرسم flutter test كل حرف مربّعاً فارغاً.
+    #
+    # الكلفة 884 كيلوبايت لأربعة أوزان — ثمن زهيد مقابل استقلال عن الشبكة.
+    # الرخصة OFL وتسمح بإعادة التوزيع.
+    - family: IBMPlexSansArabic
+      fonts:
+        - asset: assets/fonts/IBMPlexSansArabic-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/IBMPlexSansArabic-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/IBMPlexSansArabic-SemiBold.ttf
+          weight: 600
+        - asset: assets/fonts/IBMPlexSansArabic-Bold.ttf
+          weight: 700
+
   #
   # كان هنا إعلان assets/icons/ لمجلد غير موجود ولا يشير إليه أي كود، فكان
   # Flutter يطبع خطأً مع كل أمر build وtest ("unable to find directory

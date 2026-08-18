@@ -1,0 +1,9 @@
+{
+  "currencyCode": "LYD",
+  "currencySymbol": "د.ل",
+  "locale": "ar",
+  "taxRate": 0.0,
+  "passwordMinLength": 6,
+  "receiptWidthMm": 80,
+  "posAllowOpenProduct": false
+}

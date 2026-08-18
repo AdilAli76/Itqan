@@ -41,7 +41,6 @@ class ReportsScreen extends ConsumerWidget {
       );
     }
 
-
     return AdaptiveScaffold(
       title: 'التقارير والتحليلات',
       activeRoute: '/reports',
@@ -154,7 +153,8 @@ class _SalesSection extends ConsumerWidget {
 
     return summaryAsync.when(
       loading: () => const TableSkeleton(),
-      error: (err, _) => _ErrorBox(message: 'تعذّر تحميل تقرير المبيعات', onRetry: () => ref.invalidate(salesSummaryProvider)),
+      error: (err, _) => _ErrorBox(
+          message: 'تعذّر تحميل تقرير المبيعات', onRetry: () => ref.invalidate(salesSummaryProvider)),
       data: (summary) {
         final crossAxisCount = Breakpoints.isDesktop(context) ? 4 : (Breakpoints.isTablet(context) ? 2 : 1);
         final totalRevenue = (summary['totalRevenue'] as num?)?.toDouble() ?? 0;
@@ -169,7 +169,7 @@ class _SalesSection extends ConsumerWidget {
               physics: const NeverScrollableScrollPhysics(),
               mainAxisSpacing: 16,
               crossAxisSpacing: 16,
-              childAspectRatio: 1.6,
+              mainAxisExtent: 168,
               children: [
                 StatCard(
                   label: 'إجمالي المبيعات',
@@ -314,7 +314,8 @@ class _RevenueChart extends StatelessWidget {
                         final day = from.add(Duration(days: value.round()));
                         return Padding(
                           padding: const EdgeInsets.only(top: 6),
-                          child: Text(_shortDayFormat.format(day), style: AppTextStyles.labelMd(color: AppColors.textMuted)),
+                          child: Text(_shortDayFormat.format(day),
+                              style: AppTextStyles.labelMd(color: AppColors.textMuted)),
                         );
                       },
                     ),
@@ -363,7 +364,8 @@ class _InventorySection extends ConsumerWidget {
 
     return summaryAsync.when(
       loading: () => const TableSkeleton(),
-      error: (err, _) => _ErrorBox(message: 'تعذّر تحميل تقرير المخزون', onRetry: () => ref.invalidate(inventorySummaryProvider)),
+      error: (err, _) => _ErrorBox(
+          message: 'تعذّر تحميل تقرير المخزون', onRetry: () => ref.invalidate(inventorySummaryProvider)),
       data: (summary) {
         final crossAxisCount = Breakpoints.isDesktop(context) ? 4 : (Breakpoints.isTablet(context) ? 2 : 1);
 
@@ -376,7 +378,10 @@ class _InventorySection extends ConsumerWidget {
               physics: const NeverScrollableScrollPhysics(),
               mainAxisSpacing: 16,
               crossAxisSpacing: 16,
-              childAspectRatio: 1.6,
+              // أطول من شبكة المبيعات: بطاقات المخزون تحمل شارة إضافية
+              // («خسارة»/«منخفض») فوق الرقم، فثمانية وستون ومئة لا تسعها —
+              // رُصد فيضاً بثلاثين بكسل في جولة اللقطات.
+              mainAxisExtent: 200,
               children: [
                 StatCard(
                   label: 'قيمة المخزون الإجمالية',
@@ -420,10 +425,17 @@ class _InventorySection extends ConsumerWidget {
             const SizedBox(height: 16),
             AppDataTable(
               title: 'فواقد الصلاحية والأصناف القريبة من الانتهاء',
-              columns: const [AppColumn('الصنف'), AppColumn('الكمية'), AppColumn('تاريخ الانتهاء'), AppColumn('قيمة الخسارة المقدَّرة')],
+              columns: const [
+                AppColumn('الصنف'),
+                AppColumn('الكمية'),
+                AppColumn('تاريخ الانتهاء'),
+                AppColumn('قيمة الخسارة المقدَّرة')
+              ],
               rows: [
-                ...List<Map<String, dynamic>>.from(summary['expiredItems'] as List? ?? []).map((i) => _expiryRow(i, expired: true)),
-                ...List<Map<String, dynamic>>.from(summary['nearExpiryItems'] as List? ?? []).map((i) => _expiryRow(i, expired: false)),
+                ...List<Map<String, dynamic>>.from(summary['expiredItems'] as List? ?? [])
+                    .map((i) => _expiryRow(i, expired: true)),
+                ...List<Map<String, dynamic>>.from(summary['nearExpiryItems'] as List? ?? [])
+                    .map((i) => _expiryRow(i, expired: false)),
               ],
             ),
           ],
@@ -444,7 +456,8 @@ class _InventorySection extends ConsumerWidget {
               color: expired ? AppColors.dangerBg : AppColors.warningBg,
               borderRadius: BorderRadius.circular(6),
             ),
-            child: Text(expired ? 'منتهي' : 'قريب', style: AppTextStyles.labelMd(color: expired ? AppColors.danger : AppColors.warning)),
+            child: Text(expired ? 'منتهي' : 'قريب',
+                style: AppTextStyles.labelMd(color: expired ? AppColors.danger : AppColors.warning)),
           ),
           const SizedBox(width: 8),
           Text(item['productName'] as String? ?? ''),

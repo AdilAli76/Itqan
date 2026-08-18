@@ -1,0 +1,43 @@
+{
+  "items": [
+    {
+      "id": "77d6c783-7964-4abe-a384-ae9e2e5dea20",
+      "sku": "545",
+      "barcode": "222222",
+      "name": "شازالي",
+      "unitBase": "piece",
+      "costPrice": 120.0,
+      "salePrice": 150.0,
+      "trackExpiry": false,
+      "reorderLevel": 55.0,
+      "categoryId": "9abe04f6-f680-420c-93d3-854b71850019",
+      "categoryName": "اشحاص",
+      "supplierId": "09c875f4-bfff-49a5-82c9-8f73150d3bee",
+      "supplierName": "adil",
+      "quantity": 119.0,
+      "nearestExpiryDate": null,
+      "tracksStock": true
+    },
+    {
+      "id": "17e8e95c-0480-47a1-9b1f-174f26835e3e",
+      "sku": "5252",
+      "barcode": "11111111",
+      "name": "فول",
+      "unitBase": "box",
+      "costPrice": 50.0,
+      "salePrice": 62.0,
+      "trackExpiry": true,
+      "reorderLevel": 45.0,
+      "categoryId": "82bfacae-0310-474d-945a-adabb40da6ce",
+      "categoryName": "غذاء",
+      "supplierId": "09c875f4-bfff-49a5-82c9-8f73150d3bee",
+      "supplierName": "adil",
+      "quantity": 155.0,
+      "nearestExpiryDate": "2027-08-11T00:00:00",
+      "tracksStock": true
+    }
+  ],
+  "totalCount": 2,
+  "page": 1,
+  "pageSize": 50
+}

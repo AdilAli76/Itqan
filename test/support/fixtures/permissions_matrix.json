@@ -1,0 +1,34 @@
+{
+  "branch_manager": [
+    "audit_log.view",
+    "cards.issue",
+    "categories.manage",
+    "customers.delete",
+    "customers.manage",
+    "customers.wallet_adjust",
+    "inventory.delete",
+    "inventory.manage",
+    "invoices.refund",
+    "license.view",
+    "purchasing.manage",
+    "reports.view",
+    "stock_count.manage",
+    "stock_transfer.manage",
+    "suppliers.delete",
+    "suppliers.manage"
+  ],
+  "cashier": [
+    "customers.manage",
+    "invoices.refund"
+  ],
+  "inventory_officer": [
+    "categories.manage",
+    "inventory.manage",
+    "purchasing.manage",
+    "stock_count.manage",
+    "stock_transfer.manage",
+    "suppliers.manage"
+  ],
+  "accountant": [],
+  "custom": []
+}

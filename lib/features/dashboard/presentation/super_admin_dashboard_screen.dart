@@ -128,7 +128,12 @@ class _DashboardContent extends StatelessWidget {
           physics: const NeverScrollableScrollPhysics(),
           mainAxisSpacing: 16,
           crossAxisSpacing: 16,
-          childAspectRatio: 1.6,
+          // ارتفاع ثابت لا نسبة أبعاد: childAspectRatio يجعل ارتفاع
+          // البطاقة تابعاً لعرضها، فكلّما ضاقت الشاشة قصرت البطاقة
+          // بينما محتواها ثابت (أيقونة + رقم بخط 32 + تسمية) — فيفيض.
+          // رُصد فعلياً في جولة اللقطات على الجهاز اللوحي.
+          // 168 يسع المحتوى بهامش أمان عند أي عرض.
+          mainAxisExtent: 168,
           children: [
             StatCard(
               label: 'مبيعات اليوم (كل الفروع)',

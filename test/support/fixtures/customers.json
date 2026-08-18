@@ -1,0 +1,26 @@
+{
+  "items": [
+    {
+      "id": "5c0675b9-d859-4763-935d-e1797f88d857",
+      "organizationId": "3be3ba8b-3053-4267-8b06-fb6d2bc64981",
+      "branchId": null,
+      "fullName": "عادل",
+      "phone": "65665",
+      "email": null,
+      "notes": null,
+      "cardBarcode": "9UJR27SGT5FV",
+      "walletBalance": 100.0,
+      "creditLimit": 65.0,
+      "loyaltyPoints": 0,
+      "createdAt": "2026-08-11T14:53:20.9543104",
+      "accountModel": "prepaid",
+      "sponsorId": null,
+      "sponsorName": null,
+      "entitlementCeiling": 0.0,
+      "entitlementExpiresOn": null
+    }
+  ],
+  "totalCount": 1,
+  "page": 1,
+  "pageSize": 50
+}

@@ -1,0 +1,15 @@
+[
+  "app_users",
+  "branches",
+  "customer_card_index",
+  "customers",
+  "invoice_items",
+  "invoices",
+  "products",
+  "purchase_orders",
+  "role_permissions",
+  "sponsors",
+  "stock_counts",
+  "stock_levels",
+  "suppliers"
+]

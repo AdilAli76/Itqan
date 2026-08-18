@@ -1,0 +1,10 @@
+[
+  {
+    "kind": "dead_stock",
+    "severity": "info",
+    "title": "بضاعة راكدة: فول",
+    "detail": "155 وحدة بلا أي حركة بيع، رأس مال مجمَّد 7750.00.",
+    "action": "/inventory",
+    "value": 7750.0
+  }
+]

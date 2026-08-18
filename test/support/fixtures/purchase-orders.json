@@ -1,0 +1,46 @@
+[
+  {
+    "id": "8658663e-c59e-4c61-a83b-d8283b6e3edf",
+    "branchId": "1b973583-0335-4f1c-a78f-299a42e6e8c8",
+    "branchName": "adil",
+    "supplierId": "09c875f4-bfff-49a5-82c9-8f73150d3bee",
+    "supplierName": "adil",
+    "status": "draft",
+    "totalAmount": 50.0,
+    "itemCount": 1,
+    "createdAt": "2026-08-18T18:35:17.6929412"
+  },
+  {
+    "id": "1a462f1d-3e40-4ed2-b68d-20958cf04adc",
+    "branchId": "1b973583-0335-4f1c-a78f-299a42e6e8c8",
+    "branchName": "adil",
+    "supplierId": "09c875f4-bfff-49a5-82c9-8f73150d3bee",
+    "supplierName": "adil",
+    "status": "received",
+    "totalAmount": 2750.0,
+    "itemCount": 1,
+    "createdAt": "2026-08-17T22:18:12.5147789"
+  },
+  {
+    "id": "764f687b-299f-4d29-bdc7-2466cd46c390",
+    "branchId": "1b973583-0335-4f1c-a78f-299a42e6e8c8",
+    "branchName": "adil",
+    "supplierId": "09c875f4-bfff-49a5-82c9-8f73150d3bee",
+    "supplierName": "adil",
+    "status": "received",
+    "totalAmount": 14640.0,
+    "itemCount": 1,
+    "createdAt": "2026-08-11T18:55:42.8705606"
+  },
+  {
+    "id": "6b6aec61-1481-4465-acf4-86bfa4216ed3",
+    "branchId": "1b973583-0335-4f1c-a78f-299a42e6e8c8",
+    "branchName": "adil",
+    "supplierId": "09c875f4-bfff-49a5-82c9-8f73150d3bee",
+    "supplierName": "adil",
+    "status": "received",
+    "totalAmount": 4500.0,
+    "itemCount": 1,
+    "createdAt": "2026-08-11T18:55:03.2763077"
+  }
+]

@@ -1,0 +1,14 @@
+[
+  {
+    "id": "9abe04f6-f680-420c-93d3-854b71850019",
+    "organizationId": "3be3ba8b-3053-4267-8b06-fb6d2bc64981",
+    "name": "اشحاص",
+    "parentId": null
+  },
+  {
+    "id": "82bfacae-0310-474d-945a-adabb40da6ce",
+    "organizationId": "3be3ba8b-3053-4267-8b06-fb6d2bc64981",
+    "name": "غذاء",
+    "parentId": null
+  }
+]

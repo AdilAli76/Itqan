@@ -1,0 +1,11 @@
+{
+  "totalInventoryValue": 22030.0,
+  "totalProducts": 2,
+  "lowStockCount": 0,
+  "lowStockItems": [],
+  "expiredCount": 0,
+  "expiredLossValue": 0,
+  "expiredItems": [],
+  "nearExpiryCount": 0,
+  "nearExpiryItems": []
+}

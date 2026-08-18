@@ -1,0 +1,87 @@
+[
+  {
+    "code": "audit_log.view",
+    "labelAr": "ط¹ط±ط¶ ط³ط¬ظ„ ط§ظ„طھط¯ظ‚ظٹظ‚",
+    "module": "audit_log"
+  },
+  {
+    "code": "cards.issue",
+    "labelAr": "إصدار بطاقات العملاء وضبط أرقامها السرية",
+    "module": "customers"
+  },
+  {
+    "code": "customers.delete",
+    "labelAr": "ط­ط°ظپ ط§ظ„ط¹ظ…ظ„ط§ط،",
+    "module": "customers"
+  },
+  {
+    "code": "customers.manage",
+    "labelAr": "ط¥ط¯ط§ط±ط© ط¨ظٹط§ظ†ط§طھ ط§ظ„ط¹ظ…ظ„ط§ط،",
+    "module": "customers"
+  },
+  {
+    "code": "customers.wallet_adjust",
+    "labelAr": "طھط¹ط¯ظٹظ„ ط±طµظٹط¯ ظ…ط­ظپط¸ط© ط§ظ„ط¹ظ…ظٹظ„",
+    "module": "customers"
+  },
+  {
+    "code": "categories.manage",
+    "labelAr": "ط¥ط¯ط§ط±ط© طھطµظ†ظٹظپط§طھ ط§ظ„ظ…ظ†طھط¬ط§طھ",
+    "module": "inventory"
+  },
+  {
+    "code": "inventory.delete",
+    "labelAr": "ط­ط°ظپ ط§ظ„ظ…ظ†طھط¬ط§طھ",
+    "module": "inventory"
+  },
+  {
+    "code": "inventory.manage",
+    "labelAr": "ط¥ط¯ط§ط±ط© ط§ظ„ظ…ظ†طھط¬ط§طھ (ط¥ط¶ط§ظپط©/طھط¹ط¯ظٹظ„/طھط³ظˆظٹط© ظ…ط®ط²ظˆظ†)",
+    "module": "inventory"
+  },
+  {
+    "code": "invoices.refund",
+    "labelAr": "ط§ط³طھط±ط¬ط§ط¹ ط§ظ„ظپظˆط§طھظٹط±",
+    "module": "invoices"
+  },
+  {
+    "code": "license.view",
+    "labelAr": "ط¹ط±ط¶ ط§ظ„طھط±ط®ظٹطµ ظˆط§ظ„ط§ط´طھط±ط§ظƒ",
+    "module": "license"
+  },
+  {
+    "code": "pos.price_override",
+    "labelAr": "ط§ظ„ط¨ظٹط¹ ط¨ط³ط¹ط± ظ…ط®ط§ظ„ظپ ظ„ط³ط¹ط± ط§ظ„ظƒطھط§ظ„ظˆط¬",
+    "module": "pos"
+  },
+  {
+    "code": "purchasing.manage",
+    "labelAr": "ط¥ط¯ط§ط±ط© ط£ظˆط§ظ…ط± ط§ظ„ط´ط±ط§ط،",
+    "module": "purchasing"
+  },
+  {
+    "code": "reports.view",
+    "labelAr": "ط¹ط±ط¶ ط§ظ„طھظ‚ط§ط±ظٹط±",
+    "module": "reports"
+  },
+  {
+    "code": "stock_count.manage",
+    "labelAr": "ط§ظ„ط¬ط±ط¯ ط§ظ„ط¯ظˆط±ظٹ",
+    "module": "stock_count"
+  },
+  {
+    "code": "stock_transfer.manage",
+    "labelAr": "طھط­ظˆظٹظ„ ط§ظ„ظ…ط®ط²ظˆظ† ط¨ظٹظ† ط§ظ„ظپط±ظˆط¹",
+    "module": "stock_transfer"
+  },
+  {
+    "code": "suppliers.delete",
+    "labelAr": "ط­ط°ظپ ط§ظ„ظ…ظˆط±ط¯ظٹظ†",
+    "module": "suppliers"
+  },
+  {
+    "code": "suppliers.manage",
+    "labelAr": "ط¥ط¯ط§ط±ط© ط§ظ„ظ…ظˆط±ط¯ظٹظ†",
+    "module": "suppliers"
+  }
+]

@@ -1,0 +1,20 @@
+[
+  {
+    "id": "09c875f4-bfff-49a5-82c9-8f73150d3bee",
+    "organizationId": "3be3ba8b-3053-4267-8b06-fb6d2bc64981",
+    "name": "adil",
+    "phone": "54545",
+    "balance": 0.0,
+    "isDeleted": false,
+    "createdAt": "2026-08-11T18:51:14.7592157"
+  },
+  {
+    "id": "2e61c1be-01ce-44fb-99a3-4beb7340a066",
+    "organizationId": "3be3ba8b-3053-4267-8b06-fb6d2bc64981",
+    "name": "افتراضي",
+    "phone": "5252555",
+    "balance": 0.0,
+    "isDeleted": false,
+    "createdAt": "2026-08-11T18:51:33.3272184"
+  }
+]
