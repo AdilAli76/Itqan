@@ -127,8 +127,19 @@ if ($Stage -eq 'check') {
     }
 
     Head '.NET 8 Hosting Bundle'
-    $runtimes = & dotnet --list-runtimes 2>$null
-    $hasAspNet = $runtimes | Where-Object { $_ -match 'Microsoft\.AspNetCore\.App 8\.' }
+    # فحص وجود الأمر قبل تشغيله: استدعاء أمر غير موجود يرمي
+    # CommandNotFoundException فينهار السكربت كله — ومرحلة الفحص وُجدت
+    # لتُبلّغ عن الناقص لا لتموت عنده. هذا أول ما يصادفه من يبدأ بخادم خام،
+    # أي أن الانهيار يقع في أسوأ لحظة ممكنة: قبل أن يعرف المستخدم شيئاً.
+    $hasAspNet = $null
+    if (Get-Command dotnet -ErrorAction SilentlyContinue) {
+        try {
+            $runtimes = & dotnet --list-runtimes 2>$null
+            $hasAspNet = $runtimes | Where-Object { $_ -match 'Microsoft\.AspNetCore\.App 8\.' }
+        } catch {
+            # dotnet موجود لكنه لا يستجيب — يُعامَل كناقص.
+        }
+    }
     if ($hasAspNet) { Ok ($hasAspNet | Select-Object -First 1) }
     else {
         Miss 'ASP.NET Core Runtime 8 غير مثبَّت'
