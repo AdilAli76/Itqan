@@ -83,9 +83,30 @@ Write-Host "    قاعدة التجربة: $Database على $SqlInstance"
 
 # ── 1. فحص المتطلبات ────────────────────────────────────────────────────
 Step 1 'فحص المتطلبات'
+
+# Flutter لا يُضيف نفسه إلى PATH عند التثبيت اليدوي (وهو الشائع على ويندوز)،
+# فالفشل بـ«غير موجود» بينما هو مثبَّت فعلاً إزعاج بلا داعٍ. نبحث في
+# المواضع المعتادة قبل الاستسلام، ونضيفه إلى PATH لهذه الجلسة وحدها.
+if (-not (Get-Command 'flutter' -ErrorAction SilentlyContinue)) {
+    $guesses = @(
+        'C:\src\flutter\bin',
+        "$env:LOCALAPPDATA\flutter\bin",
+        "$env:USERPROFILE\flutter\bin",
+        'C:\flutter\bin',
+        'C:\tools\flutter\bin'
+    )
+    foreach ($g in $guesses) {
+        if (Test-Path (Join-Path $g 'flutter.bat')) {
+            $env:PATH = "$env:PATH;$g"
+            Warn "flutter غير موجود في PATH — استُعمل $g لهذه الجلسة"
+            break
+        }
+    }
+}
+
 foreach ($tool in @('dotnet', 'flutter')) {
     if (-not (Get-Command $tool -ErrorAction SilentlyContinue)) {
-        throw "$tool غير موجود في PATH."
+        throw "$tool غير موجود في PATH. ثبّته أو أضف مجلد bin الخاص به إلى PATH."
     }
     Ok "$tool موجود"
 }
