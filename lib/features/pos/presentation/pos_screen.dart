@@ -524,15 +524,25 @@ class _PosScreenState extends ConsumerState<PosScreen> {
           }
         },
         child: isDesktop
-            ? IntrinsicHeight(
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(flex: 3, child: scanner),
-                    const SizedBox(width: 20),
-                    Expanded(flex: 2, child: cart),
-                  ],
-                ),
+            // بلا IntrinsicHeight: كان يلفّ هذا الصف لتتساوى ارتفاعات
+            // اللوحتين، لكنه يستدعي قياس الأبعاد الجوهرية — وشبكة الأصناف
+            // داخله عارض كسول (GridView بـ shrinkWrap) يرفض ذلك صراحةً،
+            // فينهار التخطيط كاملاً بـ RenderShrinkWrappingViewport does not
+            // support returning intrinsic dimensions.
+            //
+            // العطل كامن منذ أول التزام ولم يظهر لأن بحث الأصناف كان معطوباً
+            // فلم تُملأ الشبكة قط. إصلاح البحث هو ما كشفه.
+            //
+            // التساوي ليس مطلوباً أصلاً: سلّة فارغة لا يجب أن تمتدّ بطول
+            // قائمة أصناف طويلة، وCrossAxisAlignment.start يعطي كل لوحة
+            // ارتفاعها الطبيعي.
+            ? Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(flex: 3, child: scanner),
+                  const SizedBox(width: 20),
+                  Expanded(flex: 2, child: cart),
+                ],
               )
             : Column(children: [scanner, const SizedBox(height: 20), cart]),
       ),

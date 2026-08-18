@@ -354,6 +354,10 @@ class _DesignerBodyState extends ConsumerState<_DesignerBody> {
       ),
     );
 
+    // IntrinsicHeight آمن هنا بخلاف نقطة البيع: قائمة نتائج البحث أعلاه
+    // داخل SizedBox بارتفاع 140 محدَّد، فيردّ الصندوق على قياس الأبعاد
+    // الجوهرية بقيمته دون سؤال العارض الكسول داخله. إزالة ذلك الارتفاع
+    // المحدَّد تُعيد العطل نفسه فوراً.
     return isDesktop
         ? IntrinsicHeight(
             child: Row(

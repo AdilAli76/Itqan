@@ -52,6 +52,31 @@ builder.Services
             IssuerSigningKey = new SymmetricSecurityKey(
                 Encoding.UTF8.GetBytes(builder.Configuration["Jwt:Key"]!)),
         };
+
+        // SignalR عبر WebSocket لا يستطيع إرسال ترويسة Authorization: واجهة
+        // WebSocket في المتصفح لا تسمح بترويسات مخصّصة في المصافحة إطلاقاً،
+        // فيمرّر العميل التوكن في سلسلة الاستعلام (وهو ما يفعله
+        // signalr_netcore عبر accessTokenFactory).
+        //
+        // بلا هذا المعالج يفشل الاتصال بـ"HTTP Authentication failed" ويبقى
+        // مؤشّر «غير متصل» ظاهراً أبداً — وهو ما كان يحدث فعلاً.
+        //
+        // القراءة مقصورة على مسار /hubs: قبول التوكن من سلسلة الاستعلام على
+        // نقاط الـAPI العادية يعني تسرّبه إلى سجلات الخادم وتاريخ المتصفح،
+        // وهي أماكن لا تُحمى كما تُحمى الترويسات.
+        options.Events = new JwtBearerEvents
+        {
+            OnMessageReceived = context =>
+            {
+                var accessToken = context.Request.Query["access_token"];
+                if (!string.IsNullOrEmpty(accessToken) &&
+                    context.HttpContext.Request.Path.StartsWithSegments("/hubs"))
+                {
+                    context.Token = accessToken;
+                }
+                return Task.CompletedTask;
+            }
+        };
     });
 
 builder.Services.AddAuthorization();
