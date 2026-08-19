@@ -584,15 +584,30 @@ BEGIN
     ALTER TABLE dbo.purchase_order_items
         ADD received_quantity DECIMAL(18,3) NOT NULL
             CONSTRAINT df_po_items_received DEFAULT 0;
+    PRINT N'أُضيف عمود purchase_order_items.received_quantity';
+END
+GO
 
-    -- الأوامر المستلَمة سابقاً استُلمت بالكامل بحكم آلية ذلك الوقت،
-    -- فتُضبط كميتها المستلَمة على المطلوبة — وإلا ظهرت كلها «ناقصة».
+-- تعبئة الماضي في دفعة منفصلة — والفصل إلزامي لا تنظيمي.
+--
+-- SQL Server يترجم الدفعة كاملةً قبل تنفيذ أي سطر منها، فعمودٌ يُضاف
+-- بـALTER في نفس الدفعة لا يعرفه المترجم بعد: تفشل الدفعة كلها بـ«Invalid
+-- column name» ولا يُنفَّذ حتى الـALTER نفسه. GO بينهما هو ما يجعل الأولى
+-- تكتمل قبل ترجمة الثانية.
+--
+-- والأوامر المستلَمة سابقاً استُلمت بالكامل بحكم آلية ذلك الوقت، فتُضبط
+-- كميتها المستلَمة على المطلوبة — وإلا ظهرت كلها «ناقصة» بعد الترحيل.
+-- والشرط received_quantity = 0 يجعلها آمنة للإعادة: لا تدهس استلاماً
+-- جزئياً سُجّل بعد الترحيل.
+IF EXISTS (SELECT 1 FROM sys.columns
+           WHERE object_id = OBJECT_ID('dbo.purchase_order_items') AND name = 'received_quantity')
+BEGIN
     UPDATE i SET i.received_quantity = i.quantity
     FROM dbo.purchase_order_items i
     JOIN dbo.purchase_orders o ON o.id = i.purchase_order_id
-    WHERE o.status = 'received';
+    WHERE o.status = 'received' AND i.received_quantity = 0;
 
-    PRINT N'أُضيف عمود purchase_order_items.received_quantity';
+    IF @@ROWCOUNT > 0 PRINT N'ضُبطت الكميات المستلَمة للأوامر المكتملة سابقاً';
 END
 GO
 
