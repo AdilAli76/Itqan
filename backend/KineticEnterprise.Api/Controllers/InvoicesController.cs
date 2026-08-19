@@ -1,4 +1,4 @@
-using System.IdentityModel.Tokens.Jwt;
+﻿using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -22,7 +22,13 @@ public record CreateInvoiceRequest(
     // الطلب وقبل وصول الرد حالة شائعة جداً في متجر، وبدون هذا المفتاح تُنشأ
     // الفاتورة مرّتين ويُخصَم المخزون مرّتين — وهو أسوأ ما يمكن أن ينتج عن
     // ميزة «العمل دون اتصال».
-    string? ClientRequestId = null);
+    string? ClientRequestId = null,
+    /// المدفوع الآن من الإجمالي. NULL = دفع كامل (وهو الغالب).
+    /// أقلّ من الإجمالي = دفع جزئي، والفرق يُقيَّد دَيناً على محفظة العميل
+    /// — فيلزم عميل محدَّد وحدّ ائتمان يتّسع للفرق.
+    decimal? PaidAmount = null,
+    /// النقد الذي سلّمه الزبون، والباقي يُشتقّ منه. للتدقيق وتسوية الدرج.
+    decimal? TenderedAmount = null);
 
 /// صفحة فواتير — نفس شكل CustomerPageDto وAuditLogPageDto.
 public record InvoicePageDto(List<InvoiceListItemDto> Items, int TotalCount, int Page, int PageSize);
@@ -367,6 +373,55 @@ public class InvoicesController : ControllerBase
             }
         }
 
+        // ── الدفع الجزئي ──────────────────────────────────────────────
+        //
+        // الفرق دَينٌ على العميل، فيلزم عميل معروف: لا دَين على «زبون نقدي»
+        // — من ينصرف بلا اسم لا يُطالَب لاحقاً.
+        //
+        // والحدّ الائتماني قرار إداري لا قرار كاشير: يُضبط لكل عميل من
+        // شاشة العملاء. صفر يعني «لا بيع بالأجل لهذا العميل» لا «بلا قيد»،
+        // وهو الافتراض الآمن — العكس كان يفتح الأجل للجميع بلا قرار.
+        var paidAmount = request.PaidAmount ?? invoice.TotalAmount;
+        if (paidAmount < 0)
+        {
+            return BadRequest(new { message = "المبلغ المدفوع لا يمكن أن يكون سالباً" });
+        }
+        if (paidAmount > invoice.TotalAmount)
+        {
+            return BadRequest(new { message = "المبلغ المدفوع أكبر من إجمالي الفاتورة" });
+        }
+
+        var debtAmount = invoice.TotalAmount - paidAmount;
+        Customer? debtCustomer = null;
+        if (debtAmount > 0)
+        {
+            if (payingFromWallet)
+            {
+                return BadRequest(new { message = "الدفع من المحفظة لا يقبل تجزئة — الرصيد يكفي أو لا يكفي" });
+            }
+            if (!request.CustomerId.HasValue)
+            {
+                return BadRequest(new { message = "الدفع الجزئي يحتاج عميلاً محدَّداً — لا دَين على زبون نقدي" });
+            }
+            debtCustomer = await _db.Customers.FindAsync(request.CustomerId.Value);
+            if (debtCustomer is null) return BadRequest(new { message = "العميل غير موجود" });
+
+            // الرصيد الحالي يدخل الحساب: عميل رصيده موجب يستهلكه أولاً،
+            // والدَّين هو ما يتجاوزه — والحدّ يُقاس على المحصّلة لا على
+            // مبلغ الفاتورة وحده.
+            var current = await WalletBalances.ComputeLockedAsync(_db, debtCustomer.Id);
+            var after = current - debtAmount;
+            if (after < -debtCustomer.CreditLimit)
+            {
+                return BadRequest(new
+                {
+                    message = debtCustomer.CreditLimit <= 0
+                        ? "البيع بالأجل غير مسموح لهذا العميل — اضبط حدّ الائتمان من شاشة العملاء"
+                        : $"المبلغ يتجاوز حدّ ائتمان العميل ({debtCustomer.CreditLimit:0.##})"
+                });
+            }
+        }
+
         if (payingFromWallet)
         {
             // الرصيد مجموع الدفتر لا عمود مخزَّن — راجع WalletBalances.
@@ -385,7 +440,16 @@ public class InvoicesController : ControllerBase
         // invoice_payments كانت جدولاً معرَّفاً في المخطط بلا أي كود يكتب
         // إليه — الفاتورة كانت تُنشأ بلا سجل دفع مطابق أصلاً. صف واحد بكامل
         // المبلغ يكفي الآن (دفع مقسّم فعلي مرحلة لاحقة على شاشة POS ذاتها).
-        invoice.Payments.Add(new InvoicePayment { Method = request.PaymentMethod, Amount = invoice.TotalAmount });
+        // صف الدفع بالمبلغ المدفوع فعلاً لا بإجمالي الفاتورة: تسجيل الكامل
+        // في دفع جزئي يجعل الدفتر يقول إن المال قُبض وهو لم يُقبض.
+        invoice.Payments.Add(new InvoicePayment { Method = request.PaymentMethod, Amount = paidAmount });
+        invoice.PaidAmount = paidAmount;
+        invoice.TenderedAmount = request.TenderedAmount;
+        if (request.TenderedAmount.HasValue)
+        {
+            var change = request.TenderedAmount.Value - paidAmount;
+            invoice.ChangeDue = change > 0 ? change : 0;
+        }
 
         _db.Invoices.Add(invoice);
         await _db.SaveChangesAsync();
@@ -407,6 +471,25 @@ public class InvoicesController : ControllerBase
                 Note = $"سداد فاتورة {invoice.InvoiceNumber}",
                 CreatedBy = CurrentUserId(),
             });
+            await _db.SaveChangesAsync();
+        }
+
+        // الدَّين حركة مدينة على دفتر العميل — بعد الفاتورة لنفس سبب حركة
+        // المحفظة أعلاه (مفتاح خارجي على invoices).
+        if (debtAmount > 0 && debtCustomer is not null)
+        {
+            _db.CustomerWalletTransactions.Add(new CustomerWalletTransaction
+            {
+                OrganizationId = invoice.OrganizationId,
+                CustomerId = debtCustomer.Id,
+                InvoiceId = invoice.Id,
+                Kind = WalletKinds.Spend,
+                Amount = debtAmount,
+                Note = $"باقي فاتورة {invoice.InvoiceNumber} (دفع جزئي)",
+                CreatedBy = CurrentUserId(),
+            });
+            _db.LogAudit(invoice.OrganizationId, CurrentUserId(), "invoice.partial_payment", "invoices", invoice.Id,
+                newValues: new { invoice.TotalAmount, Paid = paidAmount, Debt = debtAmount, debtCustomer.Id });
             await _db.SaveChangesAsync();
         }
 
