@@ -1,4 +1,4 @@
-using System.IdentityModel.Tokens.Jwt;
+﻿using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -12,7 +12,10 @@ namespace KineticEnterprise.Api.Controllers;
 public record PurchaseOrderLineRequest(Guid ProductId, decimal Quantity, decimal UnitCost, decimal? SalePrice);
 public record CreatePurchaseOrderRequest(Guid BranchId, Guid? SupplierId, List<PurchaseOrderLineRequest> Lines);
 
-public record ReceiveLineRequest(Guid ProductId, string? BatchNumber, DateTime? ExpiryDate);
+public record ReceiveLineRequest(
+    Guid ProductId, string? BatchNumber, DateTime? ExpiryDate,
+    /// المستلَم فعلياً من هذا السطر. NULL = المتبقّي كاملاً (وهو الغالب).
+    decimal? Quantity = null);
 public record ReceivePurchaseOrderRequest(List<ReceiveLineRequest> Lines);
 
 public record PurchaseOrderListItemDto(
@@ -20,7 +23,8 @@ public record PurchaseOrderListItemDto(
     string Status, decimal TotalAmount, int ItemCount, DateTime CreatedAt);
 
 public record PurchaseOrderDetailItemDto(
-    Guid ProductId, string ProductName, bool TrackExpiry, decimal Quantity, decimal UnitCost, decimal? SalePrice, decimal LineTotal);
+    Guid ProductId, string ProductName, bool TrackExpiry, decimal Quantity, decimal UnitCost,
+    decimal? SalePrice, decimal LineTotal, decimal ReceivedQuantity, decimal RemainingQuantity);
 public record PurchaseOrderDetailDto(
     Guid Id, Guid BranchId, string BranchName, Guid? SupplierId, string SupplierName,
     string Status, decimal TotalAmount, DateTime CreatedAt, List<PurchaseOrderDetailItemDto> Items);
@@ -33,6 +37,7 @@ public record PurchaseOrderDetailDto(
 /// البضاعة فعلياً — هنا فقط تُضاف الكمية لـ stock_levels)، أو cancelled
 /// قبل الاستلام فقط.
 /// </summary>
+[RequireModule("inventory")]
 [ApiController]
 [Route("api/purchase-orders")]
 [Authorize]
@@ -141,12 +146,36 @@ public class PurchaseOrdersController : ControllerBase
 
         var receiveLines = request.Lines.ToDictionary(l => l.ProductId);
 
+        // تحقّق قبل أي كتابة: كمية أكبر من المتبقّي تُدخل مخزوناً لم يصل،
+        // وسالبة تُخرج مخزوناً بلا سبب. والفحص كاملاً قبل البدء يمنع أمراً
+        // نصفَ مستلَم بسبب سطر خاطئ في آخر القائمة.
+        foreach (var item in order.Items)
+        {
+            if (!receiveLines.TryGetValue(item.ProductId, out var l) || l.Quantity is null) continue;
+            if (l.Quantity < 0)
+            {
+                return BadRequest(new { message = "الكمية المستلَمة لا يمكن أن تكون سالبة" });
+            }
+            if (l.Quantity > item.RemainingQuantity)
+            {
+                return BadRequest(new
+                {
+                    message = $"الكمية المستلَمة أكبر من المتبقّي ({item.RemainingQuantity:0.##}) لأحد الأصناف"
+                });
+            }
+        }
+
         await using var transaction = await _db.Database.BeginTransactionAsync();
 
         foreach (var item in order.Items)
         {
             var product = await _db.Products.FirstOrDefaultAsync(p => p.Id == item.ProductId);
             receiveLines.TryGetValue(item.ProductId, out var receiveLine);
+
+            // بلا كمية مذكورة يُستلَم المتبقّي كاملاً — سلوك الاستلام الكامل
+            // كما كان، فالطلبات القديمة لا تتغيّر نتيجتها.
+            var receiving = receiveLine?.Quantity ?? item.RemainingQuantity;
+            if (receiving <= 0) continue;
 
             var batchNumber = product?.TrackExpiry == true ? (receiveLine?.BatchNumber ?? "") : "";
             var expiryDate = product?.TrackExpiry == true ? receiveLine?.ExpiryDate : null;
@@ -161,15 +190,17 @@ public class PurchaseOrdersController : ControllerBase
                     BranchId = order.BranchId,
                     ProductId = item.ProductId,
                     BatchNumber = batchNumber,
-                    Quantity = item.Quantity,
+                    Quantity = receiving,
                     ExpiryDate = expiryDate,
                 });
             }
             else
             {
-                stock.Quantity += item.Quantity;
+                stock.Quantity += receiving;
                 if (expiryDate.HasValue) stock.ExpiryDate = expiryDate;
             }
+
+            item.ReceivedQuantity += receiving;
 
             if (product is not null)
             {
@@ -178,8 +209,15 @@ public class PurchaseOrdersController : ControllerBase
             }
         }
 
-        order.Status = "received";
-        _db.LogAudit(order.OrganizationId, CurrentUserId(), "purchase_order.received", "purchase_orders", order.Id, null);
+        // الأمر يُغلَق حين يصل كل شيء فقط. وما دام سطر واحد ناقصاً يبقى
+        // «مُرسَلاً» فيظهر في قائمة المنتظَر من الموردين — وهذا هو الغرض:
+        // توريد ناقص يجب أن يبقى مرئياً حتى يكتمل أو يُلغى.
+        var fullyReceived = order.Items.All(i => i.RemainingQuantity <= 0);
+        if (fullyReceived) order.Status = "received";
+        _db.LogAudit(order.OrganizationId, CurrentUserId(),
+            fullyReceived ? "purchase_order.received" : "purchase_order.partially_received",
+            "purchase_orders", order.Id,
+            newValues: new { Lines = order.Items.Select(i => new { i.ProductId, i.Quantity, i.ReceivedQuantity }) });
         await _db.SaveChangesAsync();
         await transaction.CommitAsync();
         return NoContent();
@@ -233,7 +271,8 @@ public class PurchaseOrdersController : ControllerBase
                 products.TryGetValue(i.ProductId, out var product);
                 return new PurchaseOrderDetailItemDto(
                     i.ProductId, product?.Name ?? "-", product?.TrackExpiry ?? false,
-                    i.Quantity, i.UnitCost, i.SalePrice, i.Quantity * i.UnitCost);
+                    i.Quantity, i.UnitCost, i.SalePrice, i.Quantity * i.UnitCost,
+                    i.ReceivedQuantity, i.RemainingQuantity);
             }).ToList());
     }
 

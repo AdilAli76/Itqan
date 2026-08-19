@@ -1,4 +1,4 @@
-using System.IdentityModel.Tokens.Jwt;
+﻿using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
 using Microsoft.AspNetCore.Mvc;
@@ -70,6 +70,10 @@ public class AuthController : ControllerBase
             // ادّعاء قصير مكرَّر "role" خصيصاً للواجهة، بلا مساس بمنطق التصريح
             // في الباك اند الذي يبقى يعتمد على ClaimTypes.Role كما هو.
             new(ClaimTypes.Role, user.Role),
+            // الاسم في التوكن لا في نداء منفصل: يُطبَع على أوامر الشراء
+            // تحت خانة «أصدره»، ويُعرض في الواجهة. توقيع بلا اسم مقروء لا
+            // يدلّ على أحد بعد شهور.
+            new(ClaimTypes.Name, user.FullName),
             new("role", user.Role),
         };
         if (user.BranchId.HasValue)
