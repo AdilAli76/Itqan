@@ -184,6 +184,21 @@ BEGIN
     VALUES ('cards.issue', N'إصدار بطاقات العملاء وضبط أرقامها السرية', N'customers');
     PRINT N'أُضيفت صلاحية cards.issue';
 END
+ELSE
+BEGIN
+    -- تصحيح النصّ لا مجرّد تخطّي الإدراج.
+    --
+    -- من نفّذ هذا الملف بـ sqlcmd بلا العلم -f 65001 خُزّن عنده النصّ
+    -- العربي تالفاً (بايتات UTF-8 مقروءة بترميز غربي: «Ø¥ØµØ¯Ø§Ø±»).
+    -- وإعادة التنفيذ لم تكن تُصلحه: الصف موجود فيتخطّاه IF NOT EXISTS،
+    -- فيبقى التلف ظاهراً للمستخدم في شاشة الصلاحيات إلى الأبد.
+    UPDATE dbo.permissions
+    SET label_ar = N'إصدار بطاقات العملاء وضبط أرقامها السرية',
+        module   = N'customers'
+    WHERE code = 'cards.issue'
+      AND (label_ar <> N'إصدار بطاقات العملاء وضبط أرقامها السرية' OR module <> N'customers');
+    IF @@ROWCOUNT > 0 PRINT N'صُحّح نصّ صلاحية cards.issue';
+END
 GO
 
 -- ⚠ role_permissions محمي بسياسة أمان (Security.RolePermissionsPolicy).
@@ -438,6 +453,190 @@ CREATE SECURITY POLICY Security.StockTransferItemsPolicy
 GO
 
 PRINT N'سياسات العزل الناقصة مُطبَّقة';
+GO
+
+-- ----------------------------------------------------------------------------
+--  2026-08-19 — جدول المرفقات: شعار المنظمة وفواتير الموردين
+--
+--  الملف نفسه يُخزَّن على قرص السيرفر لا في القاعدة: صور الشعارات وصور
+--  فواتير الموردين تُقاس بالميغابايتات، ووضعها في VARBINARY يُضخّم كل نسخة
+--  احتياطية بلا مقابل ويُبطئ استرجاعها. الجدول يحفظ الوصف والمسار، والقرص
+--  يحفظ البايتات.
+--
+--  ومسار التخزين خارج مجلد النشر بقصد (Storage:Path في appsettings): كل
+--  ترقية تستبدل مجلد backend كاملاً، فملفات مرفوعة بداخله تُمحى مع أول
+--  تحديث — وفاتورة مورّد ممحوّة لا تُسترجع.
+-- ----------------------------------------------------------------------------
+IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'attachments')
+BEGIN
+    CREATE TABLE dbo.attachments (
+        id               UNIQUEIDENTIFIER NOT NULL DEFAULT NEWID() PRIMARY KEY,
+        organization_id  UNIQUEIDENTIFIER NOT NULL,
+        -- الكيان المرتبط: 'organization_logo' أو 'purchase_order' …
+        entity_type      NVARCHAR(40)  NOT NULL,
+        entity_id        UNIQUEIDENTIFIER NULL,
+        file_name        NVARCHAR(260) NOT NULL,
+        content_type     NVARCHAR(120) NOT NULL,
+        size_bytes       BIGINT        NOT NULL,
+        -- اسم الملف على القرص فقط، لا مسار كامل: نقل مجلد التخزين أو تغيير
+        -- حرف القرص لا يُبطل الصفوف.
+        stored_name      NVARCHAR(120) NOT NULL,
+        uploaded_by      UNIQUEIDENTIFIER NULL,
+        created_at       DATETIME2     NOT NULL DEFAULT SYSUTCDATETIME()
+    );
+    CREATE INDEX ix_attachments_entity ON dbo.attachments (organization_id, entity_type, entity_id);
+    PRINT N'أُنشئ جدول attachments';
+END
+GO
+
+-- عزل على مستوى المنظمة: مرفقات منظمة لا تُقرأ من منظمة أخرى ولو عُرف
+-- معرّفها. فاتورة مورّد تكشف أسعار الشراء — وهي أكثر ما يهمّ منافساً.
+IF NOT EXISTS (SELECT 1 FROM sys.security_policies WHERE name = 'AttachmentsPolicy')
+EXEC('
+CREATE SECURITY POLICY Security.AttachmentsPolicy
+  ADD FILTER PREDICATE Security.fn_OrgOnlyPredicate(organization_id) ON dbo.attachments,
+  ADD BLOCK PREDICATE Security.fn_OrgOnlyPredicate(organization_id) ON dbo.attachments AFTER INSERT
+  WITH (STATE = ON);');
+GO
+
+PRINT N'جدول المرفقات وسياسة عزله جاهزان';
+GO
+
+-- ----------------------------------------------------------------------------
+--  2026-08-19 — إصدار المنظمة
+--
+--  الإصدار يحدّد **شكل** النظام لا حجمه: أي وحدات تعمل، وكيف تتصرّف نقطة
+--  البيع. وهو غير plan_tier في licenses الذي يحدّد الحدود (فروع، مستخدمون،
+--  مدّة). منظمة على إصدار المحفظة قد تكون كبيرة، وأخرى قياسية قد تكون
+--  تجريبية.
+--
+--    standard : متجر كامل — أصناف ومخزون ومشتريات ونقطة بيع
+--    wallet   : بطاقات وأرصدة بلا أي بضاعة. الكاشير يُدخل مبلغاً فيُخصم من
+--               بطاقة العامل أو يُسجَّل بيعاً نقدياً للفرع. للجهة التي تصرف
+--               على منتسبيها لا التي تبيع بضاعة.
+--    trial    : قياسي بمدّة محدودة
+--    enterprise : قياسي بحدود أوسع
+--
+--  عمود واحد بقيمة نصية لا جدول: القيمة تُقرأ في كل طلب تقريباً (لبناء
+--  التنقّل وسلوك نقطة البيع)، وربطها بجدول يعني وصلة في كل استعلام مقابل
+--  لا شيء — فهي لا تحمل خصائص أخرى تُخزَّن.
+-- ----------------------------------------------------------------------------
+IF NOT EXISTS (SELECT 1 FROM sys.columns
+               WHERE object_id = OBJECT_ID('dbo.organizations') AND name = 'edition')
+BEGIN
+    ALTER TABLE dbo.organizations
+        ADD edition NVARCHAR(20) NOT NULL CONSTRAINT df_organizations_edition DEFAULT 'standard';
+    PRINT N'أُضيف عمود organizations.edition';
+END
+GO
+
+PRINT N'إصدار المنظمة جاهز';
+GO
+
+-- ----------------------------------------------------------------------------
+--  2026-08-19 — الدفاتر: الدفع الجزئي، النقد المستلَم، الاستلام الجزئي
+-- ----------------------------------------------------------------------------
+
+-- النقد المستلَم والباقي.
+--
+-- كانت حاسبة النقد في نقطة البيع تحسبهما وتعرضهما ثم تنساهما: لا يُطبعان
+-- على الإيصال ولا يُراجَعان في تسوية الدرج آخر اليوم. ورقم لا يُحفَظ لا
+-- يُدقَّق — والدرج الناقص حينها لا يُعرف أهو خطأ صرف أم سرقة.
+IF NOT EXISTS (SELECT 1 FROM sys.columns
+               WHERE object_id = OBJECT_ID('dbo.invoices') AND name = 'tendered_amount')
+BEGIN
+    ALTER TABLE dbo.invoices ADD tendered_amount DECIMAL(18,3) NULL;
+    PRINT N'أُضيف عمود invoices.tendered_amount';
+END
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.columns
+               WHERE object_id = OBJECT_ID('dbo.invoices') AND name = 'change_due')
+BEGIN
+    ALTER TABLE dbo.invoices ADD change_due DECIMAL(18,3) NULL;
+    PRINT N'أُضيف عمود invoices.change_due';
+END
+GO
+
+-- المدفوع فعلاً من إجمالي الفاتورة.
+--
+-- NULL أو مساوٍ للإجمالي = مدفوعة بالكامل، وهو حال كل الفواتير السابقة.
+-- وأقلّ منه = دفع جزئي، والفرق دَينٌ مقيَّد على محفظة العميل بحركة مدينة.
+-- لا جدول ديون منفصل: دفتر المحفظة هو دفتر العميل، ورصيده السالب هو دَينه
+-- — فيظهر في كشف حسابه ويُسدَّد بشحنة كأي رصيد.
+IF NOT EXISTS (SELECT 1 FROM sys.columns
+               WHERE object_id = OBJECT_ID('dbo.invoices') AND name = 'paid_amount')
+BEGIN
+    ALTER TABLE dbo.invoices ADD paid_amount DECIMAL(18,3) NULL;
+    PRINT N'أُضيف عمود invoices.paid_amount';
+END
+GO
+
+-- الكمية المستلَمة فعلياً من كل سطر أمر شراء.
+--
+-- كان الاستلام كلّه-أو-لا-شيء: ReceiveLineRequest بلا حقل كمية أصلاً، فأي
+-- توريد ناقص من المورّد لا يمكن تسجيله كما وقع — إمّا يُستلَم الأمر كاملاً
+-- (فيدخل المخزون بضاعة لم تصل) أو يبقى معلَّقاً (فلا تدخل بضاعة وصلت).
+-- كلاهما رصيد خاطئ في الدفتر.
+IF NOT EXISTS (SELECT 1 FROM sys.columns
+               WHERE object_id = OBJECT_ID('dbo.purchase_order_items') AND name = 'received_quantity')
+BEGIN
+    ALTER TABLE dbo.purchase_order_items
+        ADD received_quantity DECIMAL(18,3) NOT NULL
+            CONSTRAINT df_po_items_received DEFAULT 0;
+
+    -- الأوامر المستلَمة سابقاً استُلمت بالكامل بحكم آلية ذلك الوقت،
+    -- فتُضبط كميتها المستلَمة على المطلوبة — وإلا ظهرت كلها «ناقصة».
+    UPDATE i SET i.received_quantity = i.quantity
+    FROM dbo.purchase_order_items i
+    JOIN dbo.purchase_orders o ON o.id = i.purchase_order_id
+    WHERE o.status = 'received';
+
+    PRINT N'أُضيف عمود purchase_order_items.received_quantity';
+END
+GO
+
+PRINT N'أعمدة الدفاتر جاهزة';
+GO
+
+-- ----------------------------------------------------------------------------
+--  2026-08-19 — شروط العقد المالية على الترخيص
+--
+--  تُحفَظ لا تُطبَع وتُنسى: العقد يُعاد طبعه بعد شهور عند خلاف أو تجديد،
+--  وقيمةٌ أُدخلت مرّة في نافذة ثم ضاعت تجعل النسخة الثانية مختلفة عن
+--  الأولى — وعقدان بمبلغين مختلفين أسوأ من غياب العقد.
+--
+--  على licenses لا على organizations: هي شروط الاشتراك لا هوية الشركة،
+--  وتتغيّر مع كل تجديد بينما الهوية ثابتة.
+-- ----------------------------------------------------------------------------
+IF NOT EXISTS (SELECT 1 FROM sys.columns
+               WHERE object_id = OBJECT_ID('dbo.licenses') AND name = 'monthly_fee')
+BEGIN
+    ALTER TABLE dbo.licenses ADD monthly_fee DECIMAL(18,3) NOT NULL
+        CONSTRAINT df_licenses_monthly_fee DEFAULT 0;
+    PRINT N'أُضيف عمود licenses.monthly_fee';
+END
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.columns
+               WHERE object_id = OBJECT_ID('dbo.licenses') AND name = 'storage_fee')
+BEGIN
+    ALTER TABLE dbo.licenses ADD storage_fee DECIMAL(18,3) NOT NULL
+        CONSTRAINT df_licenses_storage_fee DEFAULT 0;
+    PRINT N'أُضيف عمود licenses.storage_fee';
+END
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.columns
+               WHERE object_id = OBJECT_ID('dbo.licenses') AND name = 'maintenance_rate')
+BEGIN
+    ALTER TABLE dbo.licenses ADD maintenance_rate DECIMAL(9,3) NOT NULL
+        CONSTRAINT df_licenses_maintenance_rate DEFAULT 0;
+    PRINT N'أُضيف عمود licenses.maintenance_rate';
+END
+GO
+
+PRINT N'شروط العقد المالية جاهزة';
 GO
 
 -- ----------------------------------------------------------------------------
