@@ -18,8 +18,9 @@
     في أي منظمة.
 
 .PARAMETER ApiUrl
-    عنوان الخادم كما سيراه المتصفح. يُحقَن في بناء الويب.
-    مثال: https://erp.example.ly/api
+    اختياري. الويب يشتقّ عنوان الـAPI من أصل الصفحة وقت التشغيل، فالحزمة
+    الواحدة تعمل على أي نطاق بلا إعادة بناء. مرّره فقط إن كان الـAPI على
+    أصل مختلف عن الصفحة. مثال: https://erp.example.ly/api
 
 .PARAMETER Output
     مجلد الإخراج. الافتراضي publish/ في جذر المشروع.
@@ -28,11 +29,13 @@
     تخطّي بناء الويب (للنشر على خادم API فقط).
 
 .EXAMPLE
-    .\tool\publish.ps1 -ApiUrl https://erp.example.ly/api
+    .	ool\publish.ps1
+    .	ool\publish.ps1 -ApiUrl https://erp.example.ly/api
 #>
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory = $true)]
+    # اختياري: الويب يشتقّ العنوان من أصل الصفحة. مرّره فقط إن كان الـAPI
+    # على أصل مختلف عن الصفحة.
     [string]$ApiUrl,
     [string]$Output,
     [switch]$SkipWeb,
@@ -51,7 +54,7 @@ $api = Join-Path $root 'backend\KineticEnterprise.Api'
 function Step($n, $t) { Write-Host "`n[$n] $t" -ForegroundColor Cyan }
 function Ok($t) { Write-Host "    $t" -ForegroundColor Green }
 
-if ($ApiUrl -notmatch '^https://') {
+if ($ApiUrl -and $ApiUrl -notmatch '^https://') {
     if (-not $AllowInsecure) {
         # HTTP يعني توكن JWT وكلمات مرور تمرّ بنصّ ظاهر على الشبكة.
         throw "ApiUrl يجب أن يبدأ بـ https:// — أو مرّر -AllowInsecure لتجربة أولى على IP."
@@ -65,12 +68,12 @@ if ($ApiUrl -notmatch '^https://') {
     Write-Host '  ############################################################' -ForegroundColor Red
     Write-Host ''
 }
-if ($ApiUrl -notmatch '/api/?$') {
+if ($ApiUrl -and $ApiUrl -notmatch '/api/?$') {
     throw "ApiUrl يجب أن ينتهي بـ /api — هذا ما يتوقّعه ApiClient.baseUrl."
 }
 
 Write-Host "`n=== بناء حزمة النشر ===" -ForegroundColor White
-Write-Host "    عنوان الـ API: $ApiUrl"
+Write-Host "    عنوان الـ API: $(if ($ApiUrl) { $ApiUrl } else { 'يُشتقّ من أصل الصفحة — الحزمة تعمل على أي نطاق' })"
 
 # ── 1. تنظيف ────────────────────────────────────────────────────────────
 Step 1 'تنظيف مجلد الإخراج'
@@ -113,7 +116,15 @@ if (-not $SkipWeb) {
     Step 4 'بناء تطبيق الويب'
     Push-Location $root
     try {
-        & flutter build web --release --dart-define=API_BASE_URL=$ApiUrl
+        # بلا --dart-define: الويب يشتقّ عنوان الـAPI من أصل الصفحة وقت
+        # التشغيل (راجع ApiClient.baseUrl)، فالحزمة الواحدة تعمل على أي
+        # نطاق. ويُخبَز العنوان فقط إن مُرِّر -ApiUrl صراحةً — حالة استضافة
+        # الـAPI على أصل مختلف.
+        if ($ApiUrl) {
+            & flutter build web --release --dart-define=API_BASE_URL=$ApiUrl
+        } else {
+            & flutter build web --release
+        }
         if ($LASTEXITCODE -ne 0) { throw 'flutter build web فشل' }
     } finally { Pop-Location }
     # داخل wwwroot لا في مجلد منفصل: الخادم يخدم الويب من جذره (راجع
@@ -160,7 +171,7 @@ Step 7 'تعليمات مرافقة'
 تثبيت Kinetic Enterprise على السيرفر
 =====================================
 حُزمت في: $(Get-Date -Format 'yyyy-MM-dd HH:mm')
-عنوان الـ API المبني فيها: $ApiUrl
+عنوان الـ API: $(if ($ApiUrl) { "مخبوز — $ApiUrl" } else { 'يُشتقّ من أصل الصفحة وقت التشغيل (يعمل على أي نطاق)' })
 
 الترتيب مُلزَم — كل خطوة تعتمد على ما قبلها.
 

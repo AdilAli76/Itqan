@@ -47,7 +47,7 @@ class RealtimeService {
   /// مُسجَّل على الجذر (app.MapHub("/hubs/notifications")). اشتقاقه هنا يمنع
   /// وجود عنوانين منفصلين ينسى أحدهما عند تغيير بيئة النشر.
   static String get hubUrl {
-    const base = ApiClient.baseUrl;
+    final base = ApiClient.baseUrl;
     final root = base.endsWith('/api') ? base.substring(0, base.length - 4) : base;
     return '$root/hubs/notifications';
   }
