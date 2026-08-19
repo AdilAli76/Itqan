@@ -1,3 +1,4 @@
+import 'package:file_picker/file_picker.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -12,6 +13,7 @@ import '../../../shared/widgets/section_card.dart';
 import '../data/branches_providers.dart';
 import '../../../shared/widgets/skeleton.dart';
 import '../../../shared/widgets/app_surface.dart';
+import '../../../shared/widgets/authed_image.dart';
 
 // ux-audit: ignore UX-03 — قائمة فروع المنظمة محدودة بطبيعة العمل (وحدات
 // إلى عشرات، لا آلاف). الترقيم هنا يضيف شريطاً لا يظهر أبداً وحالة صفحة
@@ -253,26 +255,129 @@ class _BrandingFormState extends ConsumerState<_BrandingForm> {
   }
 }
 
-class _LogoUploadBox extends StatelessWidget {
+/// رفع شعار المنظمة.
+///
+/// خطوتان مقصودتان: الملف يُرفع إلى /api/files فيُعاد معرّفه، ثم يُربَط
+/// بالمنظمة عبر /organizations/me/logo. الفصل يُبقي منطق التخزين والتحقّق
+/// من النوع والحجم في مكان واحد يخدم الشعار وفواتير الموردين معاً.
+class _LogoUploadBox extends ConsumerStatefulWidget {
   const _LogoUploadBox();
 
   @override
+  ConsumerState<_LogoUploadBox> createState() => _LogoUploadBoxState();
+}
+
+class _LogoUploadBoxState extends ConsumerState<_LogoUploadBox> {
+  bool _busy = false;
+  String? _error;
+
+  Future<void> _pickAndUpload() async {
+    final picked = await FilePicker.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: const ['png', 'jpg', 'jpeg', 'webp'],
+      // الويب لا يعطي مساراً على القرص، فالبايتات هي السبيل الوحيد —
+      // وطلبها صراحةً يجعل نفس الكود يعمل على المنصات الثلاث.
+      withData: true,
+    );
+    final file = picked?.files.firstOrNull;
+    if (file == null || file.bytes == null) return;
+
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      final form = FormData.fromMap({
+        'file': MultipartFile.fromBytes(file.bytes!, filename: file.name),
+      });
+      final upload = await ApiClient.instance.dio.post(
+        '/files',
+        data: form,
+        queryParameters: {'entityType': 'organization_logo'},
+      );
+      await ApiClient.instance.dio.put(
+        '/organizations/me/logo',
+        data: {'attachmentId': upload.data['id']},
+      );
+      AuthedImage.evictAll();
+      ref.invalidate(brandingProvider);
+      if (mounted) setState(() => _busy = false);
+    } on DioException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _busy = false;
+        _error = e.response?.data is Map
+            ? (e.response!.data['message'] as String? ?? 'تعذّر رفع الشعار')
+            : 'تعذّر رفع الشعار';
+      });
+    }
+  }
+
+  Future<void> _remove() async {
+    setState(() => _busy = true);
+    try {
+      await ApiClient.instance.dio.put('/organizations/me/logo', data: {'attachmentId': null});
+      AuthedImage.evictAll();
+      ref.invalidate(brandingProvider);
+    } catch (_) {}
+    if (mounted) setState(() => _busy = false);
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return Container(
-      height: 96,
-      decoration: BoxDecoration(
-        color: AppColors.surfaceAlt,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: AppColors.border, style: BorderStyle.solid),
-      ),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(Icons.upload_outlined, color: AppColors.textMuted),
+    final logoUrl = ref.watch(brandingProvider).valueOrNull?.logoUrl;
+    final hasLogo = logoUrl != null && logoUrl.isNotEmpty;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Container(
+          height: 96,
+          decoration: BoxDecoration(
+            color: AppColors.surfaceAlt,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: AppColors.border),
+          ),
+          child: _busy
+              ? const Center(child: CircularProgressIndicator())
+              : hasLogo
+                  ? Padding(
+                      padding: const EdgeInsets.all(8),
+                      child: AuthedImage(
+                        path: logoUrl,
+                        fit: BoxFit.contain,
+                        errorWidget:
+                            Center(child: Text('تعذّر عرض الشعار', style: AppTextStyles.bodyMd())),
+                      ),
+                    )
+                  : Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.upload_outlined, color: AppColors.textMuted),
+                        const SizedBox(height: 6),
+                        Text('لا شعار بعد', style: AppTextStyles.bodyMd()),
+                      ],
+                    ),
+        ),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            OutlinedButton.icon(
+              onPressed: _busy ? null : _pickAndUpload,
+              icon: const Icon(Icons.upload_outlined, size: 18),
+              label: Text(hasLogo ? 'استبدال الشعار' : 'رفع الشعار'),
+            ),
+            if (hasLogo) ...[
+              const SizedBox(width: 8),
+              TextButton(onPressed: _busy ? null : _remove, child: const Text('إزالة')),
+            ],
+          ],
+        ),
+        if (_error != null) ...[
           const SizedBox(height: 6),
-          Text('رفع الشعار — غير مفعَّل بعد', style: AppTextStyles.bodyMd()),
+          Text(_error!, style: AppTextStyles.bodyMd(color: AppColors.danger)),
         ],
-      ),
+      ],
     );
   }
 }

@@ -1,4 +1,4 @@
-using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.EntityFrameworkCore;
 using KineticEnterprise.Api.Models;
 
 namespace KineticEnterprise.Api.Data;
@@ -17,6 +17,7 @@ public class AppDbContext : DbContext
     public DbSet<Supplier> Suppliers => Set<Supplier>();
     public DbSet<Sponsor> Sponsors => Set<Sponsor>();
     public DbSet<ProductCategory> ProductCategories => Set<ProductCategory>();
+    public DbSet<Attachment> Attachments => Set<Attachment>();
     public DbSet<StockLevel> StockLevels => Set<StockLevel>();
     public DbSet<StockTransfer> StockTransfers => Set<StockTransfer>();
     public DbSet<StockTransferItem> StockTransferItems => Set<StockTransferItem>();

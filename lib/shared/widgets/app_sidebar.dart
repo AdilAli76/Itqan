@@ -8,6 +8,7 @@ import '../../core/theme/branding_provider.dart';
 import 'nav_items.dart';
 import 'animations.dart';
 import '../../core/auth/permissions.dart';
+import 'authed_image.dart';
 
 /// الشريط الجانبي الموحّد — أي موديول جديد يُضاف مستقبلاً (حسب
 /// ARCHITECTURE.md) يُسجَّل في nav_items.dart بسطر واحد فقط ويظهر تلقائياً
@@ -49,7 +50,10 @@ class _AppSidebarState extends ConsumerState<AppSidebar> {
   Widget build(BuildContext context) {
     final perms = ref.perms;
     final groups = filterByPermissions(
-      navGroupsFor(isPlatformAdmin: _isPlatformAdmin),
+      navGroupsFor(
+        isPlatformAdmin: _isPlatformAdmin,
+        edition: ref.watch(brandingProvider).valueOrNull?.edition ?? 'standard',
+      ),
       (route) {
         final required = kRoutePermissions[route];
         return required == null || perms.can(required);
@@ -88,12 +92,12 @@ class _AppSidebarState extends ConsumerState<AppSidebar> {
                   const SizedBox(width: 10),
                   ClipRRect(
                     borderRadius: BorderRadius.circular(6),
-                    child: Image.network(
-                      branding!.logoUrl!,
+                    child: AuthedImage(
+                      path: branding!.logoUrl!,
                       width: 28,
                       height: 28,
                       fit: BoxFit.cover,
-                      errorBuilder: (context, error, stack) => const Icon(Icons.hub_outlined, size: 24),
+                      errorWidget: const Icon(Icons.hub_outlined, size: 24),
                     ),
                   ),
                 ],
