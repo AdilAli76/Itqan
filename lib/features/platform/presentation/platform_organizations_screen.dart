@@ -1,0 +1,345 @@
+import 'package:dio/dio.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:intl/intl.dart';
+import '../../../core/network/api_client.dart';
+import '../../../core/printing/contract_printer.dart';
+import '../../../core/responsive/adaptive_scaffold.dart';
+import '../../../core/theme/app_colors.dart';
+import '../../../core/theme/app_text_styles.dart';
+import '../../../shared/widgets/app_surface.dart';
+
+final _dateFormat = DateFormat('yyyy-MM-dd');
+
+const _editionLabels = {
+  'standard': 'قياسي',
+  'wallet': 'المحفظة',
+  'trial': 'تجريبي',
+  'enterprise': 'مؤسسات',
+};
+
+const _tierLabels = {
+  'trial': 'تجريبية',
+  'standard': 'قياسية',
+  'professional': 'احترافية',
+  'enterprise': 'مؤسسات',
+};
+
+final platformOrganizationsProvider =
+    FutureProvider.autoDispose<List<Map<String, dynamic>>>((ref) async {
+  final response = await ApiClient.instance.dio.get('/platform');
+  return (response.data as List).map((e) => Map<String, dynamic>.from(e as Map)).toList();
+});
+
+/// إدارة الشركات المشترَكة — مقصورة على مالك المنصة.
+///
+/// كانت الشاشة الوحيدة المتاحة له هي «إنشاء منظمة»: يُنشئ العميل ثم لا يملك
+/// بعدها تصحيح اسم كُتب خطأً، ولا تمديد ترخيص انتهى، ولا إيقاف عميل توقّف
+/// عن السداد. وكلها عمليات يومية في تشغيل منصّة تُباع لعملاء.
+class PlatformOrganizationsScreen extends ConsumerWidget {
+  const PlatformOrganizationsScreen({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final orgsAsync = ref.watch(platformOrganizationsProvider);
+
+    return AdaptiveScaffold(
+      title: 'الشركات المشترَكة',
+      activeRoute: '/platform/organizations',
+      body: orgsAsync.when(
+        loading: () => const Center(child: CircularProgressIndicator()),
+        error: (err, _) => Center(
+          child: Text('تعذّر تحميل الشركات', style: AppTextStyles.bodyMd(color: AppColors.danger)),
+        ),
+        data: (orgs) {
+          if (orgs.isEmpty) {
+            return Center(
+              child: Text('لا شركات بعد — أنشئ أول عميل من «إنشاء منظمة جديدة»',
+                  style: AppTextStyles.bodyMd()),
+            );
+          }
+          return ListView.builder(
+            padding: const EdgeInsets.all(16),
+            itemCount: orgs.length,
+            itemBuilder: (context, i) => _OrgCard(org: orgs[i]),
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _OrgCard extends ConsumerWidget {
+  const _OrgCard({required this.org});
+  final Map<String, dynamic> org;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final isActive = org['isActive'] as bool? ?? true;
+    final expiresRaw = org['licenseExpiresAt'] as String?;
+    final expires = expiresRaw == null ? null : DateTime.tryParse(expiresRaw);
+    final expired = expires != null && expires.isBefore(DateTime.now());
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: AppSurface(
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(org['displayName'] as String? ?? '', style: AppTextStyles.headlineMd()),
+                        Text(org['legalName'] as String? ?? '',
+                            style: AppTextStyles.bodyMd(color: AppColors.textSecondary)),
+                      ],
+                    ),
+                  ),
+                  if (!isActive)
+                    _tag('موقوفة', AppColors.danger)
+                  else if (expired)
+                    _tag('ترخيص منتهٍ', AppColors.warning)
+                  else
+                    _tag('نشطة', AppColors.success),
+                ],
+              ),
+              const Divider(height: 20),
+              Wrap(
+                spacing: 18,
+                runSpacing: 8,
+                children: [
+                  _fact('الإصدار', _editionLabels[org['edition']] ?? '${org['edition']}'),
+                  _fact('الباقة', _tierLabels[org['planTier']] ?? '${org['planTier']}'),
+                  _fact('الفروع', '${org['branchCount'] ?? 0}'),
+                  _fact('المستخدمون', '${org['userCount'] ?? 0}'),
+                  _fact('انتهاء الترخيص', expires == null ? '—' : _dateFormat.format(expires)),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 8,
+                children: [
+                  OutlinedButton.icon(
+                    onPressed: () => showDialog(
+                      context: context,
+                      builder: (_) => _EditOrgDialog(org: org),
+                    ),
+                    icon: const Icon(Icons.edit_outlined, size: 18),
+                    label: const Text('تعديل'),
+                  ),
+                  // إعادة طباعة العقد بالشروط المحفوظة — لا بقيم تُكتب من
+                  // جديد. نسختان بمبلغين مختلفين أسوأ من غياب العقد.
+                  OutlinedButton.icon(
+                    onPressed: () => _printContract(context, org),
+                    icon: const Icon(Icons.description_outlined, size: 18),
+                    label: const Text('طباعة العقد'),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _tag(String text, Color color) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Text(text, style: AppTextStyles.bodyMd(color: color)),
+      );
+
+  Widget _fact(String label, String value) => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(label, style: AppTextStyles.bodyMd(color: AppColors.textSecondary)),
+          Text(value, style: AppTextStyles.labelMd()),
+        ],
+      );
+}
+
+class _EditOrgDialog extends ConsumerStatefulWidget {
+  const _EditOrgDialog({required this.org});
+  final Map<String, dynamic> org;
+
+  @override
+  ConsumerState<_EditOrgDialog> createState() => _EditOrgDialogState();
+}
+
+class _EditOrgDialogState extends ConsumerState<_EditOrgDialog> {
+  late final _legalController = TextEditingController(text: widget.org['legalName'] as String? ?? '');
+  late final _displayController = TextEditingController(text: widget.org['displayName'] as String? ?? '');
+  late bool _isActive = widget.org['isActive'] as bool? ?? true;
+  late String _planTier = widget.org['planTier'] as String? ?? 'standard';
+  int _extendMonths = 0;
+  bool _saving = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _legalController.dispose();
+    _displayController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
+    try {
+      await ApiClient.instance.dio.put('/platform/${widget.org['id']}', data: {
+        'legalName': _legalController.text.trim(),
+        'displayName': _displayController.text.trim(),
+        'isActive': _isActive,
+        'planTier': _tierLabels.containsKey(_planTier) ? _planTier : null,
+        'extendMonths': _extendMonths > 0 ? _extendMonths : null,
+      });
+      ref.invalidate(platformOrganizationsProvider);
+      if (mounted) Navigator.pop(context);
+    } on DioException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _saving = false;
+        _error = e.response?.data is Map
+            ? (e.response!.data['message'] as String? ?? 'تعذّر الحفظ')
+            : 'تعذّر الحفظ';
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('تعديل بيانات الشركة'),
+      content: SizedBox(
+        width: 460,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              TextField(
+                controller: _legalController,
+                decoration: const InputDecoration(labelText: 'الاسم القانوني'),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _displayController,
+                decoration: const InputDecoration(labelText: 'الاسم المعروض'),
+              ),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<String>(
+                initialValue: _tierLabels.containsKey(_planTier) ? _planTier : null,
+                decoration: const InputDecoration(labelText: 'الباقة'),
+                items: _tierLabels.entries
+                    .map((e) => DropdownMenuItem(value: e.key, child: Text(e.value)))
+                    .toList(),
+                onChanged: (v) => setState(() => _planTier = v ?? _planTier),
+              ),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<int>(
+                initialValue: _extendMonths,
+                decoration: const InputDecoration(labelText: 'تمديد الترخيص'),
+                items: const [
+                  DropdownMenuItem(value: 0, child: Text('بلا تمديد')),
+                  DropdownMenuItem(value: 1, child: Text('شهر')),
+                  DropdownMenuItem(value: 3, child: Text('٣ أشهر')),
+                  DropdownMenuItem(value: 6, child: Text('٦ أشهر')),
+                  DropdownMenuItem(value: 12, child: Text('سنة')),
+                ],
+                onChanged: (v) => setState(() => _extendMonths = v ?? 0),
+              ),
+              const SizedBox(height: 4),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('الشركة نشطة'),
+                subtitle: Text(
+                  'الإيقاف يمنع دخول كل مستخدميها.',
+                  style: AppTextStyles.bodyMd(color: AppColors.textSecondary),
+                ),
+                value: _isActive,
+                onChanged: (v) => setState(() => _isActive = v),
+              ),
+              // الإصدار لا يُعدَّل هنا بقصد: تغييره على شركة عاملة يُخفي
+              // وحدات فيها بيانات قائمة — مخزون وأوامر شراء لا تعود مرئية
+              // لأحد. وهو قرار يُتَّخذ عند الإنشاء.
+              const SizedBox(height: 4),
+              Text(
+                'الإصدار: ${_editionLabels[widget.org['edition']] ?? widget.org['edition']} — '
+                'لا يُغيَّر بعد الإنشاء.',
+                style: AppTextStyles.bodyMd(color: AppColors.textSecondary),
+              ),
+              if (_error != null) ...[
+                const SizedBox(height: 10),
+                Text(_error!, style: AppTextStyles.bodyMd(color: AppColors.danger)),
+              ],
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('إلغاء')),
+        FilledButton(
+          onPressed: _saving ? null : _save,
+          child: _saving
+              ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+              : const Text('حفظ'),
+        ),
+      ],
+    );
+  }
+}
+
+
+const _tierLimits = {
+  'trial': (1, 3),
+  'standard': (3, 10),
+  'professional': (10, 50),
+  'enterprise': (999, 999),
+};
+
+Future<void> _printContract(BuildContext context, Map<String, dynamic> org) async {
+  Map<String, dynamic> platform = const {};
+  try {
+    final res = await ApiClient.instance.dio.get('/platform-settings');
+    platform = Map<String, dynamic>.from(res.data as Map);
+  } catch (_) {}
+
+  final tier = org['planTier'] as String? ?? 'standard';
+  final limits = _tierLimits[tier] ?? (1, 5);
+  final issued = DateTime.tryParse(org['licenseIssuedAt'] as String? ?? '') ??
+      DateTime.tryParse(org['createdAt'] as String? ?? '') ??
+      DateTime.now();
+  final expires = DateTime.tryParse(org['licenseExpiresAt'] as String? ?? '') ??
+      issued.add(const Duration(days: 365));
+
+  await printSubscriptionContract(
+    orgLegalName: org['legalName'] as String? ?? '',
+    orgDisplayName: org['displayName'] as String? ?? '',
+    edition: org['edition'] as String? ?? 'standard',
+    planTier: _tierLabels[tier] ?? tier,
+    issuedAt: issued,
+    expiresAt: expires,
+    maxBranches: limits.$1,
+    maxUsers: limits.$2,
+    monthlyFee: ((org['monthlyFee'] as num?) ?? 0).toDouble(),
+    storageFee: ((org['storageFee'] as num?) ?? 0).toDouble(),
+    maintenanceRate: ((org['maintenanceRate'] as num?) ?? 0).toDouble(),
+    currencySymbol: 'د.ل',
+    providerName: platform['companyName'] as String? ?? 'مزوّد النظام',
+    providerOwner: platform['ownerName'] as String?,
+    providerPhone: platform['phone'] as String?,
+    providerEmail: platform['email'] as String?,
+    providerAddress: platform['address'] as String?,
+  );
+}

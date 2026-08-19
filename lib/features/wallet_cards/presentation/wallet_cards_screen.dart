@@ -1,3 +1,4 @@
+import 'dart:typed_data';
 import 'dart:async';
 
 import 'package:dio/dio.dart';
@@ -376,7 +377,40 @@ class _CardDetailDialogState extends ConsumerState<_CardDetailDialog> {
       // اختاره الزبون في «الفروع والهوية» يُطبَع على بطاقات عملائه.
       brandColor: branding.colors.primary,
       expiryDate: expiryRaw == null ? null : DateTime.tryParse(expiryRaw),
+      logoBytes: await _fetchLogo(branding.logoUrl),
+      // هاتف الجهة المُصدِرة: هاتف الفرع. بطاقة ضائعة بلا رقم يُتّصل به
+      // تُرمى — ومن يجدها لا يعرف إلى من يعيدها.
+      supportPhone: await _issuerPhone(),
+      holderPhone: widget.card['customerPhone'] as String?,
     );
+  }
+
+  /// الشعار بايتاتٍ لا برابط: نقطة الملفات محمية بتوكن ومحرّك PDF لا يحمل
+  /// ترويسة مصادقة، فرابط مباشر كان يُنتج بطاقة بلا شعار بلا رسالة خطأ.
+  Future<Uint8List?> _fetchLogo(String? logoUrl) async {
+    if (logoUrl == null || logoUrl.isEmpty) return null;
+    try {
+      final relative = logoUrl.startsWith('/api') ? logoUrl.substring(4) : logoUrl;
+      final res = await ApiClient.instance.dio.get<List<int>>(
+        relative,
+        options: Options(responseType: ResponseType.bytes),
+      );
+      return Uint8List.fromList(res.data ?? const []);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<String?> _issuerPhone() async {
+    try {
+      final res = await ApiClient.instance.dio.get('/branches');
+      final list = (res.data as List).map((e) => Map<String, dynamic>.from(e as Map));
+      for (final b in list) {
+        final phone = (b['phone'] as String?)?.trim();
+        if (phone != null && phone.isNotEmpty) return phone;
+      }
+    } catch (_) {}
+    return null;
   }
 
   Future<void> _resetPin() async {

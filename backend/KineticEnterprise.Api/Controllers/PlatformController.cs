@@ -1,3 +1,4 @@
+﻿using System.Text.Json;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -12,10 +13,27 @@ public record CreateOrganizationRequest(
     string LegalName, string DisplayName,
     string AdminFullName, string AdminEmail, string AdminPassword,
     string BranchName, string BranchCode,
-    string PlanTier, int LicenseMonths);
+    string PlanTier, int LicenseMonths,
+    /// شكل النظام — standard | wallet | trial | enterprise. انظر [Editions].
+    /// فارغ يعني القياسي، فالطلبات القديمة تبقى صالحة.
+    string? Edition = null,
+    /// شروط العقد المالية — تُحفَظ مع الترخيص وتُطبَع في العقد.
+    decimal MonthlyFee = 0,
+    decimal StorageFee = 0,
+    decimal MaintenanceRate = 0);
 
 public record CreateOrganizationResponse(Guid OrganizationId, Guid BranchId, string LicenseKey, DateTime ExpiresAt);
-public record PlatformOrganizationDto(Guid Id, string LegalName, string DisplayName, bool IsActive, DateTime CreatedAt);
+public record PlatformOrganizationDto(
+    Guid Id, string LegalName, string DisplayName, bool IsActive, DateTime CreatedAt,
+    string Edition, string PlanTier, DateTime? LicenseExpiresAt, string? LicenseStatus,
+    int BranchCount, int UserCount,
+    decimal MonthlyFee, decimal StorageFee, decimal MaintenanceRate, DateTime? LicenseIssuedAt);
+
+public record UpdatePlatformOrganizationRequest(
+    string LegalName, string DisplayName, bool IsActive,
+    /// اختياري — تمديد الترخيص بعدد أشهر من تاريخ انتهائه الحالي.
+    int? ExtendMonths = null,
+    string? PlanTier = null);
 
 /// <summary>
 /// تزويد عملاء (منظمات) جدد على نفس السيرفر — مقصورة على "مالك المنصة"
@@ -54,7 +72,146 @@ public class PlatformController : ControllerBase
         }
 
         var orgs = await _db.PlatformOrganizations.OrderByDescending(o => o.CreatedAt).ToListAsync();
-        return orgs.Select(o => new PlatformOrganizationDto(o.Id, o.LegalName, o.DisplayName, o.IsActive, o.CreatedAt)).ToList();
+        var ids = orgs.Select(o => o.Id).ToList();
+
+        // القراءة عبر SQL خام لا عبر DbSet: جداول المنظمات والفروع
+        // والمستخدمين محكومة بسياسة عزل تُرجع منظمة الطالب وحدها، ومالك
+        // المنصة يحتاج رؤيتها كلها. وهذا هو سبب وجود الفهرس العالمي أصلاً.
+        var details = await ReadOrgDetailsAsync(ids);
+
+        return orgs.Select(o =>
+        {
+            details.TryGetValue(o.Id, out var d);
+            return new PlatformOrganizationDto(
+                o.Id, o.LegalName, o.DisplayName, o.IsActive, o.CreatedAt,
+                d?.Edition ?? "standard", d?.PlanTier ?? "-",
+                d?.ExpiresAt, d?.LicenseStatus, d?.Branches ?? 0, d?.Users ?? 0,
+                d?.MonthlyFee ?? 0, d?.StorageFee ?? 0, d?.MaintenanceRate ?? 0, d?.IssuedAt);
+        }).ToList();
+    }
+
+    private record OrgDetail(string Edition, string PlanTier, DateTime? ExpiresAt, string? LicenseStatus,
+        int Branches, int Users, decimal MonthlyFee, decimal StorageFee, decimal MaintenanceRate, DateTime? IssuedAt);
+
+    private async Task<Dictionary<Guid, OrgDetail>> ReadOrgDetailsAsync(List<Guid> ids)
+    {
+        var result = new Dictionary<Guid, OrgDetail>();
+        if (ids.Count == 0) return result;
+
+        var options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseSqlServer(_config.GetConnectionString("Default"))
+            .UseSnakeCaseNamingConvention()
+            .Options;
+        await using var db = new AppDbContext(options);
+        var conn = db.Database.GetDbConnection();
+        await conn.OpenAsync();
+
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = @"
+SELECT o.id, o.edition,
+       ISNULL(l.plan_tier, '-')  AS plan_tier,
+       l.expires_at, l.status,
+       ISNULL(l.monthly_fee, 0), ISNULL(l.storage_fee, 0), ISNULL(l.maintenance_rate, 0), l.issued_at,
+       (SELECT COUNT(*) FROM dbo.branches  b WHERE b.organization_id = o.id) AS branches,
+       (SELECT COUNT(*) FROM dbo.app_users u WHERE u.organization_id = o.id AND u.is_active = 1) AS users
+FROM dbo.organizations o
+LEFT JOIN dbo.licenses l ON l.organization_id = o.id;";
+
+        await using var reader = await cmd.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            result[reader.GetGuid(0)] = new OrgDetail(
+                reader.GetString(1),
+                reader.GetString(2),
+                reader.IsDBNull(3) ? null : reader.GetDateTime(3),
+                reader.IsDBNull(4) ? null : reader.GetString(4),
+                reader.GetInt32(9),
+                reader.GetInt32(10),
+                reader.GetDecimal(5),
+                reader.GetDecimal(6),
+                reader.GetDecimal(7),
+                reader.IsDBNull(8) ? null : reader.GetDateTime(8));
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// تعديل بيانات منظمة عميل — الاسم القانوني والمعروض، وتفعيلها أو
+    /// إيقافها، وتمديد ترخيصها.
+    ///
+    /// يمرّ عبر سياق مضبوط على معرّف المنظمة المستهدَفة لا على منظمة مالك
+    /// المنصة: سياسة العزل تحجب صف أي منظمة أخرى، فبلا ضبط السياق يُحدَّث
+    /// صفر صفوف ويبدو الأمر ناجحاً بلا أثر.
+    /// </summary>
+    [HttpPut("{id:guid}")]
+    public async Task<IActionResult> Update(Guid id, UpdatePlatformOrganizationRequest request)
+    {
+        if (User.FindFirstValue("is_platform_admin") != "True")
+        {
+            return Forbid();
+        }
+        if (string.IsNullOrWhiteSpace(request.LegalName) || string.IsNullOrWhiteSpace(request.DisplayName))
+        {
+            return BadRequest(new { message = "الاسم القانوني والاسم المعروض إلزاميان" });
+        }
+        if (request.PlanTier is not null && !ValidTiers.Contains(request.PlanTier))
+        {
+            return BadRequest(new { message = "باقة ترخيص غير معروفة" });
+        }
+
+        var index = await _db.PlatformOrganizations.FirstOrDefaultAsync(o => o.Id == id);
+        if (index is null) return NotFound();
+
+        var options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseSqlServer(_config.GetConnectionString("Default"))
+            .UseSnakeCaseNamingConvention()
+            .Options;
+        await using var db = new AppDbContext(options);
+        var conn = db.Database.GetDbConnection();
+        await conn.OpenAsync();
+        await using (var ctx = conn.CreateCommand())
+        {
+            ctx.CommandText = "EXEC sp_set_session_context @key=N'organization_id', @value=@orgId;";
+            ctx.Parameters.Add(new SqlParameter("@orgId", id));
+            await ctx.ExecuteNonQueryAsync();
+        }
+
+        var org = await db.Organizations.FirstOrDefaultAsync(o => o.Id == id);
+        if (org is null) return NotFound();
+
+        org.LegalName = request.LegalName;
+        org.DisplayName = request.DisplayName;
+
+        var license = await db.Licenses.FirstOrDefaultAsync(l => l.OrganizationId == id);
+        if (license is not null)
+        {
+            if (request.PlanTier is not null)
+            {
+                var (maxBranches, maxUsers) = LimitsFor(request.PlanTier);
+                license.PlanTier = request.PlanTier;
+                license.MaxBranches = maxBranches;
+                license.MaxUsers = maxUsers;
+            }
+            if (request.ExtendMonths is > 0)
+            {
+                // التمديد من الأبعد بين اليوم وتاريخ الانتهاء: تمديد ترخيص
+                // منتهٍ منذ شهرين من تاريخه القديم كان يمنح شهراً مضى.
+                var from = license.ExpiresAt > DateTime.UtcNow ? license.ExpiresAt : DateTime.UtcNow;
+                license.ExpiresAt = from.AddMonths(request.ExtendMonths.Value);
+                license.Status = "active";
+            }
+        }
+
+        // الفهرس العالمي يُحدَّث معه — هو ما يقرؤه مالك المنصة، وتركه
+        // متخلّفاً يعني قائمة تعرض اسماً غير الاسم الحقيقي.
+        index.LegalName = request.LegalName;
+        index.DisplayName = request.DisplayName;
+        index.IsActive = request.IsActive;
+
+        await db.SaveChangesAsync();
+        await _db.SaveChangesAsync();
+
+        return NoContent();
     }
 
     private static readonly string[] ValidTiers = { "trial", "standard", "professional", "enterprise" };
@@ -123,6 +280,11 @@ public class PlatformController : ControllerBase
         {
             return BadRequest(new { message = "باقة ترخيص غير معروفة" });
         }
+        var edition = string.IsNullOrWhiteSpace(request.Edition) ? Editions.Standard : request.Edition!;
+        if (!Editions.All.Contains(edition))
+        {
+            return BadRequest(new { message = "إصدار غير معروف" });
+        }
 
         // من هنا جاء التكرار الذي وُجد على قاعدة التطوير: إنشاء منظمة جديدة
         // بنفس بريد مدير منظمة قائمة. تسجيل الدخول يبحث بالبريد بلا منظمة،
@@ -168,6 +330,11 @@ public class PlatformController : ControllerBase
                 Id = orgId,
                 LegalName = request.LegalName,
                 DisplayName = request.DisplayName,
+                Edition = edition,
+                // إصدار المحفظة يبيع بالقيمة الحرّة حصراً — لا كتالوج يُختار
+                // منه. ضبطها هنا لا يدوياً بعد الإنشاء: منظمة تُسلَّم للعميل
+                // بإعداد ناقص تعني نقطة بيع لا تعمل من أول يوم.
+                PosAllowOpenProduct = Editions.AllowsOpenProduct(edition),
             });
             await db.SaveChangesAsync();
 
@@ -183,6 +350,10 @@ public class PlatformController : ControllerBase
                 OrganizationId = orgId,
                 LicenseKey = licenseKey,
                 PlanTier = request.PlanTier,
+                EnabledModulesJson = JsonSerializer.Serialize(Editions.ModulesOf(edition)),
+                MonthlyFee = request.MonthlyFee,
+                StorageFee = request.StorageFee,
+                MaintenanceRate = request.MaintenanceRate,
                 MaxBranches = maxBranches,
                 MaxUsers = maxUsers,
                 ExpiresAt = expiresAt,
@@ -198,6 +369,29 @@ public class PlatformController : ControllerBase
                 Role = "super_admin",
                 IsActive = true,
             });
+            // إصدار المحفظة يحتاج صنفاً واحداً مخفياً.
+            //
+            // البيع بقيمة حرّة في هذا النظام يمرّ على صفّ صنف حقيقي
+            // (TracksStock = false) — وهو ما يجعل الفاتورة وسطرها والتقارير
+            // تعمل بلا استثناءات في المسار كله. وكتالوج منظمة المحفظة فارغ
+            // بالتعريف، فبلا هذا الصنف تفتح نقطة البيع ولا تبيع شيئاً.
+            //
+            // يُزرع هنا لا يُطلَب من العميل إنشاؤه: شاشات المخزون مخفية عنه
+            // أصلاً في هذا الإصدار، فلا سبيل له إليه.
+            if (edition == Editions.Wallet)
+            {
+                db.Products.Add(new Product
+                {
+                    OrganizationId = orgId,
+                    Sku = "WALLET-VALUE",
+                    Name = "قيمة",
+                    UnitBase = "unit",
+                    TracksStock = false,
+                    SalePrice = 0,
+                    CostPrice = 0,
+                });
+            }
+
             foreach (var (role, code) in DefaultRolePermissions)
             {
                 db.RolePermissions.Add(new RolePermission { OrganizationId = orgId, Role = role, PermissionCode = code });

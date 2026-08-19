@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart' show Color;
 import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
@@ -20,6 +22,11 @@ Future<void> printWalletCard({
   required Color brandColor,
   DateTime? expiryDate,
   String? supportPhone,
+  /// شعار المنظمة بايتاتٍ — يُجلب بالتوكن قبل الاستدعاء (نقطة الملفات
+  /// محمية، ومحرّك PDF لا يحمل ترويسة مصادقة).
+  Uint8List? logoBytes,
+  /// هاتف حامل البطاقة — يُطبع على الظهر ليُعاد إليه إن ضاعت.
+  String? holderPhone,
 }) async {
   final doc = pw.Document(theme: await arabicPdfTheme());
   final brand = PdfColor.fromInt(brandColor.toARGB32());
@@ -51,6 +58,7 @@ Future<void> printWalletCard({
             cardCode: cardCode,
             holderName: holderName,
             orgName: orgName,
+            logoBytes: logoBytes,
             expiryDate: expiryDate,
             brand: brand,
             onBrand: onBrand,
@@ -62,7 +70,9 @@ Future<void> printWalletCard({
           _cardFace(child: _back(
             cardCode: cardCode,
             brand: brand,
+            orgName: orgName,
             supportPhone: supportPhone,
+            holderPhone: holderPhone,
           )),
         ],
       ),
@@ -89,6 +99,7 @@ pw.Widget _front({
   required String cardCode,
   required String holderName,
   required String orgName,
+  required Uint8List? logoBytes,
   required DateTime? expiryDate,
   required PdfColor brand,
   required PdfColor onBrand,
@@ -105,15 +116,35 @@ pw.Widget _front({
           mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
           crossAxisAlignment: pw.CrossAxisAlignment.start,
           children: [
+            if (logoBytes != null) ...[
+              pw.Container(
+                width: 26,
+                height: 26,
+                // خلفية بيضاء تحت الشعار: أغلب الشعارات مصمَّمة على أبيض،
+                // ووضعها مباشرة على لون العلامة يبتلع تفاصيلها.
+                decoration: pw.BoxDecoration(
+                  color: PdfColors.white,
+                  borderRadius: pw.BorderRadius.circular(4),
+                ),
+                padding: const pw.EdgeInsets.all(2),
+                child: pw.Image(pw.MemoryImage(logoBytes), fit: pw.BoxFit.contain),
+              ),
+              pw.SizedBox(width: 8),
+            ],
             pw.Expanded(
               child: pdfAutoDir(
                 orgName,
                 style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold, color: onBrand),
-                maxLines: 1,
+                maxLines: 2,
               ),
             ),
             pw.SizedBox(width: 8),
-            pw.Text('بطاقة عميل', style: pw.TextStyle(fontSize: 8, color: onBrandMuted)),
+            // الغرض مكتوب صراحةً على الوجه.
+            //
+            // بطاقة تحمل اسم شخص ورمزاً وباركود بلا كلمة تشرح غرضها تدعو من
+            // يجدها إلى أسوأ الظنون. وسطر واحد يُنهي ذلك.
+            pw.Text('بطاقة صرف ومشتريات',
+                style: pw.TextStyle(fontSize: 7, color: onBrandMuted)),
           ],
         ),
         pw.Column(
@@ -157,7 +188,9 @@ pw.Widget _front({
 pw.Widget _back({
   required String cardCode,
   required PdfColor brand,
+  required String orgName,
   required String? supportPhone,
+  required String? holderPhone,
 }) {
   return pw.Column(
     crossAxisAlignment: pw.CrossAxisAlignment.stretch,
@@ -184,20 +217,36 @@ pw.Widget _back({
               ),
               pw.SizedBox(height: 4),
               pw.Text(
-                'تُقدَّم هذه البطاقة عند الشراء. لا تشارك رقمك السري مع أحد.',
+                'بطاقة صرف ومشتريات صادرة عن $orgName. تُقدَّم عند الشراء، '
+                'ولا تُشارَك مع أحد ولا يُفصَح عن رقمها السري.',
                 style: const pw.TextStyle(fontSize: 6, color: PdfColors.grey700),
                 textAlign: pw.TextAlign.center,
               ),
-              if (supportPhone != null && supportPhone.isNotEmpty) ...[
-                pw.SizedBox(height: 2),
+              // بيانات الإعادة عند الفقد.
+              //
+              // بطاقة ضائعة بلا رقم يُتّصل به تُرمى أو تُهمَل، ومن يجدها لا
+              // يعرف إلى من يعيدها. هاتف الجهة المُصدِرة هو الطريق العملي —
+              // وهاتف الحامل يُطبع باختياره.
+              pw.SizedBox(height: 3),
+              pw.Text('إن وجدت هذه البطاقة فأعِدها إلى:',
+                  style: const pw.TextStyle(fontSize: 6, color: PdfColors.grey700),
+                  textAlign: pw.TextAlign.center),
+              if (supportPhone != null && supportPhone.isNotEmpty)
                 pw.Row(
                   mainAxisAlignment: pw.MainAxisAlignment.center,
                   children: [
-                    pw.Text('للاستفسار: ', style: const pw.TextStyle(fontSize: 6)),
+                    pw.Text('الجهة المُصدِرة: ', style: const pw.TextStyle(fontSize: 6)),
                     pdfLtr(pw.Text(supportPhone, style: const pw.TextStyle(fontSize: 6))),
                   ],
                 ),
-              ],
+              if (holderPhone != null && holderPhone.isNotEmpty)
+                pw.Row(
+                  mainAxisAlignment: pw.MainAxisAlignment.center,
+                  children: [
+                    pw.Text('حامل البطاقة: ', style: const pw.TextStyle(fontSize: 6)),
+                    pdfLtr(pw.Text(holderPhone, style: const pw.TextStyle(fontSize: 6))),
+                  ],
+                ),
             ],
           ),
         ),

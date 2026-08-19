@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../../../core/auth/current_user.dart';
 import '../../../core/network/api_client.dart';
+import '../../../core/printing/contract_printer.dart';
 import '../../../core/responsive/adaptive_scaffold.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_text_styles.dart';
@@ -22,6 +23,25 @@ String _dioErrorMessage(Object error, String fallback) {
   }
   return fallback;
 }
+
+/// إصدارات النظام — شكل المنظمة لا حجمها. يقابل [Editions] في السيرفر.
+///
+/// القرار يُتَّخذ عند الإنشاء ولا يُغيَّر بعده من الواجهة: تغيير الإصدار على
+/// منظمة عاملة يعني إخفاء وحدات فيها بيانات قائمة.
+const _editionLabels = {
+  'standard': 'قياسي — متجر كامل',
+  'wallet': 'المحفظة — بطاقات وأرصدة بلا بضاعة',
+  'trial': 'تجريبي',
+  'enterprise': 'مؤسسات',
+};
+
+const _editionHints = {
+  'standard': 'أصناف ومخزون ومشتريات ونقطة بيع كاملة.',
+  'wallet': 'لا أصناف ولا مخزون: الكاشير يُدخل مبلغاً فيُخصم من بطاقة '
+      'المنتسب أو يُسجَّل بيعاً نقدياً. للجهة التي تصرف على منتسبيها.',
+  'trial': 'قياسي بمدّة محدودة للتجربة.',
+  'enterprise': 'قياسي بحدود أوسع.',
+};
 
 const _planTierLabels = {
   'trial': 'تجريبية',
@@ -147,6 +167,10 @@ class _CreateOrganizationFormState extends ConsumerState<_CreateOrganizationForm
   final _monthsController = TextEditingController(text: '12');
 
   String _planTier = 'professional';
+  String _edition = 'standard';
+  final _monthlyFeeController = TextEditingController(text: '0');
+  final _storageFeeController = TextEditingController(text: '0');
+  final _maintenanceController = TextEditingController(text: '0');
   bool _saving = false;
   String? _error;
   Map<String, dynamic>? _result;
@@ -260,6 +284,49 @@ class _CreateOrganizationFormState extends ConsumerState<_CreateOrganizationForm
             const SizedBox(height: 24),
             Text('الترخيص', style: AppTextStyles.headlineMd()),
             const SizedBox(height: 12),
+            DropdownButtonFormField<String>(
+              initialValue: _edition,
+              decoration: const InputDecoration(labelText: 'الإصدار'),
+              items: _editionLabels.entries
+                  .map((e) => DropdownMenuItem(value: e.key, child: Text(e.value)))
+                  .toList(),
+              onChanged: (v) => setState(() => _edition = v ?? 'standard'),
+            ),
+            const SizedBox(height: 6),
+            Text(_editionHints[_edition] ?? '', style: AppTextStyles.bodyMd()),
+            const SizedBox(height: 12),
+            // شروط العقد المالية — تُحفَظ مع الترخيص وتُطبَع في العقد.
+            Row(
+              children: [
+                Expanded(
+                  child: TextFormField(
+                    controller: _monthlyFeeController,
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    decoration: const InputDecoration(labelText: 'اشتراك شهري'),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: TextFormField(
+                    controller: _storageFeeController,
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    decoration: const InputDecoration(labelText: 'رسوم التخزين السحابي (شهرياً)'),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: TextFormField(
+                    controller: _maintenanceController,
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    decoration: const InputDecoration(
+                      labelText: 'نسبة الصيانة ٪',
+                      helperText: 'صفر = بالتفاهم مع الدعم',
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
             Row(
               children: [
                 Expanded(
@@ -321,9 +388,19 @@ class _CreateOrganizationFormState extends ConsumerState<_CreateOrganizationForm
         'branchName': _branchNameController.text.trim(),
         'branchCode': _branchCodeController.text.trim(),
         'planTier': _planTier,
+        'edition': _edition,
         'licenseMonths': int.parse(_monthsController.text.trim()),
+        'monthlyFee': double.tryParse(_monthlyFeeController.text.trim()) ?? 0,
+        'storageFee': double.tryParse(_storageFeeController.text.trim()) ?? 0,
+        'maintenanceRate': double.tryParse(_maintenanceController.text.trim()) ?? 0,
       });
-      setState(() => _result = response.data as Map<String, dynamic>);
+      final created = response.data as Map<String, dynamic>;
+      setState(() => _result = created);
+
+      // العقد يُطبَع فور الإنشاء كما طُلب — والنسخة تبقى قابلة لإعادة
+      // الطباعة من شاشة الشركات، فمن أغلق نافذة الطباعة لا يفقدها.
+      final months = int.tryParse(_monthsController.text.trim()) ?? 12;
+      await _printContract(created, months);
       ref.invalidate(platformOrganizationsProvider);
       _formKey.currentState!.reset();
       _legalNameController.clear();
@@ -339,6 +416,51 @@ class _CreateOrganizationFormState extends ConsumerState<_CreateOrganizationForm
       if (mounted) setState(() => _saving = false);
     }
   }
+
+  Future<void> _printContract(Map<String, dynamic> created, int months) async {
+    // بيانات مزوّد النظام من إعدادات المنصة — صفّ واحد عالمي يملؤه مالك
+    // المنصة مرّة، فلا تُكتب في كل عقد يدوياً.
+    Map<String, dynamic> platform = const {};
+    try {
+      final res = await ApiClient.instance.dio.get('/platform-settings');
+      platform = Map<String, dynamic>.from(res.data as Map);
+    } catch (_) {}
+
+    final issued = DateTime.now();
+    final expires = DateTime.tryParse(created['expiresAt'] as String? ?? '') ??
+        issued.add(Duration(days: 30 * months));
+
+    await printSubscriptionContract(
+      orgLegalName: _legalNameController.text.trim().isEmpty
+          ? (_displayNameController.text.trim())
+          : _legalNameController.text.trim(),
+      orgDisplayName: _displayNameController.text.trim(),
+      edition: _edition,
+      planTier: _planTierLabels[_planTier] ?? _planTier,
+      issuedAt: issued,
+      expiresAt: expires,
+      maxBranches: _limitsFor(_planTier).$1,
+      maxUsers: _limitsFor(_planTier).$2,
+      monthlyFee: double.tryParse(_monthlyFeeController.text.trim()) ?? 0,
+      storageFee: double.tryParse(_storageFeeController.text.trim()) ?? 0,
+      maintenanceRate: double.tryParse(_maintenanceController.text.trim()) ?? 0,
+      currencySymbol: 'د.ل',
+      providerName: platform['companyName'] as String? ?? 'مزوّد النظام',
+      providerOwner: platform['ownerName'] as String?,
+      providerPhone: platform['phone'] as String?,
+      providerEmail: platform['email'] as String?,
+      providerAddress: platform['address'] as String?,
+    );
+  }
+
+  /// نفس حدود LimitsFor في PlatformController — تُكتب في العقد.
+  (int, int) _limitsFor(String tier) => switch (tier) {
+        'trial' => (1, 3),
+        'standard' => (3, 10),
+        'professional' => (10, 50),
+        'enterprise' => (999, 999),
+        _ => (1, 5),
+      };
 }
 
 class _ResultBanner extends StatelessWidget {
