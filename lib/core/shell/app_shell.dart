@@ -17,6 +17,7 @@ import 'open_tabs_provider.dart';
 import 'screen_registry.dart';
 import 'shell_scope.dart';
 import '../../shared/widgets/icon_action.dart';
+import '../../shared/widgets/update_banner.dart';
 
 /// الحاوية الدائمة لكل شاشات النظام بعد تسجيل الدخول — تُبنى مرة واحدة فقط
 /// وتبقى حيّة طوال الجلسة. فتح شاشة جديدة = تبويب جديد في IndexedStack
@@ -141,7 +142,15 @@ class _AppShellState extends ConsumerState<AppShell> {
               ],
             ),
       drawer: isDesktop ? null : Drawer(child: AppSidebar(activeRoute: tabsState.activeRoute ?? '')),
-      body: useSidebar
+      // شريط التحديث فوق كل شيء: هو الرسالة الوحيدة التي يجب أن تُرى مهما
+      // كانت الشاشة المفتوحة، ووضعه داخل شاشة بعينها يعني أن من لا يفتحها
+      // لا يعلم بالتحديث أبداً.
+      body: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const UpdateBanner(),
+          Expanded(
+            child: useSidebar
           ? Row(
               children: [
                 SizedBox(
@@ -169,6 +178,9 @@ class _AppShellState extends ConsumerState<AppShell> {
                   ],
                 )
               : content,
+          ),
+        ],
+      ),
     );
   }
 }
