@@ -366,6 +366,34 @@ class _UserFormDialogState extends ConsumerState<_UserFormDialog> {
                     onChanged: (v) => setState(() => _branchId = v),
                   ),
                 ),
+                // كاشير بلا فرع لا يستطيع فتح نقطة البيع إطلاقاً: الفرع
+                // يُقرأ من ادّعاء branch_id في التوكن، ولا يُضاف الادّعاء
+                // أصلاً لمستخدم بلا فرع (AuthController). فالحساب يُنشأ
+                // ويُسجّل دخوله بنجاح، ثم ترفضه الشاشة الوحيدة التي أُنشئ
+                // لأجلها — بلا ما يربط الرفض بسببه.
+                if (_role == 'cashier' && _branchId == null) ...[
+                  const SizedBox(height: 8),
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: AppColors.warningBg,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Icon(Icons.warning_amber_outlined, size: 18, color: AppColors.warning),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'كاشير بلا فرع لن يستطيع فتح نقطة البيع — اختر فرعاً.',
+                            style: AppTextStyles.bodyMd(color: AppColors.warning),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
                 if (_isEdit) ...[
                   const SizedBox(height: 4),
                   SwitchListTile(

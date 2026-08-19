@@ -1,4 +1,32 @@
-namespace KineticEnterprise.Api.Models;
+﻿namespace KineticEnterprise.Api.Models;
+
+/// <summary>
+/// إصدارات النظام. المصدر الوحيد لأسمائها، فلا تتفرّق نصوصاً حرّة في
+/// الوحدات والواجهة.
+/// </summary>
+public static class Editions
+{
+    public const string Standard = "standard";
+    public const string Trial = "trial";
+    public const string Enterprise = "enterprise";
+
+    /// <summary>
+    /// بطاقات وأرصدة بلا بضاعة: الكاشير يُدخل مبلغاً فيُخصم من بطاقة صاحبها
+    /// أو يُسجَّل بيعاً نقدياً للفرع. للجهة التي تصرف على منتسبيها لا التي
+    /// تبيع بضاعة — فلا كتالوج ولا مخزون ولا مشتريات.
+    /// </summary>
+    public const string Wallet = "wallet";
+
+    public static readonly string[] All = { Standard, Wallet, Trial, Enterprise };
+
+    /// <summary>الوحدات المفعَّلة لكل إصدار — منها يُبنى التنقّل وتُقيَّد النقاط.</summary>
+    public static string[] ModulesOf(string edition) => edition == Wallet
+        ? new[] { "pos", "customers", "reports" }
+        : new[] { "inventory", "pos", "customers", "reports" };
+
+    /// <summary>إصدار المحفظة يبيع بالقيمة الحرّة حصراً — لا أصناف يختار منها.</summary>
+    public static bool AllowsOpenProduct(string edition) => edition == Wallet;
+}
 
 public class Organization
 {
@@ -6,6 +34,12 @@ public class Organization
     public string LegalName { get; set; } = "";
     public string DisplayName { get; set; } = "";
     public string? LogoUrl { get; set; }
+
+    /// <summary>
+    /// شكل النظام لا حجمه — انظر [Editions]. غير PlanTier في الترخيص الذي
+    /// يحدّد الحدود (فروع، مستخدمون، مدّة).
+    /// </summary>
+    public string Edition { get; set; } = Editions.Standard;
     public string PrimaryColor { get; set; } = "#0B2540";
     public string SecondaryColor { get; set; } = "#C8952B";
     public string CurrencyCode { get; set; } = "LYD";
@@ -74,6 +108,15 @@ public class License
     public int MaxBranches { get; set; } = 1;
     public int MaxUsers { get; set; } = 5;
     public string EnabledModulesJson { get; set; } = "[\"inventory\",\"pos\",\"customers\",\"reports\"]";
+    /// <summary>الاشتراك الشهري المتفَّق عليه — يُطبَع في العقد.</summary>
+    public decimal MonthlyFee { get; set; }
+
+    /// <summary>رسوم التخزين السحابي الشهرية.</summary>
+    public decimal StorageFee { get; set; }
+
+    /// <summary>نسبة الصيانة المئوية. صفر يعني التفاهم عليها مع الدعم.</summary>
+    public decimal MaintenanceRate { get; set; }
+
     public string? HardwareFingerprint { get; set; }
     public DateTime IssuedAt { get; set; } = DateTime.UtcNow;
     public DateTime ExpiresAt { get; set; }
@@ -191,6 +234,29 @@ public class ProductCategory
     public Guid? ParentId { get; set; }
 }
 
+/// <summary>
+/// مرفق مخزَّن على قرص السيرفر — شعار منظمة، أو صورة فاتورة مورّد.
+///
+/// الصفّ يصف الملف ولا يحمله: البايتات على القرص تحت مجلد التخزين
+/// (Storage:Path)، و[StoredName] اسمه هناك. حفظ الملفات في القاعدة كان
+/// سيُضخّم كل نسخة احتياطية بصور لا تتغيّر أبداً بعد رفعها.
+/// </summary>
+public class Attachment
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid OrganizationId { get; set; }
+    /// organization_logo | purchase_order
+    public string EntityType { get; set; } = "";
+    public Guid? EntityId { get; set; }
+    public string FileName { get; set; } = "";
+    public string ContentType { get; set; } = "";
+    public long SizeBytes { get; set; }
+    /// اسم الملف على القرص فقط لا مسار كامل — نقل المجلد لا يُبطل الصف.
+    public string StoredName { get; set; } = "";
+    public Guid? UploadedBy { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+}
+
 public class StockLevel
 {
     public Guid Id { get; set; } = Guid.NewGuid();
@@ -287,6 +353,15 @@ public class PurchaseOrderItem
     public decimal UnitCost { get; set; }
     // اختياري — NULL يعني الإبقاء على سعر بيع الصنف الحالي عند الاستلام.
     public decimal? SalePrice { get; set; }
+
+    /// <summary>
+    /// المستلَم فعلياً من [Quantity]. أقلّ منها يعني توريداً ناقصاً والأمر
+    /// يبقى مفتوحاً حتى يكتمل.
+    /// </summary>
+    public decimal ReceivedQuantity { get; set; }
+
+    /// <summary>ما لم يصل بعد — الأساس الذي يُبنى عليه أي استلام تالٍ.</summary>
+    public decimal RemainingQuantity => Quantity - ReceivedQuantity;
 }
 
 /// <summary>
@@ -505,6 +580,19 @@ public class Invoice
     public decimal TaxAmount { get; set; }
     public decimal DiscountAmount { get; set; }
     public decimal TotalAmount { get; set; }
+
+    /// <summary>
+    /// المدفوع فعلاً. NULL أو مساوٍ للإجمالي = مدفوعة بالكامل. وأقلّ منه
+    /// يعني دفعاً جزئياً، والفرق دَينٌ مقيَّد على محفظة العميل.
+    /// </summary>
+    public decimal? PaidAmount { get; set; }
+
+    /// <summary>النقد الذي سلّمه الزبون — للتدقيق وتسوية الدرج.</summary>
+    public decimal? TenderedAmount { get; set; }
+
+    /// <summary>الباقي المُعاد إليه.</summary>
+    public decimal? ChangeDue { get; set; }
+
     public string Status { get; set; } = "completed";
     public Guid? CreatedBy { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;

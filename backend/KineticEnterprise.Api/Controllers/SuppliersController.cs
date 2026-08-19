@@ -1,4 +1,4 @@
-using System.IdentityModel.Tokens.Jwt;
+﻿using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -13,6 +13,7 @@ namespace KineticEnterprise.Api.Controllers;
 /// نفس نمط ProductsController بالضبط — Security Policy على جدول suppliers
 /// (fn_OrgOnlyPredicate) تتكفّل بعزل المنظمة تلقائياً.
 /// </summary>
+[RequireModule("inventory")]
 [ApiController]
 [Route("api/suppliers")]
 [Authorize]

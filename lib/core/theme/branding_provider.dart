@@ -9,6 +9,7 @@ class OrganizationBranding {
     required this.colors,
     required this.currencySymbol,
     required this.navLayout,
+    required this.edition,
   });
 
   final String displayName;
@@ -18,12 +19,23 @@ class OrganizationBranding {
   // 'sidebar' أو 'navbar' — تفضيل عرض بحت يختاره كل عميل، راجع AdaptiveScaffold.
   final String navLayout;
 
+  /// شكل النظام: standard | wallet | trial | enterprise.
+  ///
+  /// يُقرَّر عند إنشاء المنظمة ولا يُغيَّر من الواجهة — تغييره بعد التشغيل
+  /// يعني إخفاء وحدات فيها بيانات قائمة.
+  final String edition;
+
+  /// إصدار المحفظة: بطاقات وأرصدة بلا بضاعة. نقطة البيع تُدخِل مبلغاً،
+  /// ولا كتالوج ولا مخزون ولا مشتريات.
+  bool get isWallet => edition == 'wallet';
+
   static const fallback = OrganizationBranding(
     displayName: 'Kinetic Enterprise',
     logoUrl: null,
     colors: AppColors(),
     currencySymbol: 'د.ل',
     navLayout: 'sidebar',
+    edition: 'standard',
   );
 }
 
@@ -45,6 +57,7 @@ final brandingProvider = FutureProvider<OrganizationBranding>((ref) async {
       ),
       currencySymbol: data['currencySymbol'] as String? ?? 'د.ل',
       navLayout: data['navLayout'] as String? ?? 'sidebar',
+      edition: data['edition'] as String? ?? 'standard',
     );
   } catch (_) {
     // قبل تسجيل الدخول (لا توكن بعد) أو تعذّر الاتصال بالسيرفر -> اللوحة

@@ -6,6 +6,7 @@ import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text_styles.dart';
 import 'nav_items.dart';
 import '../../core/auth/permissions.dart';
+import '../../core/theme/branding_provider.dart';
 
 /// بديل أفقي عن AppSidebar لمن يفضّل شريطاً علوياً بدل شريط جانبي ثابت —
 /// نفس مجموعات nav_items.dart بالضبط، فقط بتخطيط مختلف. راجع AppShell
@@ -41,7 +42,10 @@ class _AppNavbarState extends ConsumerState<AppNavbar> {
   Widget build(BuildContext context) {
     final perms = ref.perms;
     final groups = filterByPermissions(
-      navGroupsFor(isPlatformAdmin: _isPlatformAdmin),
+      navGroupsFor(
+        isPlatformAdmin: _isPlatformAdmin,
+        edition: ref.watch(brandingProvider).valueOrNull?.edition ?? 'standard',
+      ),
       (route) {
         final required = kRoutePermissions[route];
         return required == null || perms.can(required);

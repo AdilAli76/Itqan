@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -6,8 +6,9 @@ using KineticEnterprise.Api.Data;
 
 namespace KineticEnterprise.Api.Controllers;
 
-public record BrandingResponse(string DisplayName, string? LogoUrl, string PrimaryColor, string SecondaryColor, string CurrencySymbol, string NavLayout);
+public record BrandingResponse(string DisplayName, string? LogoUrl, string PrimaryColor, string SecondaryColor, string CurrencySymbol, string NavLayout, string Edition);
 public record UpdateBrandingRequest(string DisplayName, string PrimaryColor, string SecondaryColor, string NavLayout);
+public record SetLogoRequest(Guid? AttachmentId);
 
 public record OrganizationSettingsDto(string CurrencyCode, string CurrencySymbol, string Locale, decimal TaxRate, int PasswordMinLength, double ReceiptWidthMm, bool PosAllowOpenProduct);
 public record UpdateSettingsRequest(string CurrencyCode, string CurrencySymbol, string Locale, decimal TaxRate, int PasswordMinLength, double ReceiptWidthMm, bool PosAllowOpenProduct);
@@ -33,7 +34,35 @@ public class OrganizationsController : ControllerBase
         var org = await _db.Organizations.FirstOrDefaultAsync();
         if (org is null) return NotFound();
 
-        return new BrandingResponse(org.DisplayName, org.LogoUrl, org.PrimaryColor, org.SecondaryColor, org.CurrencySymbol, org.NavLayout);
+        return new BrandingResponse(org.DisplayName, org.LogoUrl, org.PrimaryColor, org.SecondaryColor, org.CurrencySymbol, org.NavLayout, org.Edition);
+    }
+
+    /// <summary>
+    /// ربط شعار مرفوع بالمنظمة. الملف يُرفع أولاً عبر POST /api/files ثم
+    /// يُمرَّر معرّفه هنا — فصلٌ يبقي منطق التخزين في مكان واحد.
+    /// </summary>
+    [HttpPut("me/logo")]
+    [Authorize(Roles = "super_admin")]
+    public async Task<IActionResult> SetLogo([FromBody] SetLogoRequest request)
+    {
+        var org = await _db.Organizations.FirstOrDefaultAsync();
+        if (org is null) return NotFound();
+
+        if (request.AttachmentId is null)
+        {
+            org.LogoUrl = null;
+        }
+        else
+        {
+            // التحقّق من وجود المرفق قبل ربطه: معرّف عشوائي كان سيُخزَّن
+            // رابطاً ميتاً يظهر أيقونة مكسورة في كل شاشة.
+            var exists = await _db.Attachments.AnyAsync(a => a.Id == request.AttachmentId);
+            if (!exists) return BadRequest(new { message = "المرفق غير موجود" });
+            org.LogoUrl = $"/api/files/{request.AttachmentId}";
+        }
+
+        await _db.SaveChangesAsync();
+        return Ok(new { logoUrl = org.LogoUrl });
     }
 
     [HttpPut("me/branding")]

@@ -1,4 +1,4 @@
-using System.IdentityModel.Tokens.Jwt;
+﻿using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -120,6 +120,7 @@ public class ProductsController : ControllerBase
     /// تعديل مخزون بصيغة "فرق" (+/-) وليس قيمة مطلقة، حتى يبقى كل تغيير
     /// قابلاً للتدقيق (نفس فلسفة `audit_logs` — لا نكتب فوق الرقم القديم).
     /// </summary>
+    [RequireModule("inventory")]
     [HttpPost("{id:guid}/stock-adjustments")]
     [RequirePermission("inventory.manage")]
     public async Task<ActionResult<StockLevel>> AdjustStock(Guid id, StockAdjustmentRequest request)
@@ -190,6 +191,7 @@ public class ProductsController : ControllerBase
         return product is null ? NotFound() : product;
     }
 
+    [RequireModule("inventory")]
     [HttpPost]
     [RequirePermission("inventory.manage")]
     public async Task<ActionResult<Product>> Create(Product product)
@@ -210,6 +212,7 @@ public class ProductsController : ControllerBase
         return CreatedAtAction(nameof(GetById), new { id = product.Id }, product);
     }
 
+    [RequireModule("inventory")]
     [HttpPut("{id:guid}")]
     [RequirePermission("inventory.manage")]
     public async Task<IActionResult> Update(Guid id, Product update)
@@ -243,6 +246,7 @@ public class ProductsController : ControllerBase
 
     // حذف فعلي غير مسموح به في أي موديول (راجع ARCHITECTURE.md §3.2) —
     // فقط Soft Delete لحفظ سجل التدقيق.
+    [RequireModule("inventory")]
     [HttpDelete("{id:guid}")]
     [RequirePermission("inventory.delete")]
     public async Task<IActionResult> SoftDelete(Guid id)

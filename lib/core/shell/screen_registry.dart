@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../features/dashboard/presentation/super_admin_dashboard_screen.dart';
 import '../../features/branches/presentation/branch_identity_screen.dart';
-import '../../features/pos/presentation/pos_screen.dart';
 import '../../features/inventory/presentation/inventory_screen.dart';
 import '../../features/purchasing/presentation/purchase_orders_screen.dart';
 import '../../features/customers/presentation/customers_screen.dart';
@@ -19,6 +18,8 @@ import '../../features/stock_count/presentation/stock_count_screen.dart';
 import '../../features/barcode_designer/presentation/barcode_designer_screen.dart';
 import '../../features/support/presentation/support_screen.dart';
 import '../../features/platform/presentation/create_organization_screen.dart';
+import '../../features/pos/presentation/wallet_pos_screen.dart';
+import '../../features/platform/presentation/platform_organizations_screen.dart';
 
 /// يقابل تماماً قائمة GoRoute السابقة في app_router.dart — لكن بدل أن يستبدل
 /// كل مسار الصفحة كلها، يبني الودجت التي يعرضها AppShell داخل تبويب. أي
@@ -30,7 +31,10 @@ Widget buildScreenForRoute(String route) {
     case '/branches':
       return const BranchIdentityScreen();
     case '/pos':
-      return const PosScreen();
+      // إصدار المحفظة له نقطة بيع مختلفة في نموذج العمل لا في الشكل:
+      // مبلغ يُخصم من رصيد، لا سلّة أصناف. الاختيار داخل ودجت لا هنا،
+      // لأن هذه الدالة بلا ref.
+      return const PosScreenSwitcher();
     case '/inventory':
       return const InventoryScreen();
     case '/purchasing':
@@ -63,6 +67,8 @@ Widget buildScreenForRoute(String route) {
       return const BarcodeDesignerScreen();
     case '/support':
       return const SupportScreen();
+    case '/platform/organizations':
+      return const PlatformOrganizationsScreen();
     case '/platform/organizations/new':
       return const CreateOrganizationScreen();
     default:

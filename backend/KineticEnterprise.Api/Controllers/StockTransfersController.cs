@@ -1,4 +1,4 @@
-using System.IdentityModel.Tokens.Jwt;
+﻿using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -27,6 +27,7 @@ public record TransferDetailDto(
 /// تتم هنا يدوياً: مدير فرع يرى فقط التحويلات التي فرعه طرف فيها (مصدراً
 /// أو هدفاً)، مدير عام يرى كل تحويلات المنظمة.
 /// </summary>
+[RequireModule("inventory")]
 [ApiController]
 [Route("api/stock-transfers")]
 [Authorize]

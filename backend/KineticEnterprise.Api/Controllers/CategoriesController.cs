@@ -1,4 +1,4 @@
-using System.IdentityModel.Tokens.Jwt;
+﻿using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -14,6 +14,7 @@ namespace KineticEnterprise.Api.Controllers;
 /// DATABASE_TABLES_GUIDE.md §5.2) — ليس جدولاً مالياً/مخزونياً بحد ذاته،
 /// فالحذف الفعلي مقبول هنا، ويُمنع فقط إن كان صنف ما لا يزال مرتبطاً به.
 /// </summary>
+[RequireModule("inventory")]
 [ApiController]
 [Route("api/categories")]
 [Authorize]

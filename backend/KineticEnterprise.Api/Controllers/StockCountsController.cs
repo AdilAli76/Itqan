@@ -1,4 +1,4 @@
-using System.IdentityModel.Tokens.Jwt;
+﻿using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -28,6 +28,7 @@ public record StockCountDetailDto(
 /// فعلياً (على عكس stock_transfers)، فـ StockCountsPolicy تعزل تلقائياً حسب
 /// فرع المستخدم — لا فلترة يدوية مطلوبة هنا.
 /// </summary>
+[RequireModule("inventory")]
 [ApiController]
 [Route("api/stock-counts")]
 [Authorize]
