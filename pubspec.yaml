@@ -25,6 +25,10 @@ dependencies:
   pdf: ^3.13.0
   printing: ^5.15.0
   file_picker: ^11.0.3
+  mobile_scanner: ^7.4.0
+  audioplayers: ^6.8.1
+  package_info_plus: ^9.0.1
+  url_launcher: ^6.3.2
 
 dev_dependencies:
   flutter_test:
@@ -59,6 +63,15 @@ flutter:
           weight: 600
         - asset: assets/fonts/IBMPlexSansArabic-Bold.ttf
           weight: 700
+
+  # نغمات نقطة البيع — ملفات WAV صغيرة مضمَّنة في الحزمة لا مُنزَّلة.
+  #
+  # الكاشير ينظر إلى الزبون لا إلى الشاشة، فالتأكيد المسموع هو ما يمنع مسح
+  # الصنف مرّتين أو ظنّ أن مسحةً نجحت وهي فشلت. وتضمينها شرط لا تحسين:
+  # جهاز نقطة بيع قد يعمل بلا إنترنت، وصوت لا يُسمع إلا بالشبكة لا يُعتمد
+  # عليه.
+  assets:
+    - assets/sounds/
 
   #
   # كان هنا إعلان assets/icons/ لمجلد غير موجود ولا يشير إليه أي كود، فكان

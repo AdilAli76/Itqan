@@ -29,6 +29,7 @@ const _notifications = NavItem(Icons.notifications_outlined, 'الإشعارات
 // يظهر فقط لمالك المنصة (is_platform_admin في التوكن) — تزويد عملاء جدد
 // على نفس السيرفر ليس جزءاً من صلاحيات أي عميل عادي مهما كان دوره.
 const kPlatformNavItem = NavItem(Icons.add_business_outlined, 'إنشاء منظمة جديدة', '/platform/organizations/new');
+const kPlatformManageItem = NavItem(Icons.apartment_outlined, 'الشركات المشترَكة', '/platform/organizations');
 
 const _salesGroup = NavGroup(
   icon: Icons.point_of_sale_outlined,
@@ -84,17 +85,25 @@ const _systemGroup = NavGroup(
 
 /// المجموعات بالترتيب المعروض. مالك المنصة وحده يرى "إنشاء منظمة جديدة"،
 /// وتُضاف داخل مجموعة النظام بدل أن تكون عنصراً سائباً في آخر القائمة.
-List<NavGroup> navGroupsFor({required bool isPlatformAdmin}) => [
+List<NavGroup> navGroupsFor({required bool isPlatformAdmin, String edition = 'standard'}) => [
       NavGroup(icon: _dashboard.icon, label: _dashboard.label, items: const [_dashboard]),
       _salesGroup,
-      _inventoryGroup,
+      // إصدار المحفظة بلا بضاعة أصلاً: لا كتالوج ولا مخزون ولا مشتريات ولا
+      // جرد ولا ملصقات باركود. إخفاء المجموعة هنا لا في كل واجهة على حدة —
+      // ثلاثة مواضع تعرض هذه القائمة (الشريط الجانبي والعلوي ولوحة
+      // الأوامر)، وإخفاء يُنفَّذ في اثنين يترك الشاشة قابلة للفتح من الثالث.
+      if (edition != 'wallet') _inventoryGroup,
       _reportsGroup,
       NavGroup(icon: _notifications.icon, label: _notifications.label, items: const [_notifications]),
       _adminGroup,
       NavGroup(
         icon: _systemGroup.icon,
         label: _systemGroup.label,
-        items: [..._systemGroup.items, if (isPlatformAdmin) kPlatformNavItem],
+        items: [
+          ..._systemGroup.items,
+          if (isPlatformAdmin) kPlatformManageItem,
+          if (isPlatformAdmin) kPlatformNavItem,
+        ],
       ),
     ];
 

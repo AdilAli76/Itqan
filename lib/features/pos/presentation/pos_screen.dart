@@ -3,9 +3,12 @@ import 'dart:async';
 import 'package:dio/dio.dart';
 import 'package:flutter/gestures.dart' show PointerDeviceKind;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show KeyDownEvent, KeyEvent, LogicalKeyboardKey;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/auth/current_user.dart';
+import '../../../core/feedback/pos_sounds.dart';
 import '../../../core/network/api_client.dart';
+import 'barcode_scanner_sheet.dart';
 import '../../../core/printing/print_settings_provider.dart';
 import '../../../core/printing/receipt_printer.dart';
 import '../../../core/responsive/adaptive_scaffold.dart';
@@ -18,7 +21,6 @@ import '../../../shared/widgets/numeric_keypad.dart';
 import '../../../shared/widgets/pin_pad.dart';
 import '../data/pos_providers.dart';
 import '../data/pos_settings_provider.dart';
-import 'cash_payment_dialog.dart';
 import '../../../shared/widgets/icon_action.dart';
 import '../../../core/network/offline_queue.dart';
 import '../../../shared/widgets/app_surface.dart';
@@ -64,8 +66,14 @@ class _PosScreenState extends ConsumerState<PosScreen> {
 
   String _padValue = '';
 
+  /// المبلغ المستلَم نقداً — يُكتب على شاشة البيع نفسها لا في نافذة منفصلة.
+  /// فارغ يعني «المبلغ بالضبط»، وهو الحالة الغالبة.
+  final _tenderedController = TextEditingController();
+
   Map<String, dynamic>? _customer;
   String? _branchId;
+  /// فروع المنظمة — تُملأ فقط لمن لا فرع مثبَّت في توكنه، ليختار منها.
+  List<Map<String, dynamic>> _branches = const [];
   bool _loadingBranch = true;
   bool _placingOrder = false;
   String? _error;
@@ -74,12 +82,34 @@ class _PosScreenState extends ConsumerState<PosScreen> {
   @override
   void initState() {
     super.initState();
-    readCurrentBranchId().then((id) {
-      if (mounted) {
+    readCurrentBranchId().then((id) async {
+      if (!mounted) return;
+      if (id != null) {
         setState(() {
           _branchId = id;
           _loadingBranch = false;
         });
+        return;
+      }
+      // مدير عام أو مالك منصة: لا فرع في توكنه لأنه غير مقيّد بفرع، لا
+      // لأنه ممنوع. رفضه كان يمنع صاحب المنشأة نفسه من فتح نقطة البيع في
+      // فرعه — والحلّ الوحيد أمامه أن يقيّد حسابه بفرع واحد فيفقد رؤية
+      // الباقي. فيُختار الفرع هنا بدل الرفض.
+      try {
+        final res = await ApiClient.instance.dio.get('/branches');
+        final list = (res.data as List)
+            .map((e) => Map<String, dynamic>.from(e as Map))
+            .where((b) => b['isActive'] != false)
+            .toList();
+        if (!mounted) return;
+        setState(() {
+          _branches = list;
+          // فرع واحد فقط: لا معنى لسؤال لا جواب له إلا واحد.
+          if (list.length == 1) _branchId = list.first['id'] as String;
+          _loadingBranch = false;
+        });
+      } catch (_) {
+        if (mounted) setState(() => _loadingBranch = false);
       }
     });
   }
@@ -88,11 +118,26 @@ class _PosScreenState extends ConsumerState<PosScreen> {
   void dispose() {
     _debounce?.cancel();
     _searchController.dispose();
+    _tenderedController.dispose();
     _searchFocusNode.dispose();
     super.dispose();
   }
 
+  /// كل رفض يُعرَض ويُسمَع معاً.
+  ///
+  /// كان الخطأ نصاً أحمر في زاوية الشاشة لا غير، والكاشير ينظر إلى الزبون
+  /// لا إلى الشاشة — فيمضي ظانّاً أن العملية تمّت.
+  void _fail(String message) {
+    setState(() => _error = message);
+    PosSounds.error();
+  }
+
   double get _subtotal => _cart.fold(0, (sum, line) => sum + line.lineTotal);
+
+  double get _tendered => double.tryParse(_tenderedController.text.trim()) ?? 0;
+
+  /// الباقي للزبون. سالبٌ يعني أن المستلَم أقل من المستحق.
+  double get _changeDue => _tendered - _subtotal;
 
   void _onSearchChanged(String value) {
     _debounce?.cancel();
@@ -126,13 +171,24 @@ class _PosScreenState extends ConsumerState<PosScreen> {
     }
   }
 
+  /// يفتح كاميرا الجهاز، ويمرّر الرمز الممسوح إلى نفس مسار القارئ السلكي —
+  /// فسلوك الجهازين واحد: باركود صنف أولاً، ثم بطاقة عميل.
+  Future<void> _scanWithCamera() async {
+    final code = await Navigator.of(context).push<String>(
+      MaterialPageRoute(builder: (_) => const BarcodeScannerSheet(), fullscreenDialog: true),
+    );
+    if (code == null || code.isEmpty || !mounted) return;
+    _searchController.text = code;
+    await _onSearchSubmitted(code);
+  }
+
   /// يحوّل المسحة إلى اختيار عميل — الكاشير يمرّر البطاقة على نفس القارئ
   /// دون فتح نافذة اختيار العميل ولا كتابة أي شيء.
-  Future<void> _tryCardScan(String code) async {
+  Future<bool> _tryCardScan(String code) async {
     try {
       final response = await ApiClient.instance.dio.get('/customers/by-card/$code');
       final customer = Map<String, dynamic>.from(response.data as Map);
-      if (!mounted) return;
+      if (!mounted) return true;
       setState(() {
         _customer = customer;
         _error = null;
@@ -140,8 +196,47 @@ class _PosScreenState extends ConsumerState<PosScreen> {
       _searchController.clear();
       ref.read(posProductSearchProvider.notifier).state = '';
       _searchFocusNode.requestFocus();
+      return true;
     } on DioException {
       // ليس رمز بطاقة ولا باركود صنف — تُترك الشبكة كما هي ليختار الكاشير يدوياً.
+      return false;
+    }
+  }
+
+  /// إدخال رمز بطاقة العميل صراحةً.
+  ///
+  /// المسح على مربع بحث الأصناف يعمل ويبقى كما هو، لكنه ميزة لا يعرفها من
+  /// لم يقرأ الكود: لا زر لها ولا نصّ يذكرها. وعلى جهاز بلا قارئ لا سبيل
+  /// إليها إطلاقاً. هذا الزر يجعلها مرئية ويجعل الإدخال اليدوي ممكناً.
+  Future<void> _promptCardCode() async {
+    final controller = TextEditingController();
+    final code = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('بطاقة العميل'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          textInputAction: TextInputAction.done,
+          onSubmitted: (v) => Navigator.pop(ctx, v.trim()),
+          decoration: const InputDecoration(
+            labelText: 'رمز البطاقة',
+            hintText: 'امسح البطاقة أو اكتب رمزها',
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('إلغاء')),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
+            child: const Text('بحث'),
+          ),
+        ],
+      ),
+    );
+    if (code == null || code.isEmpty) return;
+    final found = await _tryCardScan(code);
+    if (!found && mounted) {
+      _fail('لا عميل بهذه البطاقة — تأكّد من الرمز أو أنها غير موقوفة');
     }
   }
 
@@ -154,7 +249,7 @@ class _PosScreenState extends ConsumerState<PosScreen> {
       // — إخفاء الزر وحده يترك الباركود والبحث طريقاً مفتوحاً للصنف نفسه.
       final allowed = ref.read(posAllowOpenProductProvider).valueOrNull ?? false;
       if (!allowed) {
-        setState(() => _error = 'بيع الأصناف مفتوحة القيمة غير مفعَّل — '
+        _fail('بيع الأصناف مفتوحة القيمة غير مفعَّل — '
             'يفعّله مدير المنظمة من الإعدادات');
         return;
       }
@@ -201,6 +296,7 @@ class _PosScreenState extends ConsumerState<PosScreen> {
           availableQuantity: (product['quantity'] as num?)?.toDouble() ?? 0,
         );
         _cart.add(line);
+        PosSounds.scan();
         // آخر صنف مضاف هو هدف لوحة الأرقام — يكتب الكاشير الكمية مباشرة
         // بعد المسح بلا اختيار السطر أولاً.
         _selectedLine = line;
@@ -298,7 +394,7 @@ class _PosScreenState extends ConsumerState<PosScreen> {
     if (!mounted) return;
 
     if (products.isEmpty) {
-      setState(() => _error = 'لا يوجد صنف مفتوح القيمة في الكتالوج — أنشئ صنفاً '
+      _fail('لا يوجد صنف مفتوح القيمة في الكتالوج — أنشئ صنفاً '
           'بخيار "لا يتبع المخزون" من شاشة المخزون أولاً');
       return;
     }
@@ -321,24 +417,46 @@ class _PosScreenState extends ConsumerState<PosScreen> {
     if (selected != null) setState(() => _customer = selected);
   }
 
-  /// يفتح حاسبة الدفع النقدي أولاً (مبلغ مستلَم + باقٍ) قبل تنفيذ البيع
-  /// فعلياً — راجع تعليق CashPaymentDialog لسبب بقاء هذا عرضاً وحساباً في
-  /// الواجهة فقط دون تغيير _checkout أو الـ Backend في هذه المرحلة.
+  /// البيع نقداً بنقرة واحدة — بلا نافذة وسيطة.
+  ///
+  /// كانت تُفتح حاسبة في نافذة منفصلة قبل كل عملية نقدية: نقرتان إضافيتان
+  /// وانتظار انتقال، في أكثر إجراء تكراراً على مدار اليوم وأمام زبون واقف.
+  /// والحاسبة نفسها لم تكن تحفظ شيئاً — تعرض الباقي ثم تنساه. فصار المبلغ
+  /// المستلَم يُكتب على الشاشة نفسها اختيارياً (والباقي يظهر فوراً بجانبه)،
+  /// وتركه فارغاً — وهو الغالب — يعني الدفع بالمبلغ بالضبط.
   Future<void> _startCashCheckout() async {
     if (_cart.isEmpty) {
-      setState(() => _error = 'السلة فارغة');
+      _fail('السلة فارغة');
       return;
     }
-    final branding = ref.read(brandingProvider).valueOrNull;
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (_) => CashPaymentDialog(
-        totalDue: _subtotal,
-        currencySymbol: branding?.currencySymbol ?? 'د.ل',
-        keypadSize: ref.read(posTouchModeProvider) ? KeypadSize.large : KeypadSize.compact,
-      ),
-    );
-    if (confirmed == true) await _checkout('cash');
+    // مستلَم أقلّ من المستحق = دفع جزئي، والفرق دَينٌ على العميل. يُؤكَّد
+    // صراحةً لأنه ليس ما يقصده الكاشير عادةً: الغالب أن يكون خطأ إدخال،
+    // لا نيّة بيع بالأجل.
+    if (_tenderedController.text.trim().isNotEmpty && _changeDue < 0) {
+      if (_customer == null) {
+        _fail('الدفع الجزئي يحتاج عميلاً محدَّداً — امسح بطاقته أو اختره أولاً');
+        return;
+      }
+      final remaining = -_changeDue;
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('دفع جزئي'),
+          content: Text(
+            'المستلَم أقلّ من المستحق بمقدار ${remaining.toStringAsFixed(2)}. '
+            'سيُقيَّد الباقي دَيناً على ${_customer!['fullName']}.',
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('تراجع')),
+            FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('تأكيد الدَّين')),
+          ],
+        ),
+      );
+      if (confirmed != true) return;
+      await _checkout('cash', paidAmount: _tendered);
+      return;
+    }
+    await _checkout('cash');
   }
 
   /// الخصم من المحفظة يمرّ بالرقم السري إلزامياً — بطاقة بلا رقم سري نقودٌ
@@ -346,11 +464,11 @@ class _PosScreenState extends ConsumerState<PosScreen> {
   /// في السيرفر (راجع InvoicesController.Create)، فلا يمكن تجاوزه من الواجهة.
   Future<void> _startWalletCheckout() async {
     if (_cart.isEmpty) {
-      setState(() => _error = 'السلة فارغة');
+      _fail('السلة فارغة');
       return;
     }
     if (_customer == null) {
-      setState(() => _error = 'امسح بطاقة العميل أو اختره أولاً للخصم من رصيده');
+      _fail('امسح بطاقة العميل أو اختره أولاً للخصم من رصيده');
       return;
     }
     final pin = await showDialog<String>(
@@ -364,17 +482,19 @@ class _PosScreenState extends ConsumerState<PosScreen> {
     if (pin != null) await _checkout('customer_wallet', customerPin: pin);
   }
 
-  Future<void> _checkout(String paymentMethod, {String? customerPin}) async {
+  Future<void> _checkout(String paymentMethod, {String? customerPin, double? paidAmount}) async {
     if (_cart.isEmpty) {
-      setState(() => _error = 'السلة فارغة');
+      _fail('السلة فارغة');
       return;
     }
     if (_branchId == null) {
-      setState(() => _error = 'يجب تسجيل الدخول من حساب مرتبط بفرع لاستخدام نقطة البيع');
+      _fail(_branches.isEmpty
+          ? 'لا فرع نشط في هذه المنظمة — أنشئ فرعاً من شاشة الفروع أولاً'
+          : 'اختر الفرع الذي تبيع منه أولاً');
       return;
     }
     if (paymentMethod == 'customer_wallet' && _customer == null) {
-      setState(() => _error = 'اختر عميلاً أولاً للخصم من رصيده');
+      _fail('اختر عميلاً أولاً للخصم من رصيده');
       return;
     }
 
@@ -390,6 +510,10 @@ class _PosScreenState extends ConsumerState<PosScreen> {
       'branchId': _branchId,
       'customerId': _customer?['id'],
       'paymentMethod': paymentMethod,
+      // المدفوع فعلاً والمستلَم نقداً — يُحفظان في الفاتورة للتدقيق
+      // ولتسوية الدرج، وأقلّ من الإجمالي يعني دَيناً على العميل.
+      'paidAmount': paidAmount,
+      'tenderedAmount': _tenderedController.text.trim().isEmpty ? null : _tendered,
       'customerPin': customerPin,
       'clientRequestId': OfflineQueueNotifier.newRequestId(),
       'lines': _cart
@@ -406,11 +530,13 @@ class _PosScreenState extends ConsumerState<PosScreen> {
 
       final invoiceId = response.data['id'] as String;
       final invoiceNumber = response.data['invoiceNumber'] as String? ?? '';
+      PosSounds.success();
       setState(() {
         _cart.clear();
         _customer = null;
         _selectedLine = null;
         _padValue = '';
+        _tenderedController.clear();
       });
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -437,6 +563,7 @@ class _PosScreenState extends ConsumerState<PosScreen> {
             _customer = null;
             _selectedLine = null;
             _padValue = '';
+            _tenderedController.clear();
           });
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
@@ -447,11 +574,11 @@ class _PosScreenState extends ConsumerState<PosScreen> {
             );
           }
         } else {
-          setState(() => _error = 'طابور العمليات المؤجَّلة ممتلئ (${OfflineQueueNotifier.maxQueued}) — '
+          _fail('طابور العمليات المؤجَّلة ممتلئ (${OfflineQueueNotifier.maxQueued}) — '
               'راجع الاتصال قبل متابعة البيع');
         }
       } else {
-        setState(() => _error = _dioErrorMessage(e, 'تعذّر إتمام عملية البيع'));
+        _fail(_dioErrorMessage(e, 'تعذّر إتمام عملية البيع'));
       }
     } finally {
       if (mounted) setState(() => _placingOrder = false);
@@ -497,6 +624,50 @@ class _PosScreenState extends ConsumerState<PosScreen> {
     final scanner = _scannerBuilder(context, touch);
     final cart = _cartBuilder(context, touch);
 
+    // مفاتيح الاختصار: نقطة البيع تُستعمل بيد واحدة على لوحة المفاتيح
+    // والأخرى على البضاعة، والتنقّل بالفأرة بين الأزرار يبطئ كل عملية.
+    // Focus لا Shortcuts/Actions: الأخيران يتطلّبان أن يكون التركيز داخل
+    // شجرتهما، ومربع البحث يخطف التركيز دائماً (autofocus وإعادة تركيز بعد
+    // كل مسحة) — فمعالج مستوى الشاشة هو الوحيد الذي يلتقط المفتاح حيثما كان.
+    return Focus(
+      autofocus: false,
+      onKeyEvent: _onShortcut,
+      child: _buildScaffold(context, isDesktop, touch, scanner, cart),
+    );
+  }
+
+  /// المفاتيح الوظيفية: F2 نقدي، F3 خصم من الرصيد، F4 بطاقة العميل،
+  /// F6 لوحة الكمية، F8 إلغاء الفاتورة، Esc تفريغ البحث.
+  ///
+  /// Enter لا يُلتقط هنا: هو مفتاح القارئ السلكي — يُرسله بعد كل مسحة —
+  /// ويعالجه مربع البحث نفسه عبر onSubmitted. اختطافه على مستوى الشاشة كان
+  /// سيكسر المسح كله.
+  KeyEventResult _onShortcut(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+
+    final key = event.logicalKey;
+    if (key == LogicalKeyboardKey.f2) {
+      _startCashCheckout();
+    } else if (key == LogicalKeyboardKey.f3) {
+      _startWalletCheckout();
+    } else if (key == LogicalKeyboardKey.f4) {
+      _promptCardCode();
+    } else if (key == LogicalKeyboardKey.f6) {
+      setState(() => _padOpenOverride = true);
+    } else if (key == LogicalKeyboardKey.f8) {
+      if (_cart.isNotEmpty) _confirmClearCart();
+    } else if (key == LogicalKeyboardKey.escape) {
+      _searchController.clear();
+      ref.read(posProductSearchProvider.notifier).state = '';
+      _searchFocusNode.requestFocus();
+    } else {
+      return KeyEventResult.ignored;
+    }
+    return KeyEventResult.handled;
+  }
+
+  Widget _buildScaffold(
+      BuildContext context, bool isDesktop, bool touch, Widget scanner, Widget cart) {
     return AdaptiveScaffold(
       title: 'نقطة البيع',
       activeRoute: '/pos',
@@ -555,6 +726,28 @@ class _PosScreenState extends ConsumerState<PosScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        // يظهر فقط لمن لا فرع مثبَّت في توكنه (مدير عام، مالك منصة).
+        // الكاشير المقيّد بفرع لا يراه أصلاً فلا يستطيع البيع من غير فرعه.
+        if (_branches.length > 1) ...[
+          DropdownButtonFormField<String>(
+            initialValue: _branchId,
+            decoration: const InputDecoration(
+              labelText: 'الفرع الذي تبيع منه',
+              prefixIcon: Icon(Icons.store_outlined),
+            ),
+            items: _branches
+                .map((b) => DropdownMenuItem(
+                      value: b['id'] as String,
+                      child: Text(b['name'] as String? ?? ''),
+                    ))
+                .toList(),
+            onChanged: (v) => setState(() {
+              _branchId = v;
+              _error = null;
+            }),
+          ),
+          const SizedBox(height: 12),
+        ],
         TextField(
           controller: _searchController,
           focusNode: _searchFocusNode,
@@ -564,7 +757,14 @@ class _PosScreenState extends ConsumerState<PosScreen> {
           style: touch ? AppTextStyles.headlineMd(color: AppColors.textPrimary) : null,
           decoration: InputDecoration(
             hintText: 'امسح باركود الصنف أو ابحث بالاسم...',
-            prefixIcon: const Icon(Icons.qr_code_scanner_outlined),
+            // زر حقيقي لا أيقونة زخرفية: كانت prefixIcon بلا مستقبِل نقر،
+            // فالضغط عليها لا يفعل شيئاً — وهو أول ما يجرّبه من لا يملك
+            // قارئاً سلكياً.
+            prefixIcon: IconButton(
+              tooltip: 'المسح بالكاميرا',
+              icon: const Icon(Icons.qr_code_scanner_outlined),
+              onPressed: _scanWithCamera,
+            ),
             filled: true,
             fillColor: AppColors.surface,
             // حقل أطول في وضع اللمس: هو هدف النقر الأول في الشاشة وأكثرها
@@ -595,14 +795,15 @@ class _PosScreenState extends ConsumerState<PosScreen> {
           ),
           data: (products) {
             if (products.isEmpty) {
+              // لا شيء مكتوب: تُعرض أصناف الوصول السريع بدل نصّ إرشادي.
+              // شاشة فارغة أمام كاشير بلا قارئ باركود تعني عملاً متوقّفاً،
+              // لا إرشاداً.
+              if (_searchController.text.trim().isEmpty) {
+                return _buildQuickPicks(touch);
+              }
               return Padding(
                 padding: const EdgeInsets.all(16),
-                child: Text(
-                  _searchController.text.trim().isEmpty
-                      ? 'اكتب اسم الصنف أو امسح الباركود لبدء البيع'
-                      : 'لا توجد نتائج',
-                  style: AppTextStyles.bodyMd(),
-                ),
+                child: Text('لا توجد نتائج', style: AppTextStyles.bodyMd()),
               );
             }
             // بطاقات أقل في الصف وأكبر حجماً في وضع اللمس — الهدف أن تُنقَر
@@ -648,6 +849,131 @@ class _PosScreenState extends ConsumerState<PosScreen> {
   /// كانت اللوحة موجودة لكنها لا تُفتح إلا بالنقر على مربع الكمية، ولا شيء
   /// يدل على أن المربع قابل للنقر. ميزة لا يعرف المستخدم أنها موجودة ليست
   /// موجودة — فصارت ظاهرة افتراضياً في وضع اللمس، وبزر واضح على سطح المكتب.
+  /// المبلغ المستلَم والباقي — على شاشة البيع لا في نافذة.
+  ///
+  /// أزرار المبالغ الجاهزة تغطّي الحالة الغالبة بنقرة: المبلغ بالضبط، ثم
+  /// أقرب ورقة نقدية أعلى منه. والكتابة اليدوية تبقى متاحة لغيرها.
+  Widget _buildCashRow(bool touch) {
+    final symbol = ref.watch(brandingProvider).valueOrNull?.currencySymbol ?? 'د.ل';
+    final total = _subtotal;
+    final quick = <double>{};
+    for (final step in [5, 10, 20, 50, 100]) {
+      final up = (total / step).ceil() * step;
+      if (up > total) quick.add(up.toDouble());
+    }
+    final shortcuts = quick.toList()..sort();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: TextField(
+                controller: _tenderedController,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                textAlign: TextAlign.center,
+                style: touch ? AppTextStyles.headlineMd() : null,
+                onChanged: (_) => setState(() {}),
+                decoration: InputDecoration(
+                  labelText: 'المستلَم (اختياري)',
+                  hintText: 'بالضبط',
+                  suffixText: symbol,
+                  isDense: true,
+                  contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: touch ? 16 : 10),
+                  border: const OutlineInputBorder(),
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    _changeDue < 0 ? 'المتبقّي على الزبون' : 'الباقي للزبون',
+                    style: AppTextStyles.bodyMd(
+                      color: _changeDue < 0 ? AppColors.warning : AppColors.success,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  CurrencyBadge(
+                    amount: _tenderedController.text.trim().isEmpty ? 0 : _changeDue.abs(),
+                    currencySymbol: symbol,
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        if (shortcuts.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              OutlinedButton(
+                onPressed: () => setState(() => _tenderedController.clear()),
+                child: const Text('بالضبط'),
+              ),
+              ...shortcuts.take(4).map((amount) => OutlinedButton(
+                    onPressed: () => setState(() =>
+                        _tenderedController.text = amount.toStringAsFixed(0)),
+                    child: Text(amount.toStringAsFixed(0)),
+                  )),
+            ],
+          ),
+        ],
+      ],
+    );
+  }
+
+  /// شبكة الوصول السريع — الأكثر مبيعاً والأصناف بلا باركود.
+  Widget _buildQuickPicks(bool touch) {
+    final picksAsync = ref.watch(posQuickPicksProvider);
+    return picksAsync.when(
+      loading: () => const Padding(
+        padding: EdgeInsets.all(24),
+        child: Center(child: CircularProgressIndicator()),
+      ),
+      error: (_, __) => Padding(
+        padding: const EdgeInsets.all(16),
+        child: Text('اكتب اسم الصنف أو امسح الباركود لبدء البيع', style: AppTextStyles.bodyMd()),
+      ),
+      data: (picks) {
+        if (picks.isEmpty) {
+          return Padding(
+            padding: const EdgeInsets.all(16),
+            child: Text('اكتب اسم الصنف أو امسح الباركود لبدء البيع', style: AppTextStyles.bodyMd()),
+          );
+        }
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Text('وصول سريع', style: AppTextStyles.bodyMd(color: AppColors.textSecondary)),
+            ),
+            GridView(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
+                maxCrossAxisExtent: touch ? 280 : 220,
+                mainAxisSpacing: 12,
+                crossAxisSpacing: 12,
+                mainAxisExtent: touch ? 200 : 176,
+              ),
+              children: picks
+                  .map((p) => _ProductTile(product: p, touch: touch, onTap: () => _addProduct(p)))
+                  .toList(),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   Widget _buildQuantityPad(bool touch) {
     if (_cart.isEmpty) return const SizedBox.shrink();
 
@@ -754,6 +1080,11 @@ class _PosScreenState extends ConsumerState<PosScreen> {
                   onPressed: _confirmClearCart,
                 ),
               const Spacer(),
+              IconButton(
+                tooltip: 'بطاقة العميل — للخصم من رصيده',
+                icon: Icon(Icons.credit_card_outlined, size: 20, color: AppColors.textSecondary),
+                onPressed: _promptCardCode,
+              ),
               InkWell(
                 onTap: _pickCustomer,
                 child: Row(
@@ -818,6 +1149,8 @@ class _PosScreenState extends ConsumerState<PosScreen> {
             Text(_error!, style: AppTextStyles.bodyMd(color: AppColors.danger)),
           ],
           const SizedBox(height: 12),
+          _buildCashRow(touch),
+          const SizedBox(height: 12),
           _buildQuantityPad(touch),
           const SizedBox(height: 16),
           // أزرار الدفع أطول في وضع اللمس — آخر نقرة في العملية وأكثرها
@@ -829,7 +1162,7 @@ class _PosScreenState extends ConsumerState<PosScreen> {
                   height: touch ? 64 : 44,
                   child: OutlinedButton.icon(
                     onPressed: (_placingOrder || _loadingBranch) ? null : _startCashCheckout,
-                    icon: const Icon(Icons.calculate_outlined, size: 20),
+                    icon: const Icon(Icons.payments_outlined, size: 20),
                     label: Text('نقداً', style: touch ? AppTextStyles.headlineMd() : null),
                   ),
                 ),
