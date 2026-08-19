@@ -16,7 +16,8 @@
 .PARAMETER Stage
     check   : فحص المتطلبات فقط (ابدأ به)
     db      : إنشاء القاعدة وتنفيذ المخطط والترحيلات والفهارس
-    iis     : إنشاء موقعَي الـAPI والويب في IIS
+    iis     : إنشاء موقع Kinetic في IIS (الويب على / والـAPI على /api)
+    https   : ربط الشهادة بالمنفذ 443 وتفعيل التحويل إلى HTTPS
     verify  : فحص شامل بعد اكتمال كل شيء
 
 .PARAMETER Domain
@@ -395,7 +396,7 @@ GRANT EXECUTE TO [$poolIdentity];
     #
     # القاعدة أدناه طبقة ثانية احتياطية لا أكثر، ففشلها ليس مشكلة.
     Head 'الحماية (طبقة احتياطية)'
-    $req = "IIS:\Sites\KineticWeb\api"
+    $req = "IIS:\Sites\Kinetic"
     # الإضافة تفشل إن كان المقطع مُسجَّلاً من تشغيل سابق، وIIS يرميها استثناءً
     # COM لا يكبحه -ErrorAction. والمرحلة يُعاد تنفيذها بعد كل تصحيح إعدادات
     # بطبيعتها، فالفحص قبل الإضافة هو الصواب — لا الانهيار على خطوة نتيجتها
@@ -417,7 +418,7 @@ GRANT EXECUTE TO [$poolIdentity];
     Write-Host '  التالي — الشهادة (الخطوة الوحيدة المتبقّية قبل الإطلاق):' -ForegroundColor Yellow
     Write-Host '    1) وجّه سجل DNS من A إلى IP هذا الخادم، وتأكّد أن 80 و443 مفتوحان.' -ForegroundColor Gray
     Write-Host '    2) نزّل win-acme من https://www.win-acme.com ثم:' -ForegroundColor Gray
-    Write-Host '         .\wacs.exe --target iis --siteid (Get-Website KineticWeb).Id' -ForegroundColor White
+    Write-Host '         .\wacs.exe --target iis --siteid (Get-Website Kinetic).Id' -ForegroundColor White
     Write-Host '       يُصدر شهادة Let''s Encrypt ويربطها بالمنفذ 443 ويجدّدها تلقائياً.' -ForegroundColor Gray
     Write-Host '    3) ثم:  .\server_setup.ps1 -Stage verify -Domain ' -NoNewline -ForegroundColor Gray
     Write-Host $Domain -ForegroundColor Gray
@@ -451,15 +452,27 @@ if ($Stage -eq 'https') {
     }
 
     Head 'الشهادة'
-    $cert = Get-ChildItem Cert:\LocalMachine\My -ErrorAction SilentlyContinue |
-            Where-Object { $_.Subject -like "*$Domain*" -or $_.DnsNameList -contains $Domain }
+    # يُبحَث في المخزنين لا في My وحده.
+    #
+    # win-acme يثبّت في WebHosting افتراضياً لا في My — وهو المخزن المصمَّم
+    # لشهادات المواقع على IIS. والبحث في My وحده كان يقول «لا شهادة» بعد
+    # إصدار ناجح تماماً، فيُرسل المستخدم لإعادة إصدارٍ لا لزوم له ويستهلك
+    # من حصّة Let's Encrypt.
+    $certStore = 'My'
+    $cert = $null
+    foreach ($store in 'WebHosting', 'My') {
+        $found = Get-ChildItem "Cert:\LocalMachine\$store" -ErrorAction SilentlyContinue |
+                 Where-Object { $_.Subject -like "*$Domain*" -or $_.DnsNameList -contains $Domain } |
+                 Sort-Object NotAfter -Descending
+        if ($found) { $cert = $found; $certStore = $store; break }
+    }
     if ($cert) {
-        Ok "شهادة موجودة تنتهي $($cert[0].NotAfter.ToString('yyyy-MM-dd'))"
+        Ok "شهادة موجودة في مخزن $certStore تنتهي $($cert[0].NotAfter.ToString('yyyy-MM-dd'))"
         $https = $site.Bindings.Collection | Where-Object { $_.protocol -eq 'https' }
         if (-not $https) {
             New-WebBinding -Name 'Kinetic' -Protocol https -Port 443 -HostHeader $Domain -SslFlags 1
             $binding = Get-WebBinding -Name 'Kinetic' -Protocol https
-            $binding.AddSslCertificate($cert[0].GetCertHashString(), 'My')
+            $binding.AddSslCertificate($cert[0].GetCertHashString(), $certStore)
             Ok 'أُضيف ارتباط https على 443'
         } else {
             Ok 'ارتباط https موجود'

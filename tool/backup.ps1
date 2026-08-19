@@ -18,7 +18,11 @@
     Scheduler — راجع المعامل -Install أدناه.
 
 .PARAMETER SqlInstance
-    نسخة SQL Server. الافتراضي .\SQLEXPRESS01
+    نسخة SQL Server. الافتراضي .\SQLEXPRESS — نفس افتراض server_setup.ps1.
+
+    اختلاف الافتراض بين السكربتين كان يُنتج أسوأ أنواع الفشل: التسجيل
+    ينجح والنسخة تفشل كل ليلة على نسخة SQL خاطئة، فلا يُكتشف إلا يوم
+    الحاجة إلى الاسترجاع.
 
 .PARAMETER Database
     اسم القاعدة. الافتراضي KineticEnterprise
@@ -42,7 +46,7 @@
 #>
 [CmdletBinding()]
 param(
-    [string]$SqlInstance = '.\SQLEXPRESS01',
+    [string]$SqlInstance = '.\SQLEXPRESS',
     [string]$Database = 'KineticEnterprise',
     [string]$Path,
     [int]$RetentionDays = 30,

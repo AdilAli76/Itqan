@@ -26,7 +26,7 @@
 #>
 [CmdletBinding()]
 param(
-    [string]$SqlInstance = '.\SQLEXPRESS01',
+    [string]$SqlInstance = '.\SQLEXPRESS',
     [string]$Database = 'KineticEnterprise'
 )
 
