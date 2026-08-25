@@ -6,7 +6,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 /// يحقن توكن JWT تلقائياً في كل طلب، ويُنشأ مرة واحدة عبر [ApiClient.instance].
 class ApiClient {
   ApiClient._internal() {
-    _dio = Dio(BaseOptions(baseUrl: baseUrl, connectTimeout: const Duration(seconds: 10)));
+    _dio = Dio(BaseOptions(baseUrl: resolvedBaseUrl, connectTimeout: const Duration(seconds: 10)));
     _dio.interceptors.add(InterceptorsWrapper(
       onRequest: (options, handler) async {
         final token = await _storage.read(key: _tokenKey);
@@ -67,11 +67,81 @@ class ApiClient {
   /// استضافة الـAPI على أصل مختلف.
   static const String _definedBaseUrl = String.fromEnvironment('API_BASE_URL');
 
-  static String get baseUrl {
+  /// عنوان أدخله المستخدم على هذا الجهاز — يُحمَّل قبل تشغيل التطبيق.
+  ///
+  /// **العطب الذي يصلحه:** الويب وحده كان يشتقّ عنوانه، والأندرويد وسطح
+  /// المكتب يسقطان على <c>localhost</c> — أي أن الهاتف يكلّم نفسه فلا يدخل
+  /// أحد. والبديل السابق (خبز العنوان وقت البناء) يعني **نسخة APK لكل
+  /// عميل**، وإعادة بناء عند كل تغيّر نطاق.
+  static String? _savedBaseUrl;
+
+  /// العنوان الفعّال، بترتيب الأولوية.
+  ///
+  /// المخبوز وقت البناء يتقدّم على المحفوظ: من بنى نسخةً لعميل بعينه قصد
+  /// أن تعمل على خادمه وحده، ولا يصحّ أن يُغيّره مستخدم على الجهاز.
+  static String get resolvedBaseUrl {
     if (_definedBaseUrl.isNotEmpty) return _definedBaseUrl;
+    if (_savedBaseUrl != null && _savedBaseUrl!.isNotEmpty) return _savedBaseUrl!;
     if (kIsWeb) return '${Uri.base.origin}/api';
-    return 'https://localhost:5001/api';
+    return '';
   }
+
+  /// هل يحتاج هذا الجهاز إلى ضبط عنوان الخادم قبل أي شيء.
+  static bool get needsSetup => resolvedBaseUrl.isEmpty;
+
+  /// هل يُسمح للمستخدم بتغيير العنوان — لا في النسخ المخبوزة لعميل بعينه.
+  static bool get canChangeServer => _definedBaseUrl.isEmpty && !kIsWeb;
+
+  static const _serverKey = 'kinetic_server_url';
+
+  /// يُستدعى مرّة قبل runApp.
+  static Future<void> loadSavedServer() async {
+    if (!canChangeServer) return;
+    try {
+      _savedBaseUrl = await const FlutterSecureStorage().read(key: _serverKey);
+      instance._applyBaseUrl();
+    } catch (_) {
+      // تخزين معطّل: يبقى العنوان فارغاً فتظهر شاشة الضبط — وهي أوضح من
+      // تعطّل صامت.
+    }
+  }
+
+  /// يحفظ العنوان ويُطبّقه فوراً بلا إعادة تشغيل.
+  static Future<void> setServer(String url) async {
+    final normalized = normalizeServerUrl(url);
+    _savedBaseUrl = normalized;
+    instance._applyBaseUrl();
+    await const FlutterSecureStorage().write(key: _serverKey, value: normalized);
+  }
+
+  /// يمحو العنوان المحفوظ — لتغيير الخادم من شاشة الدخول.
+  static Future<void> clearServer() async {
+    _savedBaseUrl = null;
+    instance._applyBaseUrl();
+    await const FlutterSecureStorage().delete(key: _serverKey);
+  }
+
+  /// يقبل ما يكتبه المستخدم فعلاً ويحوّله إلى عنوان صالح.
+  ///
+  /// من يُملى عليه العنوان هاتفياً يكتب «erp.droob-albayan.ly» بلا بروتوكول،
+  /// أو يُلحق «/» أو ينسى «/api». ورفضُ ذلك بـ«عنوان غير صالح» يجعله يعيد
+  /// المحاولة بلا أن يعرف ما ينقص.
+  static String normalizeServerUrl(String raw) {
+    var url = raw.trim();
+    if (url.isEmpty) return '';
+    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+      // https افتراضاً: الخوادم الحقيقية بشهادة، وhttp يُكتب صراحةً لمن
+      // يستعمل تركيباً محلياً بلا شهادة.
+      url = 'https://$url';
+    }
+    while (url.endsWith('/')) {
+      url = url.substring(0, url.length - 1);
+    }
+    if (!url.endsWith('/api')) url = '$url/api';
+    return url;
+  }
+
+  void _applyBaseUrl() => _dio.options.baseUrl = resolvedBaseUrl;
 
   static const _tokenKey = 'kinetic_jwt_token';
   final _storage = const FlutterSecureStorage();

@@ -132,6 +132,18 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
               label: const Text('عميل؟ اعرض رصيد بطاقتك'),
             ),
           ),
+          // تغيير الخادم من هنا: عنوانٌ كُتب خطأً كان سيحبس المستخدم في
+          // شاشة دخول تفشل أبداً بلا مخرج إلا حذف التطبيق. ولا يظهر على
+          // الويب ولا في نسخة مخبوزة لعميل بعينه.
+          if (ApiClient.canChangeServer)
+            Center(
+              child: TextButton.icon(
+                onPressed: () => context.go('/server'),
+                icon: const Icon(Icons.dns_outlined, size: 16),
+                label: Text('الخادم: ${_serverLabel()}',
+                    style: AppTextStyles.caption()),
+              ),
+            ),
         ],
       ),
     );
@@ -254,6 +266,16 @@ class _Step extends StatelessWidget {
 ///
 /// والعلامة المائية شفافة خلف النصّ — «صورة» مرسومة بالكود تتلوّن بهوية كل
 /// عميل تلقائياً، فلا تحتاج ملفاً لكل واحد.
+/// العنوان بلا بروتوكول ولا لاحقة — ما يقرؤه المستخدم لا ما يرسله العميل.
+String _serverLabel() {
+  final url = ApiClient.resolvedBaseUrl;
+  if (url.isEmpty) return 'غير مضبوط';
+  return url
+      .replaceFirst('https://', '')
+      .replaceFirst('http://', '')
+      .replaceFirst(RegExp(r'/api$'), '');
+}
+
 class _BrandPanel extends StatelessWidget {
   const _BrandPanel();
 

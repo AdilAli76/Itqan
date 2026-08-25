@@ -8,6 +8,7 @@ import 'core/theme/app_colors.dart';
 import 'core/theme/app_theme.dart';
 import 'core/theme/branding_provider.dart';
 import 'core/theme/theme_mode_provider.dart';
+import 'core/network/api_client.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -23,6 +24,11 @@ Future<void> main() async {
   // Program.cs يردّ التطبيق لأي مسار غير معروف — وبدونه كان فتح
   // /pos مباشرةً يعطي 404.
   usePathUrlStrategy();
+
+  // عنوان الخادم المحفوظ على هذا الجهاز — قبل runApp لا بعده: أول طلب قد
+  // ينطلق مع أول إطار، وتحميلٌ متأخّر يجعله يذهب إلى عنوان فارغ ثم ينجح
+  // الطلب التالي — فيظهر عطلٌ متقطّع لا يُفسَّر.
+  await ApiClient.loadSavedServer();
 
   runApp(const ProviderScope(child: KineticApp()));
 }
