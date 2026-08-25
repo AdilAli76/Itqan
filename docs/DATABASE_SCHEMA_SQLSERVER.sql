@@ -206,6 +206,7 @@ INSERT INTO permissions (code, label_ar, module) VALUES
   ('prescriptions.dispense',  N'صرف الأدوية المقيَّدة بوصفة وتسجيلها',       N'pharmacy'),
   ('invoices.refund',         N'استرجاع الفواتير',                          N'invoices'),
   ('pos.price_override',      N'البيع بسعر مخالف لسعر الكتالوج',            N'pos'),
+  ('expenses.manage',        N'تسجيل المصروفات',                           N'expenses'),
   ('reports.view',            N'عرض التقارير',                              N'reports'),
   ('audit_log.view',          N'عرض سجل التدقيق',                           N'audit_log'),
   ('license.view',            N'عرض الترخيص والاشتراك',                     N'license');
@@ -881,22 +882,11 @@ CREATE INDEX IX_customer_wallet_transactions_customer
 GO
 
 -- ----------------------------------------------------------------------------
--- 7. المالية المبسّطة
--- ----------------------------------------------------------------------------
-CREATE TABLE expenses (
-  id UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
-  organization_id UNIQUEIDENTIFIER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
-  branch_id UNIQUEIDENTIFIER NOT NULL REFERENCES branches(id),
-  category NVARCHAR(80) NOT NULL,
-  amount DECIMAL(14,2) NOT NULL,
-  note NVARCHAR(300) NULL,
-  created_by UNIQUEIDENTIFIER NULL REFERENCES app_users(id),
-  created_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
-);
-GO
-
--- ----------------------------------------------------------------------------
--- 7.5 المحاسبة — دليل الحسابات والقيود  (وحدة accounting، إصدار المؤسسات)
+-- 6.9 المحاسبة — دليل الحسابات والقيود  (وحدة accounting، إصدار المؤسسات)
+--
+-- ⚠ **قبل قسم المالية المبسّطة عمداً:** expenses.account_id يشير إلى
+-- accounts، وSQL Server ينفّذ الملف بالترتيب فيرفض مفتاحاً خارجياً إلى جدول
+-- لم يُنشأ بعد. نفس الإشارة الأمامية التي أصابت stock_levels ← warehouses.
 --
 -- على الدليل المحاسبي الموحّد: 1 الأصول · 2 الالتزامات وحقوق الملكية ·
 -- 3 الاستخدامات · 4 الإيرادات.
@@ -970,6 +960,29 @@ CREATE TABLE account_mappings (
   role NVARCHAR(40) NOT NULL,
   account_id UNIQUEIDENTIFIER NOT NULL REFERENCES accounts(id),
   PRIMARY KEY (organization_id, role)
+);
+GO
+
+-- ----------------------------------------------------------------------------
+-- 7. المالية المبسّطة
+-- ----------------------------------------------------------------------------
+CREATE TABLE expenses (
+  id UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
+  organization_id UNIQUEIDENTIFIER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  branch_id UNIQUEIDENTIFIER NOT NULL REFERENCES branches(id),
+  category NVARCHAR(80) NOT NULL,
+  amount DECIMAL(14,2) NOT NULL,
+  note NVARCHAR(300) NULL,
+  -- حساب المصروف حين تكون وحدة المحاسبة مفعّلة. NULL = «مصروفات عمومية».
+  -- تركُه فارغاً أفضل من إجبار من يسجّل مصروفاً على اختيار حساب لا يعرفه،
+  -- فيختار أول ما تقع عليه عينه ويُفسد التبويب.
+  -- القيد مُسمّى ليطابق ما يُنشئه MIGRATIONS.sql: القيود السطرية تأخذ اسماً
+  -- مُجزَّأً يختلف بين كل قاعدة وأخرى، فتختلف قاعدةٌ مُرحَّلة عن قاعدةٍ
+  -- مُنشأة من المخطّط في أسماء قيودها — ولا تُترجَم رسالتها إلى العربية.
+  account_id UNIQUEIDENTIFIER NULL
+    CONSTRAINT FK_expenses_account REFERENCES accounts(id),
+  created_by UNIQUEIDENTIFIER NULL REFERENCES app_users(id),
+  created_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
 );
 GO
 

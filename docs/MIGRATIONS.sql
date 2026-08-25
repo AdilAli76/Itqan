@@ -142,6 +142,7 @@ USING (VALUES
     ('customers.wallet_adjust', N'تعديل رصيد محفظة العميل',                   N'customers'),
     ('invoices.refund',         N'استرجاع الفواتير',                          N'invoices'),
     ('pos.price_override',      N'البيع بسعر مخالف لسعر الكتالوج',            N'pos'),
+    ('expenses.manage',        N'تسجيل المصروفات',                           N'expenses'),
     ('reports.view',            N'عرض التقارير',                              N'reports'),
     ('audit_log.view',          N'عرض سجل التدقيق',                           N'audit_log'),
     ('license.view',            N'عرض الترخيص والاشتراك',                     N'license')
@@ -1888,6 +1889,27 @@ CREATE SECURITY POLICY Security.JournalEntryLinesPolicy
 GO
 
 PRINT N'المحاسبة: دليل الحسابات والقيود جاهز';
+GO
+
+-- ----------------------------------------------------------------------------
+--  المصروفات: حساب المصروف
+--
+--  جدول expenses كان موجوداً في المخطّط منذ اليوم الأول ولا يقرؤه سطر واحد —
+--  لا كيان ولا وحدة تحكّم ولا شاشة. يُبنى الآن، ويُربَط بدليل الحسابات.
+--
+--  ⚠ يجب أن يلي كتلة المحاسبة أعلاه: المفتاح الخارجي يشير إلى accounts.
+-- ----------------------------------------------------------------------------
+IF NOT EXISTS (SELECT 1 FROM sys.columns
+               WHERE object_id = OBJECT_ID('dbo.expenses') AND name = 'account_id')
+   AND OBJECT_ID('dbo.accounts', 'U') IS NOT NULL
+BEGIN
+    ALTER TABLE dbo.expenses ADD account_id UNIQUEIDENTIFIER NULL
+        CONSTRAINT FK_expenses_account REFERENCES dbo.accounts(id);
+    PRINT N'أُضيف عمود expenses.account_id';
+END
+GO
+
+PRINT N'المصروفات جاهزة';
 GO
 
 -- ----------------------------------------------------------------------------

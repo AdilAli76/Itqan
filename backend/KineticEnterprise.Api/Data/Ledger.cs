@@ -109,6 +109,87 @@ public static class Ledger
     }
 
     /// <summary>
+    /// قيدٌ يخلط حسابات بأعيانها مع أدوار محاسبية.
+    ///
+    /// <para><b>لماذا يلزم:</b> معظم القيود تُبنى من أدوار ثابتة (الصندوق،
+    /// المبيعات) لأن النظام هو من يقرّرها. لكن **المصروف يختار حسابه لحظة
+    /// تسجيله** — الإيجار على «إيجارات» والراتب على «رواتب وأجور» — ولا دور
+    /// ثابتاً لكلٍّ منهما، ولا يصحّ اختراع دور لكل حساب مصروف يُنشئه محاسب.
+    /// </para>
+    ///
+    /// <para>ويمرّ بنفس فحص التوازن ونفس مولّد الرقم: طريقٌ ثانٍ يلتفّ عليهما
+    /// يُبطل معنى الطريق الواحد.</para>
+    /// </summary>
+    /// <param name="direct">سطور بحسابات بأعيانها: (الحساب، مدين، دائن، ملاحظة).</param>
+    /// <param name="byRole">سطور بأدوار — تُحلّ من الربط.</param>
+    public static async Task<JournalEntry> PostToAccountsAsync(
+        AppDbContext db,
+        Guid organizationId,
+        Guid? branchId,
+        string source,
+        Guid? sourceId,
+        string description,
+        IEnumerable<(Guid AccountId, decimal Debit, decimal Credit, string? Note)> direct,
+        IEnumerable<PostingLine> byRole,
+        Guid? createdBy,
+        DateTime? entryDate = null)
+    {
+        var directLines = direct.Where(l => l.Debit != 0 || l.Credit != 0).ToList();
+        var roleLines = byRole.Where(l => l.Debit != 0 || l.Credit != 0).ToList();
+
+        if (directLines.Count + roleLines.Count == 0)
+        {
+            throw new InvalidOperationException("قيد بلا سطور — لا شيء يُرحَّل.");
+        }
+
+        var debit = directLines.Sum(l => l.Debit) + roleLines.Sum(l => l.Debit);
+        var credit = directLines.Sum(l => l.Credit) + roleLines.Sum(l => l.Credit);
+        if (Math.Abs(debit - credit) > 0.01m)
+        {
+            throw new InvalidOperationException(
+                $"قيد غير متوازن: مدين {debit:0.##} ودائن {credit:0.##} — لم يُكتب شيء.");
+        }
+
+        var mappings = await db.AccountMappings.ToDictionaryAsync(m => m.Role, m => m.AccountId);
+
+        var entry = new JournalEntry
+        {
+            OrganizationId = organizationId,
+            BranchId = branchId,
+            Number = await NextNumberAsync(db),
+            EntryDate = entryDate ?? DateTime.UtcNow.Date,
+            Source = source,
+            SourceId = sourceId,
+            Description = description,
+            CreatedBy = createdBy,
+        };
+
+        foreach (var (accountId, d, c, note) in directLines)
+        {
+            entry.Lines.Add(new JournalEntryLine { AccountId = accountId, Debit = d, Credit = c, Note = note });
+        }
+
+        foreach (var line in roleLines)
+        {
+            if (!mappings.TryGetValue(line.Role, out var accountId))
+            {
+                throw new InvalidOperationException(
+                    $"لا حساب مربوط بالدور «{line.Role}» — راجع ربط الحسابات.");
+            }
+            entry.Lines.Add(new JournalEntryLine
+            {
+                AccountId = accountId,
+                Debit = line.Debit,
+                Credit = line.Credit,
+                Note = line.Note,
+            });
+        }
+
+        db.JournalEntries.Add(entry);
+        return entry;
+    }
+
+    /// <summary>
     /// يعكس قيداً — التصحيح الوحيد المسموح.
     ///
     /// <para>يُنشئ قيداً بنفس السطور مقلوبةً، ويشير إلى الأصل. فيبقى الخطأ

@@ -40,6 +40,8 @@ public class AppDbContext : DbContext
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
 
     // ── المحاسبة ────────────────────────────────────────────────────────
+    public DbSet<Expense> Expenses => Set<Expense>();
+
     public DbSet<Account> Accounts => Set<Account>();
     public DbSet<JournalEntry> JournalEntries => Set<JournalEntry>();
     public DbSet<JournalEntryLine> JournalEntryLines => Set<JournalEntryLine>();
@@ -100,6 +102,7 @@ public class AppDbContext : DbContext
         modelBuilder.Entity<DebtReminder>().ToTable("debt_reminders");
         modelBuilder.Entity<NotificationItem>().ToTable("notifications");
         modelBuilder.Entity<AuditLog>().ToTable("audit_logs");
+        modelBuilder.Entity<Expense>().ToTable("expenses");
         modelBuilder.Entity<Account>().ToTable("accounts");
         modelBuilder.Entity<JournalEntry>().ToTable("journal_entries");
         modelBuilder.Entity<JournalEntryLine>().ToTable("journal_entry_lines");

@@ -123,6 +123,15 @@ List<NavGroup> navGroupsFor({required bool isPlatformAdmin, String edition = 'st
           label: 'المحاسبة',
           items: [NavItem(Icons.account_tree_outlined, 'دليل الحسابات', '/accounting')],
         ),
+      // المصروفات في كل الإصدارات عدا المحفظة: الإيجار والرواتب مصروفات
+      // كل نشاط، وبلا تسجيلها يقول تقرير الأرباح ربحاً ليس ربحاً. أما إصدار
+      // المحفظة فجهةٌ تصرف على منتسبيها لا تُدير محلاً بمصروفاته.
+      if (edition != 'wallet')
+        const NavGroup(
+          icon: Icons.payments_outlined,
+          label: 'المالية',
+          items: [NavItem(Icons.payments_outlined, 'المصروفات', '/expenses')],
+        ),
       _reportsGroup,
       NavGroup(icon: _notifications.icon, label: _notifications.label, items: const [_notifications]),
       _adminGroup,

@@ -1634,3 +1634,36 @@ public static class AccountRoles
         CostOfGoodsSold, CustomerWallet, SalesReturns, GeneralExpense,
     };
 }
+
+/// <summary>
+/// مصروف — إيجار، رواتب، كهرباء، نقل…
+///
+/// <para><b>الجدول كان موجوداً في المخطّط منذ اليوم الأول ولا يقرؤه سطر
+/// واحد:</b> لا كيان ولا وحدة تحكّم ولا شاشة. أي أن «المالية المبسّطة»
+/// الموعودة في ARCHITECTURE.md §2.8 لم تُبنَ أصلاً — والتاجر الذي يدفع إيجاراً
+/// من درج الكاشير لا يجد له مكاناً في النظام، فيُسجّله على ورقة أو لا يسجّله.
+/// وحينها يقول تقرير الأرباح ربحاً ليس ربحاً.</para>
+/// </summary>
+public class Expense
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid OrganizationId { get; set; }
+    public Guid BranchId { get; set; }
+
+    /// <summary>وصف حرّ للبند — يبقى مفيداً حتى مع المحاسبة المفعّلة.</summary>
+    public string Category { get; set; } = "";
+    public decimal Amount { get; set; }
+    public string? Note { get; set; }
+
+    /// <summary>
+    /// حساب المصروف حين تكون وحدة المحاسبة مفعّلة.
+    ///
+    /// <para>NULL يعني «مصروفات عمومية» — ودعُه فارغاً أفضل من إجبار من
+    /// يسجّل مصروفاً على اختيار حساب لا يعرفه، فيختار أول ما تقع عليه عينه
+    /// ويُفسد التبويب. الحساب الافتراضي يقول الحقيقة: «مصروف لم يُبوَّب».</para>
+    /// </summary>
+    public Guid? AccountId { get; set; }
+
+    public Guid? CreatedBy { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+}
