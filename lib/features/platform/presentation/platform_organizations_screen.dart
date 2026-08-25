@@ -31,6 +31,17 @@ final platformOrganizationsProvider =
   return (response.data as List).map((e) => Map<String, dynamic>.from(e as Map)).toList();
 });
 
+/// نصّ الخطأ كما يقوله الخادم — بما فيه الرمز المرجعي إن وُجد.
+String _errorDetail(Object err) {
+  if (err is DioException) {
+    final data = err.response?.data;
+    if (data is Map && data['message'] is String) return data['message'] as String;
+    if (err.response == null) return 'لا اتصال بالخادم — تحقّق من الشبكة.';
+    return 'ردّ الخادم بالحالة ${err.response?.statusCode}.';
+  }
+  return err.toString();
+}
+
 /// إدارة الشركات المشترَكة — مقصورة على مالك المنصة.
 ///
 /// كانت الشاشة الوحيدة المتاحة له هي «إنشاء منظمة»: يُنشئ العميل ثم لا يملك
@@ -48,8 +59,32 @@ class PlatformOrganizationsScreen extends ConsumerWidget {
       activeRoute: '/platform/organizations',
       body: orgsAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
+        // رسالة الخادم كما هي لا نصٌّ عامّ.
+        //
+        // «تعذّر تحميل الشركات» وحدها طريقٌ مسدود: لا المستخدم يعرف ماذا
+        // يفعل، ولا الدعم يعرف أين يبحث. والخادم يُرسل الآن رمزاً مرجعياً
+        // مع كل عطب غير متوقّع — عرضُه هو ما يجعل الشكوى قابلة للتتبّع.
         error: (err, _) => Center(
-          child: Text('تعذّر تحميل الشركات', style: AppTextStyles.bodyMd(color: AppColors.danger)),
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text('تعذّر تحميل الشركات',
+                    style: AppTextStyles.headlineMd(color: AppColors.danger)),
+                const SizedBox(height: 8),
+                Text(_errorDetail(err),
+                    style: AppTextStyles.bodyMd(color: AppColors.textSecondary),
+                    textAlign: TextAlign.center),
+                const SizedBox(height: 16),
+                OutlinedButton.icon(
+                  onPressed: () => ref.invalidate(platformOrganizationsProvider),
+                  icon: const Icon(Icons.refresh, size: 18),
+                  label: const Text('أعد المحاولة'),
+                ),
+              ],
+            ),
+          ),
         ),
         data: (orgs) {
           if (orgs.isEmpty) {

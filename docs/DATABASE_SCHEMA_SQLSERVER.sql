@@ -896,6 +896,84 @@ CREATE TABLE expenses (
 GO
 
 -- ----------------------------------------------------------------------------
+-- 7.5 المحاسبة — دليل الحسابات والقيود  (وحدة accounting، إصدار المؤسسات)
+--
+-- على الدليل المحاسبي الموحّد: 1 الأصول · 2 الالتزامات وحقوق الملكية ·
+-- 3 الاستخدامات · 4 الإيرادات.
+-- ----------------------------------------------------------------------------
+CREATE TABLE accounts (
+  id UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
+  organization_id UNIQUEIDENTIFIER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  code NVARCHAR(20) NOT NULL,
+  name NVARCHAR(200) NOT NULL,
+  -- بلا ON DELETE: حذف أبٍ له أبناء يجب أن يُرفض لا أن يتتالى — التتالي
+  -- يمحو فرعاً كاملاً من الدليل بضغطة واحدة.
+  parent_id UNIQUEIDENTIFIER NULL REFERENCES accounts(id),
+  type NVARCHAR(20) NOT NULL
+    CONSTRAINT CK_accounts_type CHECK (type IN ('asset','liability','equity','expense','revenue')),
+  -- الوسيط لا يُرحَّل إليه: قيدٌ على «الأصول» مباشرةً يجعل رصيد الأب لا
+  -- يساوي مجموع أبنائه، فيستحيل تفسير أي رقم بردّه إلى مفرداته.
+  is_postable BIT NOT NULL DEFAULT 1,
+  -- أنشأه النظام ويعتمد عليه الترحيل الآلي — لا يُحذف. حذف «المبيعات»
+  -- يُوقف كل بيع في المحلّ، والمستخدم لا يعرف ذلك وهو يضغط «حذف».
+  is_system BIT NOT NULL DEFAULT 0,
+  is_active BIT NOT NULL DEFAULT 1,
+  created_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+  CONSTRAINT UQ_accounts_org_code UNIQUE (organization_id, code)
+);
+GO
+
+CREATE TABLE journal_entries (
+  id UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
+  organization_id UNIQUEIDENTIFIER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  branch_id UNIQUEIDENTIFIER NULL REFERENCES branches(id),
+  -- تسلسل داخل المنظمة بلا فجوات: يُولَّد بقفل داخل المعاملة لا بـIDENTITY،
+  -- لأن IDENTITY يترك فجوات عند أي تراجع — وفجوةٌ في تسلسل دفتر اليومية
+  -- سؤالٌ يطرحه كل مراجع.
+  number BIGINT NOT NULL,
+  -- التاريخ المحاسبي قد يخالف تاريخ الإدخال: فاتورة أمس تُسجَّل اليوم
+  -- تنتمي محاسبياً إلى أمس.
+  entry_date DATETIME2 NOT NULL,
+  source NVARCHAR(30) NOT NULL,
+  source_id UNIQUEIDENTIFIER NULL,
+  description NVARCHAR(400) NOT NULL DEFAULT N'',
+  -- القيد الذي يعكسه هذا القيد. حرمة القيد: لا تعديل ولا حذف، والتصحيح
+  -- بعكسٍ يشير إلى أصله — نفس مبدأ دفتر المخزون ودفتر المحفظة.
+  reverses_entry_id UNIQUEIDENTIFIER NULL REFERENCES journal_entries(id),
+  created_by UNIQUEIDENTIFIER NULL REFERENCES app_users(id),
+  created_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+  CONSTRAINT UQ_journal_entries_number UNIQUE (organization_id, number)
+);
+GO
+
+CREATE TABLE journal_entry_lines (
+  id UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
+  journal_entry_id UNIQUEIDENTIFIER NOT NULL REFERENCES journal_entries(id) ON DELETE CASCADE,
+  account_id UNIQUEIDENTIFIER NOT NULL REFERENCES accounts(id),
+  -- عمودان لا عمود واحد بإشارة: يُقرآن كما يكتبهما المحاسب، والمبلغ الموجب
+  -- دائماً يمنع طبقةً كاملة من أخطاء الإشارة في التجميع.
+  debit DECIMAL(18,2) NOT NULL DEFAULT 0,
+  credit DECIMAL(18,2) NOT NULL DEFAULT 0,
+  note NVARCHAR(300) NULL,
+  -- سطرٌ بمدين ودائن معاً، أو بصفرَين، أو بسالب: كلّها بلا معنى محاسبي.
+  -- القيد هنا لا في الكود: الكود يُنسى في مسار جديد، والقاعدة لا تنسى.
+  CONSTRAINT CK_journal_lines_side CHECK (
+    debit >= 0 AND credit >= 0 AND (
+      (debit > 0 AND credit = 0) OR (credit > 0 AND debit = 0)
+    )
+  )
+);
+GO
+
+CREATE TABLE account_mappings (
+  organization_id UNIQUEIDENTIFIER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  role NVARCHAR(40) NOT NULL,
+  account_id UNIQUEIDENTIFIER NOT NULL REFERENCES accounts(id),
+  PRIMARY KEY (organization_id, role)
+);
+GO
+
+-- ----------------------------------------------------------------------------
 -- 8. الإشعارات وسجل التدقيق
 -- ----------------------------------------------------------------------------
 -- ----------------------------------------------------------------------------
@@ -1021,6 +1099,45 @@ GO
 CREATE SECURITY POLICY Security.ProductsPolicy
   ADD FILTER PREDICATE Security.fn_OrgOnlyPredicate(organization_id) ON dbo.products,
   ADD BLOCK PREDICATE Security.fn_OrgOnlyPredicate(organization_id) ON dbo.products AFTER INSERT
+  WITH (STATE = ON);
+GO
+
+-- ── المحاسبة ────────────────────────────────────────────────────────────
+CREATE SECURITY POLICY Security.AccountsPolicy
+  ADD FILTER PREDICATE Security.fn_OrgOnlyPredicate(organization_id) ON dbo.accounts,
+  ADD BLOCK PREDICATE Security.fn_OrgOnlyPredicate(organization_id) ON dbo.accounts AFTER INSERT
+  WITH (STATE = ON);
+GO
+
+CREATE SECURITY POLICY Security.JournalEntriesPolicy
+  ADD FILTER PREDICATE Security.fn_OrgOnlyPredicate(organization_id) ON dbo.journal_entries,
+  ADD BLOCK PREDICATE Security.fn_OrgOnlyPredicate(organization_id) ON dbo.journal_entries AFTER INSERT
+  WITH (STATE = ON);
+GO
+
+CREATE SECURITY POLICY Security.AccountMappingsPolicy
+  ADD FILTER PREDICATE Security.fn_OrgOnlyPredicate(organization_id) ON dbo.account_mappings,
+  ADD BLOCK PREDICATE Security.fn_OrgOnlyPredicate(organization_id) ON dbo.account_mappings AFTER INSERT
+  WITH (STATE = ON);
+GO
+
+-- سطر القيد لا يحمل organization_id — يصل إليها عبر رأس القيد، بنفس نمط
+-- invoice_items تماماً.
+CREATE FUNCTION Security.fn_JournalChild(@EntryId UNIQUEIDENTIFIER)
+RETURNS TABLE
+WITH SCHEMABINDING
+AS
+RETURN SELECT 1 AS fn_result
+WHERE EXISTS (
+    SELECT 1 FROM dbo.journal_entries e
+    WHERE e.id = @EntryId
+      AND e.organization_id = CAST(SESSION_CONTEXT(N'organization_id') AS UNIQUEIDENTIFIER)
+);
+GO
+
+CREATE SECURITY POLICY Security.JournalEntryLinesPolicy
+  ADD FILTER PREDICATE Security.fn_JournalChild(journal_entry_id) ON dbo.journal_entry_lines,
+  ADD BLOCK PREDICATE Security.fn_JournalChild(journal_entry_id) ON dbo.journal_entry_lines AFTER INSERT
   WITH (STATE = ON);
 GO
 

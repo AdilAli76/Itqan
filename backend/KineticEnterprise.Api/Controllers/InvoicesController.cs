@@ -261,6 +261,9 @@ public class InvoicesController : ControllerBase
         //   2) حامل صلاحية pos.price_override — ويُسجَّل التجاوز في التدقيق.
         // ------------------------------------------------------------------
         var canOverridePrice = await HasPriceOverrideAsync();
+        // تكلفة البضاعة المباعة — تُجمَع من الدفتر أثناء الصرف ويُرحَّل بها
+        // قيد التكلفة بعد الحفظ (راجع PostInvoiceAsync).
+        decimal costOfGoodsSold = 0;
         var resolvedLines = new List<(Product Product, decimal Quantity, decimal UnitPrice, bool Overridden, bool SoldAsSubUnit)>();
 
         foreach (var line in request.Lines)
@@ -567,6 +570,14 @@ public class InvoicesController : ControllerBase
                 return BadRequest(new { message = $"{ex.Message} — {product.Name}" });
             }
 
+            // التكلفة الفعلية لما خرج، من الدفتر لا من سعر الكتالوج.
+            //
+            // IssuedLot يحمل تكلفة **كل دفعة استُهلك منها** بسعرها هي. وسعر
+            // الشراء يتغيّر، فاشتقاق التكلفة من Product.CostPrice يجعل تكلفة
+            // بيعٍ ماضٍ تتغيّر بأثر رجعي كلما اشتُريت شحنة بسعر جديد — أي
+            // ربحاً يتحرّك بعد أن تحقّق.
+            costOfGoodsSold += issuedLots.Sum(l => l.Quantity * l.UnitCost);
+
             foreach (var group in issuedLots.GroupBy(l => l.BatchNumber))
             {
                 invoiceItem.Batches.Add(new InvoiceItemBatch
@@ -783,9 +794,93 @@ public class InvoicesController : ControllerBase
             await _db.SaveChangesAsync();
         }
 
+        // ── الترحيل المحاسبي ────────────────────────────────────────────
+        //
+        // داخل المعاملة نفسها: فاتورةٌ بلا قيدها ثقبٌ في الدفتر لا يُكتشف إلا
+        // عند المراجعة. وترحيلٌ بمهمّة خلفية يعني دفتراً يتخلّف عن الواقع
+        // بمقدار ما تعطّلت المهمّة — راجع [Ledger].
+        await PostInvoiceAsync(invoice, org, paidAmount, debtAmount, payingFromWallet, costOfGoodsSold);
+
         await transaction.CommitAsync();
 
         return CreatedAtAction(nameof(GetById), new { id = invoice.Id }, invoice);
+    }
+
+    /// <summary>
+    /// قيد الفاتورة.
+    ///
+    /// <para><b>القيد المكتوب:</b></para>
+    /// <code>
+    ///   من ح/ الصندوق            (المدفوع نقداً)
+    ///   من ح/ العملاء            (الآجل)
+    ///   من ح/ أرصدة العملاء      (المخصوم من المحفظة — إطفاء التزام)
+    ///       إلى ح/ المبيعات      (الصافي قبل الضريبة)
+    ///       إلى ح/ ضريبة المبيعات
+    ///
+    ///   من ح/ تكلفة البضاعة المباعة
+    ///       إلى ح/ المخزون
+    /// </code>
+    ///
+    /// <para><b>ولماذا قيدان لا واحد:</b> الأول يُثبت الإيراد، والثاني ينقل
+    /// البضاعة من أصلٍ إلى تكلفة. دمجُهما يجعل «تكلفة البضاعة المباعة» و
+    /// «المبيعات» في قيد واحد فيبدو الربح كأنه بند مستقلّ — وهو ليس بنداً بل
+    /// فرقٌ يُشتقّ.</para>
+    ///
+    /// <para><b>والخصم من المحفظة ليس تحصيلاً نقدياً:</b> المال قُبض يوم
+    /// الشحن وسُجّل التزاماً (راجع حساب «أرصدة العملاء»). فالبيع منه
+    /// **يُطفئ الالتزام** لا يُدخل نقداً. تسجيله في الصندوق يُضخّم النقدية
+    /// بمالٍ ليس في الدرج.</para>
+    /// </summary>
+    private async Task PostInvoiceAsync(
+        Invoice invoice, Organization org, decimal paidAmount, decimal debtAmount, bool fromWallet,
+        decimal costOfGoodsSold)
+    {
+        var license = await _db.Licenses.FirstOrDefaultAsync();
+        if (!Ledger.IsEnabled(org, license)) return;
+
+        var net = invoice.Subtotal - invoice.DiscountAmount;
+        var lines = new List<PostingLine>();
+
+        if (fromWallet)
+        {
+            lines.Add(new PostingLine(AccountRoles.CustomerWallet, invoice.TotalAmount, 0,
+                "خصم من رصيد العميل"));
+        }
+        else
+        {
+            if (paidAmount > 0) lines.Add(new PostingLine(AccountRoles.Cash, paidAmount, 0));
+            if (debtAmount > 0) lines.Add(new PostingLine(AccountRoles.Receivables, debtAmount, 0));
+        }
+
+        lines.Add(new PostingLine(AccountRoles.SalesRevenue, 0, net));
+        if (invoice.TaxAmount > 0)
+        {
+            lines.Add(new PostingLine(AccountRoles.SalesTax, 0, invoice.TaxAmount));
+        }
+
+        await Ledger.PostAsync(_db, invoice.OrganizationId, invoice.BranchId,
+            JournalSources.Invoice, invoice.Id,
+            $"فاتورة {invoice.InvoiceNumber}", lines, CurrentUserId(),
+            invoice.CreatedAt.Date);
+
+        // قيد التكلفة بما جمعه الدفتر فعلاً أثناء الصرف. وقد يكون صفراً
+        // لصنفٍ لا يُتتبَّع مخزونه (خدمة، صنف مفتوح القيمة) — فلا قيد تكلفة
+        // له، إذ لم تخرج بضاعة.
+        var cost = costOfGoodsSold;
+        if (cost > 0)
+        {
+            await Ledger.PostAsync(_db, invoice.OrganizationId, invoice.BranchId,
+                JournalSources.Invoice, invoice.Id,
+                $"تكلفة مبيعات فاتورة {invoice.InvoiceNumber}",
+                new[]
+                {
+                    new PostingLine(AccountRoles.CostOfGoodsSold, cost, 0),
+                    new PostingLine(AccountRoles.Inventory, 0, cost),
+                },
+                CurrentUserId(), invoice.CreatedAt.Date);
+        }
+
+        await _db.SaveChangesAsync();
     }
 
     /// <summary>

@@ -46,6 +46,10 @@ public static class Editions
         {
             "inventory", "pos", "customers", "reports",
             "warehouses", "valuation", "procurement",
+            // دليل الحسابات والقيود. لإصدار المؤسسات وحده: بقّالة بفرع واحد
+            // لا تحتاج ميزان مراجعة، وشجرة حسابات في شاشتها ضوضاء تُربك ولا
+            // تُفيد — نفس مبرر تقييد نشرة الدواء بوحدة pharmacy.
+            "accounting",
         },
         _ => new[] { "inventory", "pos", "customers", "reports" },
     };
@@ -1433,4 +1437,200 @@ public class AuditLog
     public string? OldValues { get; set; }
     public string? NewValues { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  المحاسبة — دليل الحسابات والقيود
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// <summary>
+/// أقسام دليل الحسابات، على الدليل المحاسبي الموحّد المعروف محلياً.
+///
+/// <para>خمسة أقسام لا أربعة: الشجرة الظاهرة للمستخدم أربعة جذور
+/// (الأصول · الالتزامات وحقوق الملكية · الاستخدامات · الإيرادات)، لكن
+/// **حقوق الملكية تسلك سلوكاً مغايراً للالتزامات** عند الإقفال وفي قراءة
+/// الميزانية. دمجُهما في نوع واحد يجعل التمييز مستحيلاً لاحقاً بلا ترحيل
+/// مؤلم، وفصلُهما لا يكلّف اليوم شيئاً.</para>
+/// </summary>
+public static class AccountTypes
+{
+    public const string Asset = "asset";
+    public const string Liability = "liability";
+    public const string Equity = "equity";
+
+    /// <summary>«الاستخدامات» في الدليل الموحّد — المصروفات والتكاليف.</summary>
+    public const string Expense = "expense";
+    public const string Revenue = "revenue";
+
+    public static readonly string[] All = { Asset, Liability, Equity, Expense, Revenue };
+
+    /// <summary>
+    /// هل يزيد رصيد هذا النوع بالمدين.
+    ///
+    /// <para>الأصول والاستخدامات تزيد مديناً؛ والالتزامات وحقوق الملكية
+    /// والإيرادات تزيد دائناً. هذه هي القاعدة التي يُشتقّ منها كل رصيد في
+    /// النظام، فلا تُكرَّر في أي مكان آخر.</para>
+    /// </summary>
+    public static bool IsDebitNormal(string type) => type is Asset or Expense;
+}
+
+/// <summary>
+/// حساب في دليل الحسابات.
+///
+/// <para><b>لماذا شجرة لا قائمة:</b> الميزان يُقرأ مجمَّعاً («إجمالي
+/// الأصول») ومفصَّلاً («صندوق الفرع الثاني») معاً، والتجميع بالبادئة النصّية
+/// للرمز يكسر أول ما يتجاوز الترقيم عشرة أبناء.</para>
+/// </summary>
+public class Account
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid OrganizationId { get; set; }
+
+    /// <summary>رمز الحساب — <c>1</c>، <c>11</c>، <c>1101</c>… فريد داخل المنظمة.</summary>
+    public string Code { get; set; } = "";
+    public string Name { get; set; } = "";
+    public Guid? ParentId { get; set; }
+
+    /// <summary>راجع [AccountTypes]. يُورَّث من الجذر ولا يخالفه.</summary>
+    public string Type { get; set; } = AccountTypes.Asset;
+
+    /// <summary>
+    /// هل يُرحَّل إليه مباشرةً.
+    ///
+    /// <para><b>الحسابات الوسيطة لا تُرحَّل إليها إطلاقاً:</b> قيدٌ على
+    /// «الأصول» مباشرةً يجعل رصيد الأب لا يساوي مجموع أبنائه — فلا يعود
+    /// للشجرة معنى، ويستحيل تفسير أي رقم بردّه إلى مفرداته. والحساب يصير
+    /// غير قابل للترحيل بمجرّد أن يُولَد له ابن.</para>
+    /// </summary>
+    public bool IsPostable { get; set; } = true;
+
+    /// <summary>
+    /// حساب أنشأه النظام ويعتمد عليه الترحيل الآلي.
+    ///
+    /// <para>لا يُحذف ولا يُغيَّر نوعه ولا رمزه. حذفُ «المبيعات» يُوقف كل
+    /// بيع في المحلّ — والمستخدم لا يعرف ذلك وهو يضغط «حذف».</para>
+    /// </summary>
+    public bool IsSystem { get; set; }
+
+    public bool IsActive { get; set; } = true;
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+}
+
+/// <summary>
+/// مصادر القيود — من أين جاء القيد.
+/// </summary>
+public static class JournalSources
+{
+    public const string Invoice = "invoice";
+    public const string InvoiceReturn = "invoice_return";
+    public const string Expense = "expense";
+    public const string WalletTopUp = "wallet_top_up";
+    public const string Payment = "payment";
+
+    /// <summary>قيد كتبه محاسب بيده.</summary>
+    public const string Manual = "manual";
+
+    /// <summary>قيد عكسي يُصحّح قيداً سابقاً.</summary>
+    public const string Reversal = "reversal";
+}
+
+/// <summary>
+/// قيد يومية — رأس القيد.
+///
+/// <para><b>حرمة القيد:</b> لا يُعدَّل ولا يُحذف بعد إنشائه. التصحيح بقيد
+/// عكسي يشير إليه، بنفس مبدأ دفتر المخزون ودفتر المحفظة في هذا النظام. دفترٌ
+/// يُعدَّل ماضيه لا يصلح لإثبات شيء.</para>
+/// </summary>
+public class JournalEntry
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid OrganizationId { get; set; }
+    public Guid? BranchId { get; set; }
+
+    /// <summary>رقم متسلسل داخل المنظمة — ما يشير إليه المحاسب بلسانه.</summary>
+    public long Number { get; set; }
+
+    /// <summary>
+    /// تاريخ القيد المحاسبي — قد يخالف <see cref="CreatedAt"/>.
+    ///
+    /// <para>فاتورة أمس تُسجَّل اليوم تنتمي محاسبياً إلى أمس. والخلط بينهما
+    /// يجعل مبيعات شهرٍ تقع في الشهر التالي فتختلّ كل مقارنة.</para>
+    /// </summary>
+    public DateTime EntryDate { get; set; } = DateTime.UtcNow.Date;
+
+    /// <summary>راجع [JournalSources].</summary>
+    public string Source { get; set; } = JournalSources.Manual;
+
+    /// <summary>معرّف المستند الأصل (فاتورة، مصروف…) — للتتبّع في الاتجاهين.</summary>
+    public Guid? SourceId { get; set; }
+
+    public string Description { get; set; } = "";
+
+    /// <summary>القيد الذي يعكسه هذا القيد، إن كان تصحيحاً.</summary>
+    public Guid? ReversesEntryId { get; set; }
+
+    public Guid? CreatedBy { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+
+    public List<JournalEntryLine> Lines { get; set; } = new();
+}
+
+/// <summary>
+/// سطر قيد — مدين أو دائن على حساب واحد.
+///
+/// <para><b>عمودان لا عمود واحد بإشارة:</b> «مدين ٥٠» و«دائن ٥٠» يُقرآن
+/// كما يكتبهما المحاسب في دفتره، والمبلغ الموجب دائماً يمنع طبقةً كاملة من
+/// أخطاء الإشارة في التجميع.</para>
+/// </summary>
+public class JournalEntryLine
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid JournalEntryId { get; set; }
+    public Guid AccountId { get; set; }
+    public decimal Debit { get; set; }
+    public decimal Credit { get; set; }
+    public string? Note { get; set; }
+}
+
+/// <summary>
+/// ربط الأدوار المحاسبية بحسابات فعلية.
+///
+/// <para><b>لماذا جدول لا أعمدة على المنظمة:</b> الأدوار تنمو مع كل نوع
+/// حركة جديد (ضريبة، خصم مسموح، فروق جرد…)، وكل واحد عموداً يعني ترحيل
+/// مخطّط لكل إضافة.</para>
+///
+/// <para>ويُملأ كاملاً لحظة تفعيل الوحدة مع بذر الدليل. **ربطٌ ناقص يعني
+/// بيعاً يفشل عند الكاشير**، فلا يُترك للمستخدم أن يكتشفه بنفسه.</para>
+/// </summary>
+public class AccountMapping
+{
+    public Guid OrganizationId { get; set; }
+
+    /// <summary>راجع [AccountRoles].</summary>
+    public string Role { get; set; } = "";
+    public Guid AccountId { get; set; }
+}
+
+/// <summary>الأدوار المحاسبية التي يحتاجها الترحيل الآلي.</summary>
+public static class AccountRoles
+{
+    public const string Cash = "cash";
+    public const string Receivables = "receivables";
+    public const string SalesRevenue = "sales_revenue";
+    public const string SalesTax = "sales_tax";
+    public const string Inventory = "inventory";
+    public const string CostOfGoodsSold = "cost_of_goods_sold";
+
+    /// <summary>أرصدة العملاء المشحونة — التزامٌ على المنشأة لا إيراد.</summary>
+    public const string CustomerWallet = "customer_wallet";
+
+    public const string SalesReturns = "sales_returns";
+    public const string GeneralExpense = "general_expense";
+
+    /// <summary>ما لا يمكن للترحيل أن يعمل بدونه.</summary>
+    public static readonly string[] Required =
+    {
+        Cash, Receivables, SalesRevenue, SalesTax, Inventory,
+        CostOfGoodsSold, CustomerWallet, SalesReturns, GeneralExpense,
+    };
 }

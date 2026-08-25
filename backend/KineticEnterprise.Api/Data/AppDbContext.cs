@@ -38,6 +38,12 @@ public class AppDbContext : DbContext
     public DbSet<DebtReminder> DebtReminders => Set<DebtReminder>();
     public DbSet<NotificationItem> Notifications => Set<NotificationItem>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
+
+    // ── المحاسبة ────────────────────────────────────────────────────────
+    public DbSet<Account> Accounts => Set<Account>();
+    public DbSet<JournalEntry> JournalEntries => Set<JournalEntry>();
+    public DbSet<JournalEntryLine> JournalEntryLines => Set<JournalEntryLine>();
+    public DbSet<AccountMapping> AccountMappings => Set<AccountMapping>();
     public DbSet<Permission> Permissions => Set<Permission>();
     public DbSet<RolePermission> RolePermissions => Set<RolePermission>();
     public DbSet<PurchaseOrder> PurchaseOrders => Set<PurchaseOrder>();
@@ -94,6 +100,10 @@ public class AppDbContext : DbContext
         modelBuilder.Entity<DebtReminder>().ToTable("debt_reminders");
         modelBuilder.Entity<NotificationItem>().ToTable("notifications");
         modelBuilder.Entity<AuditLog>().ToTable("audit_logs");
+        modelBuilder.Entity<Account>().ToTable("accounts");
+        modelBuilder.Entity<JournalEntry>().ToTable("journal_entries");
+        modelBuilder.Entity<JournalEntryLine>().ToTable("journal_entry_lines");
+        modelBuilder.Entity<AccountMapping>().ToTable("account_mappings");
         modelBuilder.Entity<Permission>().ToTable("permissions").HasKey(p => p.Code);
         modelBuilder.Entity<RolePermission>().ToTable("role_permissions")
             .HasKey(rp => new { rp.OrganizationId, rp.Role, rp.PermissionCode });
@@ -154,6 +164,14 @@ public class AppDbContext : DbContext
         // يرفض قراءة عمود DECIMAL عبر GetDouble() مباشرة (InvalidCastException)
         // بصرف النظر عن قيمة الصف. التحويل الصريح هنا يخبر EF بقراءته كـ
         // decimal ثم تحويله لـ double بدل محاولة قراءته مباشرة كـ double.
+        // ── المحاسبة ────────────────────────────────────────────────────
+        modelBuilder.Entity<AccountMapping>().HasKey(m => new { m.OrganizationId, m.Role });
+
+        modelBuilder.Entity<JournalEntry>()
+            .HasMany(e => e.Lines)
+            .WithOne()
+            .HasForeignKey(l => l.JournalEntryId);
+
         modelBuilder.Entity<Organization>().Property(o => o.ReceiptWidthMm)
             .HasConversion(d => (decimal)d, d => (double)d);
     }

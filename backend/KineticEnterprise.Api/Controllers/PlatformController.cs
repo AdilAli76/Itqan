@@ -60,10 +60,12 @@ public class PlatformController : ControllerBase
 {
     private readonly IConfiguration _config;
     private readonly AppDbContext _db;
-    public PlatformController(IConfiguration config, AppDbContext db)
+    private readonly ILogger<PlatformController> _logger;
+    public PlatformController(IConfiguration config, AppDbContext db, ILogger<PlatformController> logger)
     {
         _config = config;
         _db = db;
+        _logger = logger;
     }
 
     // فهرس عالمي (لا RLS) — راجع تعليق PlatformOrganizationRecord. أي حساب
@@ -123,10 +125,18 @@ public class PlatformController : ControllerBase
                 .EnumerateFiles("*", SearchOption.AllDirectories)
                 .Sum(f => f.Length);
         }
-        catch (IOException)
+        catch (Exception)
         {
-            // قرص مشغول أو ملف مقفول: صفر لا استثناء — شاشة إدارة العملاء
-            // لا تسقط لأجل رقم إعلامي.
+            // صفر لا استثناء — شاشة إدارة العملاء لا تسقط لأجل رقم إعلامي.
+            //
+            // **كان يُمسك IOException وحده، وهي ثغرة حقيقية:**
+            // UnauthorizedAccessException لا يرث IOException بل SystemException.
+            // ومجلد المرفوعات على IIS مملوك لهوية مجمّع التطبيقات، فمجلّدُ
+            // منظمة واحدة بصلاحيات ناقصة كان يُسقط **قائمة الشركات كلّها**
+            // بـ500 بجسم فارغ — فتقول الشاشة «تعذّر تحميل الشركات» بلا سبب.
+            //
+            // والالتقاط عريض عمداً: هذا رقم إعلامي على شاشة إدارية، ولا
+            // استثناء منه يستحقّ إسقاط الشاشة.
             return 0;
         }
     }
@@ -187,20 +197,32 @@ SELECT o.edition,
 FROM dbo.organizations o
 LEFT JOIN dbo.licenses l ON l.organization_id = o.id;";
 
-            await using var reader = await cmd.ExecuteReaderAsync();
-            if (await reader.ReadAsync())
+            // منظمةٌ تفشل قراءتها لا تُسقط القائمة كلّها: تُعرَض بقيمها
+            // الافتراضية ويُسجَّل سببها. صفٌّ واحد تالف كان يحجب كل العملاء.
+            try
             {
-                result[id] = new OrgDetail(
-                    reader.GetString(0),
-                    reader.GetString(1),
-                    reader.IsDBNull(2) ? null : reader.GetDateTime(2),
-                    reader.IsDBNull(3) ? null : reader.GetString(3),
-                    reader.GetInt32(8),
-                    reader.GetInt32(9),
-                    reader.GetDecimal(4),
-                    reader.GetDecimal(5),
-                    reader.GetDecimal(6),
-                    reader.IsDBNull(7) ? null : reader.GetDateTime(7));
+                await using var reader = await cmd.ExecuteReaderAsync();
+                if (await reader.ReadAsync())
+                {
+                    result[id] = new OrgDetail(
+                        // GetString على عمود NULL يرمي InvalidCastException.
+                        // وedition عمود أُضيف لاحقاً بترحيل — فمنظمة أُنشئت
+                        // قبله على قاعدة لم تُرحَّل بعدُ تحمل NULL.
+                        reader.IsDBNull(0) ? "standard" : reader.GetString(0),
+                        reader.IsDBNull(1) ? "-" : reader.GetString(1),
+                        reader.IsDBNull(2) ? null : reader.GetDateTime(2),
+                        reader.IsDBNull(3) ? null : reader.GetString(3),
+                        reader.IsDBNull(8) ? 0 : reader.GetInt32(8),
+                        reader.IsDBNull(9) ? 0 : reader.GetInt32(9),
+                        reader.IsDBNull(4) ? 0 : reader.GetDecimal(4),
+                        reader.IsDBNull(5) ? 0 : reader.GetDecimal(5),
+                        reader.IsDBNull(6) ? 0 : reader.GetDecimal(6),
+                        reader.IsDBNull(7) ? null : reader.GetDateTime(7));
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "تعذّرت قراءة تفاصيل المنظمة {OrganizationId}", id);
             }
         }
 

@@ -155,6 +155,35 @@ public class DbConstraintMessageMiddleware
             context.Response.ContentType = "application/json; charset=utf-8";
             await context.Response.WriteAsync(JsonSerializer.Serialize(new { message }));
         }
+        catch (Exception ex)
+        {
+            // ── أي عطب آخر ──────────────────────────────────────────────
+            //
+            // **العطب الذي يصلحه هذا:** لا معالج استثناءات عامّ في التطبيق،
+            // فكل خطأ غير متوقّع كان يعود **500 بجسم فارغ**. والشاشة تعرض
+            // حينها نصّها العامّ («تعذّر تحميل الشركات») بلا سبب — فيصير
+            // التشخيص عن بعد مستحيلاً: لا المستخدم يعرف ما حدث، ولا نحن
+            // نعرف أيّ سطر في السجلّ يخصّ شكواه.
+            //
+            // فيُولَّد رمز مرجعي قصير يظهر على الشاشة ويُكتب في السجلّ معاً.
+            // يقرؤه المستخدم في الهاتف، فنجد به الاستثناء كاملاً في ثوانٍ.
+            var reference = Guid.NewGuid().ToString("N")[..8].ToUpperInvariant();
+            _logger.LogError(ex, "عطب غير متوقّع [{Reference}] على {Method} {Path}",
+                reference, context.Request.Method, context.Request.Path);
+
+            if (context.Response.HasStarted) throw;
+
+            context.Response.Clear();
+            context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+            context.Response.ContentType = "application/json; charset=utf-8";
+            // تفاصيل الاستثناء لا تُرسَل: قد تحمل أسماء جداول أو مسارات
+            // خادم. الرمز وحده يكفي لربط الشكوى بالسجلّ.
+            await context.Response.WriteAsync(JsonSerializer.Serialize(new
+            {
+                message = $"عطب غير متوقّع. أبلغ الدعم بالرمز المرجعي: {reference}",
+                reference,
+            }));
+        }
     }
 
     /// <summary>

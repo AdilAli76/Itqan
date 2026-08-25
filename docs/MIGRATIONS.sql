@@ -1754,6 +1754,143 @@ PRINT N'الجرد الميداني: تمييز العدّ جاهز';
 GO
 
 -- ----------------------------------------------------------------------------
+--  المحاسبة: دليل الحسابات والقيود  (وحدة accounting)
+--
+--  على الدليل المحاسبي الموحّد: 1 الأصول · 2 الالتزامات وحقوق الملكية ·
+--  3 الاستخدامات · 4 الإيرادات.
+--
+--  ولا بذر هنا: الدليل يُبذَر من التطبيق عند تفعيل الوحدة
+--  (POST /api/accounting/accounts/seed) لا من ترحيل. البذر من SQL يعني
+--  إنشاء شجرة لكل منظمة في القاعدة — بما فيها من لم يشترِ الوحدة أصلاً.
+-- ----------------------------------------------------------------------------
+IF OBJECT_ID('dbo.accounts', 'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.accounts (
+      id UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
+      organization_id UNIQUEIDENTIFIER NOT NULL REFERENCES dbo.organizations(id) ON DELETE CASCADE,
+      code NVARCHAR(20) NOT NULL,
+      name NVARCHAR(200) NOT NULL,
+      -- بلا ON DELETE: حذف أبٍ له أبناء يُرفض لا يتتالى.
+      parent_id UNIQUEIDENTIFIER NULL REFERENCES dbo.accounts(id),
+      type NVARCHAR(20) NOT NULL
+        CONSTRAINT CK_accounts_type CHECK (type IN ('asset','liability','equity','expense','revenue')),
+      is_postable BIT NOT NULL DEFAULT 1,
+      is_system BIT NOT NULL DEFAULT 0,
+      is_active BIT NOT NULL DEFAULT 1,
+      created_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+      CONSTRAINT UQ_accounts_org_code UNIQUE (organization_id, code)
+    );
+    PRINT N'أُنشئ جدول accounts';
+END
+GO
+
+IF OBJECT_ID('dbo.journal_entries', 'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.journal_entries (
+      id UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
+      organization_id UNIQUEIDENTIFIER NOT NULL REFERENCES dbo.organizations(id) ON DELETE CASCADE,
+      branch_id UNIQUEIDENTIFIER NULL REFERENCES dbo.branches(id),
+      -- تسلسل بلا فجوات: يُولَّد بقفل داخل المعاملة لا بـIDENTITY. فجوةٌ في
+      -- دفتر اليومية سؤالٌ يطرحه كل مراجع.
+      number BIGINT NOT NULL,
+      entry_date DATETIME2 NOT NULL,
+      source NVARCHAR(30) NOT NULL,
+      source_id UNIQUEIDENTIFIER NULL,
+      description NVARCHAR(400) NOT NULL DEFAULT N'',
+      reverses_entry_id UNIQUEIDENTIFIER NULL REFERENCES dbo.journal_entries(id),
+      created_by UNIQUEIDENTIFIER NULL REFERENCES dbo.app_users(id),
+      created_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+      CONSTRAINT UQ_journal_entries_number UNIQUE (organization_id, number)
+    );
+    PRINT N'أُنشئ جدول journal_entries';
+END
+GO
+
+IF OBJECT_ID('dbo.journal_entry_lines', 'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.journal_entry_lines (
+      id UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
+      journal_entry_id UNIQUEIDENTIFIER NOT NULL REFERENCES dbo.journal_entries(id) ON DELETE CASCADE,
+      account_id UNIQUEIDENTIFIER NOT NULL REFERENCES dbo.accounts(id),
+      debit DECIMAL(18,2) NOT NULL DEFAULT 0,
+      credit DECIMAL(18,2) NOT NULL DEFAULT 0,
+      note NVARCHAR(300) NULL,
+      -- سطرٌ بمدين ودائن معاً، أو بصفرَين، أو بسالب: بلا معنى محاسبي.
+      -- القيد في القاعدة لا في الكود: الكود يُنسى في مسار جديد.
+      CONSTRAINT CK_journal_lines_side CHECK (
+        debit >= 0 AND credit >= 0 AND (
+          (debit > 0 AND credit = 0) OR (credit > 0 AND debit = 0)
+        )
+      )
+    );
+    PRINT N'أُنشئ جدول journal_entry_lines';
+END
+GO
+
+IF OBJECT_ID('dbo.account_mappings', 'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.account_mappings (
+      organization_id UNIQUEIDENTIFIER NOT NULL REFERENCES dbo.organizations(id) ON DELETE CASCADE,
+      role NVARCHAR(40) NOT NULL,
+      account_id UNIQUEIDENTIFIER NOT NULL REFERENCES dbo.accounts(id),
+      PRIMARY KEY (organization_id, role)
+    );
+    PRINT N'أُنشئ جدول account_mappings';
+END
+GO
+
+-- ── سياسات العزل ────────────────────────────────────────────────────────
+IF NOT EXISTS (SELECT 1 FROM sys.security_policies WHERE name = 'AccountsPolicy')
+EXEC('
+CREATE SECURITY POLICY Security.AccountsPolicy
+  ADD FILTER PREDICATE Security.fn_OrgOnlyPredicate(organization_id) ON dbo.accounts,
+  ADD BLOCK PREDICATE Security.fn_OrgOnlyPredicate(organization_id) ON dbo.accounts AFTER INSERT
+  WITH (STATE = ON);');
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.security_policies WHERE name = 'JournalEntriesPolicy')
+EXEC('
+CREATE SECURITY POLICY Security.JournalEntriesPolicy
+  ADD FILTER PREDICATE Security.fn_OrgOnlyPredicate(organization_id) ON dbo.journal_entries,
+  ADD BLOCK PREDICATE Security.fn_OrgOnlyPredicate(organization_id) ON dbo.journal_entries AFTER INSERT
+  WITH (STATE = ON);');
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.security_policies WHERE name = 'AccountMappingsPolicy')
+EXEC('
+CREATE SECURITY POLICY Security.AccountMappingsPolicy
+  ADD FILTER PREDICATE Security.fn_OrgOnlyPredicate(organization_id) ON dbo.account_mappings,
+  ADD BLOCK PREDICATE Security.fn_OrgOnlyPredicate(organization_id) ON dbo.account_mappings AFTER INSERT
+  WITH (STATE = ON);');
+GO
+
+-- سطر القيد يصل إلى المنظمة عبر رأس القيد — نفس نمط invoice_items.
+IF OBJECT_ID('Security.fn_JournalChild', 'IF') IS NULL
+EXEC('
+CREATE FUNCTION Security.fn_JournalChild(@EntryId UNIQUEIDENTIFIER)
+RETURNS TABLE
+WITH SCHEMABINDING
+AS
+RETURN SELECT 1 AS fn_result
+WHERE EXISTS (
+    SELECT 1 FROM dbo.journal_entries e
+    WHERE e.id = @EntryId
+      AND e.organization_id = CAST(SESSION_CONTEXT(N''organization_id'') AS UNIQUEIDENTIFIER)
+);');
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.security_policies WHERE name = 'JournalEntryLinesPolicy')
+EXEC('
+CREATE SECURITY POLICY Security.JournalEntryLinesPolicy
+  ADD FILTER PREDICATE Security.fn_JournalChild(journal_entry_id) ON dbo.journal_entry_lines,
+  ADD BLOCK PREDICATE Security.fn_JournalChild(journal_entry_id) ON dbo.journal_entry_lines AFTER INSERT
+  WITH (STATE = ON);');
+GO
+
+PRINT N'المحاسبة: دليل الحسابات والقيود جاهز';
+GO
+
+-- ----------------------------------------------------------------------------
 --  فهارس الأداء — ملف منفصل لأنه يُنفَّذ ويُعاد بلا خطر
 -- ----------------------------------------------------------------------------
 PRINT N'لا تنسَ تنفيذ docs\INDEXES.sql على هذه القاعدة أيضاً.';
