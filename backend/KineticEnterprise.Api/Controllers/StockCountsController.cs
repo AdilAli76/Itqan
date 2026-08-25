@@ -23,7 +23,12 @@ public record StockCountListItemDto(
     int ItemCount, int VarianceCount, DateTime CreatedAt, DateTime? ClosedAt);
 
 public record StockCountItemDto(
-    Guid Id, Guid ProductId, string ProductName, decimal SystemQuantity, decimal CountedQuantity, decimal Variance);
+    Guid Id, Guid ProductId, string ProductName, decimal SystemQuantity, decimal CountedQuantity, decimal Variance,
+    /// NULL = لم يُمَسّ بعد. راجع StockCountItem.CountedAt — الكمية وحدها لا
+    /// تفرّق بين «عُدَّ وطابق» و«لم يُنظَر إليه».
+    DateTime? CountedAt,
+    bool AddedDuringCount,
+    string? Barcode, string Sku, string UnitBase);
 
 public record StockCountDetailDto(
     Guid Id, Guid BranchId, string BranchName, string Status,
@@ -31,9 +36,47 @@ public record StockCountDetailDto(
     // خطوة اعتماد الفروقات — راجع StockCount.Status.
     string? SubmittedByName, DateTime? SubmittedAt,
     string? ReviewedByName, DateTime? ReviewedAt,
-    string? RecountReason, int RecountRounds);
+    string? RecountReason, int RecountRounds,
+    /// كم سطراً لم يُمَسّ بعد — سؤال الشاشة الميدانية الدائم «كم بقي».
+    int UncountedCount);
 
 public record RecountRequest(string Reason);
+
+/// <param name="Force">
+/// إنهاء العدّ رغم بقاء سطور لم تُمَسّ. بلا هذا العلم يُرفض الإنهاء —
+/// راجع Submit.
+/// </param>
+public record SubmitCountRequest(bool Force = false);
+
+/// نتيجة مسح رمز داخل جرد — راجع [ScanCodes] لمعاني Outcome.
+public record ScanResultDto(string Outcome, StockCountItemDto? Item, string? Message);
+
+public record AddUnlistedItemRequest(Guid ProductId);
+
+/// <summary>
+/// نتائج مسح رمز في الشاشة الميدانية.
+///
+/// <para>الأربعة مسمّاة صراحةً لأن **شاشات الاستثناء هي المنتج** لا المسار
+/// الناجح: العامل الواقف أمام رفّ يحمل ما ليس في قائمته يحتاج زرّاً يقول
+/// ذلك، وإلا خرج من النظام وكتب على ورقة — وانتهت صلاحية النظام كلّه.</para>
+/// </summary>
+public static class ScanCodes
+{
+    /// الرمز وجد سطره في هذا الجرد — المسار الناجح.
+    public const string Found = "found";
+
+    /// عُدَّ في هذه الجولة من قبل. لا يُكتَب فوقه صامتاً: تكرار المسح غالباً
+    /// خطأٌ (صنف مُرّ عليه مرّتين)، وأحياناً تصحيح مقصود — والفرق بينهما
+    /// يقرّره من يقف أمام الرفّ لا الخادم.
+    public const string AlreadyCounted = "already_counted";
+
+    /// الصنف موجود في الكتالوج ولا سطر له في هذا الجرد — حالة الجرد الموزَّع
+    /// حين يستبعد NotCountedSince ما عُدَّ حديثاً.
+    public const string Unlisted = "unlisted";
+
+    /// لا صنف بهذا الرمز إطلاقاً — باركود غريب أو صنف لم يُسجَّل بعد.
+    public const string Unknown = "unknown";
+}
 
 /// <summary>
 /// راجع DATABASE_TABLES_GUIDE.md §5.7. stock_counts يحمل branch_id واحداً
@@ -148,8 +191,125 @@ public class StockCountsController : ControllerBase
         if (item is null) return NotFound();
 
         item.CountedQuantity = request.CountedQuantity;
+        // الختم هنا لا في الشاشة: سطرٌ مرّ من هذا الطريق **رآه إنسان**،
+        // وهذه هي الحقيقة الوحيدة التي تميّزه عمّا لم يُنظَر إليه.
+        item.CountedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync();
         return NoContent();
+    }
+
+    /// <summary>
+    /// يحلّ رمزاً ممسوحاً داخل جرد مفتوح — أساس الشاشة الميدانية.
+    ///
+    /// <para><b>لماذا على الخادم لا في التطبيق:</b> الحلّ محلياً يستلزم
+    /// تحميل كل سطور الجرد إلى الهاتف — آلاف الصفوف على شبكة متجر — ويجعل
+    /// الجواب رهناً بحداثة ما حُمِّل. وجهازان يعدّان معاً لا يرى أحدهما ما
+    /// سجّله الآخر، فيصير <c>already_counted</c> مستحيل الاكتشاف.</para>
+    ///
+    /// <para>يبحث بالباركود ثم بالـSKU: القارئ الضوئي يُرسل الباركود، ومن
+    /// يكتب بيده يكتب رمز الصنف غالباً. والمطابقة تامّة لا جزئية — جزئيةٌ
+    /// قد تُرجع صنفاً آخر يحتوي المُدخَل فيُعدّ في مكان غيره.</para>
+    /// </summary>
+    [HttpGet("{id:guid}/scan/{code}")]
+    [RequirePermission("stock_count.manage")]
+    public async Task<ActionResult<ScanResultDto>> Scan(Guid id, string code)
+    {
+        var count = await _db.StockCounts.FirstOrDefaultAsync(c => c.Id == id);
+        if (count is null) return NotFound();
+        if (count.Status != "open")
+        {
+            return BadRequest(new { message = "هذا الجرد ليس قيد العدّ" });
+        }
+
+        var normalized = (code ?? "").Trim();
+        if (normalized.Length == 0)
+        {
+            return BadRequest(new { message = "لا رمز" });
+        }
+
+        // RLS تحصر البحث في منظمة المستخدم.
+        var product = await _db.Products.FirstOrDefaultAsync(p =>
+            !p.IsDeleted && (p.Barcode == normalized || p.Sku == normalized));
+
+        if (product is null)
+        {
+            return new ScanResultDto(ScanCodes.Unknown, null,
+                $"لا صنف بالرمز {normalized}. تأكّد من المسح، أو سجّل الصنف في الكتالوج أولاً.");
+        }
+
+        var item = await _db.StockCountItems
+            .FirstOrDefaultAsync(i => i.StockCountId == id && i.ProductId == product.Id);
+
+        if (item is null)
+        {
+            return new ScanResultDto(ScanCodes.Unlisted, null,
+                $"«{product.Name}» موجود على الرفّ وليس في قائمة هذا الجرد.");
+        }
+
+        var dto = new StockCountItemDto(
+            item.Id, item.ProductId, product.Name, item.SystemQuantity, item.CountedQuantity,
+            item.Variance, item.CountedAt, item.AddedDuringCount, product.Barcode, product.Sku, product.UnitBase);
+
+        return new ScanResultDto(
+            item.CountedAt is null ? ScanCodes.Found : ScanCodes.AlreadyCounted,
+            dto,
+            item.CountedAt is null
+                ? null
+                : $"عُدَّ هذا الصنف في هذه الجولة بكمية {item.CountedQuantity:0.###}.");
+    }
+
+    /// <summary>
+    /// يُضيف صنفاً وُجد على الرفّ ولم يكن في قائمة الجرد.
+    ///
+    /// <para>هي حالة <c>ConfirmUnexpectedUnitLoad</c> في myWMS، وتقع عندنا
+    /// في الجرد الموزَّع: <c>NotCountedSince</c> يستبعد ما عُدَّ حديثاً،
+    /// فيقف العامل أمام صنف موجود لا يجده في قائمته. بلا هذا الطريق يخرج من
+    /// النظام ويكتب على ورقة.</para>
+    ///
+    /// <para>الكمية النظامية تُقرأ من الرصيد الحالي لا تُفترض صفراً: الصنف
+    /// قد يكون له رصيد ولم يدخل القائمة إلا لأنه عُدَّ حديثاً. وافتراضُ
+    /// الصفر يجعل كل إضافة تبدو فرقاً هائلاً فيُغرق مراجعَ الفروقات.</para>
+    ///
+    /// <para>ويبدأ بكمية معدودة صفراً وبلا ختم عدّ: الإضافة ليست عدّاً —
+    /// العامل يسجّل أنه وجد شيئاً، ثم يعدّه في الخطوة التالية.</para>
+    /// </summary>
+    [HttpPost("{id:guid}/items")]
+    [RequirePermission("stock_count.manage")]
+    public async Task<ActionResult<StockCountItemDto>> AddUnlistedItem(Guid id, AddUnlistedItemRequest request)
+    {
+        var count = await _db.StockCounts.FirstOrDefaultAsync(c => c.Id == id);
+        if (count is null) return NotFound();
+        if (count.Status != "open")
+        {
+            return BadRequest(new { message = "لا يمكن الإضافة إلى جرد ليس قيد العدّ" });
+        }
+
+        var product = await _db.Products.FirstOrDefaultAsync(p => p.Id == request.ProductId && !p.IsDeleted);
+        if (product is null) return BadRequest(new { message = "صنف غير موجود أو محذوف" });
+
+        var exists = await _db.StockCountItems.AnyAsync(i => i.StockCountId == id && i.ProductId == product.Id);
+        if (exists) return BadRequest(new { message = "الصنف موجود في هذا الجرد أصلاً" });
+
+        var systemQuantity = await _db.StockLevels
+            .Where(sl => sl.BranchId == count.BranchId && sl.ProductId == product.Id)
+            .SumAsync(sl => (decimal?)sl.Quantity) ?? 0;
+
+        var item = new StockCountItem
+        {
+            StockCountId = id,
+            ProductId = product.Id,
+            SystemQuantity = systemQuantity,
+            CountedQuantity = 0,
+            AddedDuringCount = true,
+        };
+        _db.StockCountItems.Add(item);
+
+        _db.LogAudit(count.OrganizationId, CurrentUserId(), "stock_count.item_added", "stock_counts", count.Id,
+            newValues: new { product.Name, product.Sku, SystemQuantity = systemQuantity });
+        await _db.SaveChangesAsync();
+
+        return new StockCountItemDto(item.Id, product.Id, product.Name, systemQuantity, 0, -systemQuantity,
+            null, true, product.Barcode, product.Sku, product.UnitBase);
     }
 
     /// <summary>
@@ -159,7 +319,7 @@ public class StockCountsController : ControllerBase
     /// </summary>
     [HttpPost("{id:guid}/submit")]
     [RequirePermission("stock_count.manage")]
-    public async Task<ActionResult<object>> Submit(Guid id)
+    public async Task<ActionResult<object>> Submit(Guid id, [FromBody] SubmitCountRequest? request = null)
     {
         var count = await _db.StockCounts.Include(c => c.Items).FirstOrDefaultAsync(c => c.Id == id);
         if (count is null) return NotFound();
@@ -168,8 +328,33 @@ public class StockCountsController : ControllerBase
             return BadRequest(new { message = "لا يمكن إنهاء عدّ جرد ليس قيد العد" });
         }
 
+        // سطورٌ لم يُمَسّ منها شيء تُنهي الجرد بكذبة: الدوري يبدأ بكمية معدودة
+        // مساوية للنظامية، فما لم يره أحد يُحسَب «طابق». إنهاءٌ هكذا يقول
+        // «صفر فروقات» عن رفوف لم يقف أمامها إنسان — وهو أسوأ من غياب الجرد،
+        // لأنه يمنح ثقةً لا سند لها.
+        //
+        // ولا يُرفض إلى الأبد: قد يقرّر المسؤول أن الباقي خارج نطاق هذه
+        // الجولة. لكن القرار يكون **صريحاً** لا افتراضاً صامتاً، ويُسجَّل.
+        var uncounted = count.Items.Count(i => i.CountedAt is null);
+        if (uncounted > 0 && request?.Force != true)
+        {
+            return BadRequest(new
+            {
+                message = $"بقي {uncounted} صنفاً لم يُعدّ. أكمل العدّ، أو أنهِ صراحةً مع تسجيل ذلك.",
+                uncountedCount = uncounted,
+            });
+        }
+
         count.SubmittedBy = CurrentUserId();
         count.SubmittedAt = DateTime.UtcNow;
+
+        if (uncounted > 0)
+        {
+            // يُسجَّل باسمه: من راجع الفروقات لاحقاً يجب أن يعرف أن جزءاً من
+            // الرفوف لم يُنظَر إليه أصلاً، وإلا قرأ «صفر فروقات» على أنه شهادة.
+            _db.LogAudit(count.OrganizationId, CurrentUserId(), "stock_count.submitted_incomplete",
+                "stock_counts", count.Id, newValues: new { UncountedItems = uncounted });
+        }
 
         var varianceCount = count.Items.Count(i => i.Variance != 0);
         if (varianceCount == 0)
@@ -212,7 +397,14 @@ public class StockCountsController : ControllerBase
             return BadRequest(new { message = "لا يمكن طلب إعادة عدّ لجرد ليس قيد المراجعة" });
         }
 
-        foreach (var item in count.Items) item.CountedQuantity = item.SystemQuantity;
+        // الختم يُمحى مع الكمية: إعادة العدّ تعني أن ما سُجِّل لا يُوثَق به،
+        // فإبقاء «عُدَّ» عليها يجعل الجولة الثانية تُنهى فوراً بلا أن يقف أحد
+        // أمام رفّ — وهو نقيض الغرض من طلب الإعادة.
+        foreach (var item in count.Items)
+        {
+            item.CountedQuantity = item.SystemQuantity;
+            item.CountedAt = null;
+        }
 
         count.Status = "open";
         count.RecountReason = reason;
@@ -351,7 +543,11 @@ public class StockCountsController : ControllerBase
     {
         var branchName = await _db.Branches.Where(b => b.Id == count.BranchId).Select(b => b.Name).FirstOrDefaultAsync() ?? "-";
         var productIds = count.Items.Select(i => i.ProductId).ToList();
-        var productNames = await _db.Products.Where(p => productIds.Contains(p.Id)).ToDictionaryAsync(p => p.Id, p => p.Name);
+        // الباركود والرمز والوحدة تُجلَب معها: الشاشة الميدانية تعرض الوحدة
+        // بجانب الكمية («12 علبة» لا «12»)، وبلاها يُدخل العادّ حبّات مكان علب.
+        var products = await _db.Products.Where(p => productIds.Contains(p.Id))
+            .Select(p => new { p.Id, p.Name, p.Barcode, p.Sku, p.UnitBase })
+            .ToDictionaryAsync(p => p.Id, p => p);
 
         // اسم من عدّ ومن راجع: الشاشة تعرضهما جنباً إلى جنب، فتطابقهما ظاهر
         // لمن ينظر بلا حاجة إلى فتح سجلّ التدقيق.
@@ -364,14 +560,21 @@ public class StockCountsController : ControllerBase
         return new StockCountDetailDto(
             count.Id, count.BranchId, branchName, count.Status, count.CreatedAt, count.ClosedAt,
             count.Items
-                .Select(i => new StockCountItemDto(i.Id, i.ProductId, productNames.GetValueOrDefault(i.ProductId, "-"), i.SystemQuantity, i.CountedQuantity, i.Variance))
+                .Select(i =>
+                {
+                    var p = products.GetValueOrDefault(i.ProductId);
+                    return new StockCountItemDto(
+                        i.Id, i.ProductId, p?.Name ?? "-", i.SystemQuantity, i.CountedQuantity, i.Variance,
+                        i.CountedAt, i.AddedDuringCount, p?.Barcode, p?.Sku ?? "-", p?.UnitBase ?? "piece");
+                })
                 .OrderBy(i => i.ProductName)
                 .ToList(),
             count.SubmittedBy is null ? null : userNames.GetValueOrDefault(count.SubmittedBy.Value),
             count.SubmittedAt,
             count.ReviewedBy is null ? null : userNames.GetValueOrDefault(count.ReviewedBy.Value),
             count.ReviewedAt,
-            count.RecountReason, count.RecountRounds);
+            count.RecountReason, count.RecountRounds,
+            count.Items.Count(i => i.CountedAt is null));
     }
 
     private Guid? CurrentUserId()

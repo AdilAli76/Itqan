@@ -755,6 +755,101 @@ Api PUT "/organizations/me/settings" -Token $token -Body ($baseSettings + @{
 }
 
 # -----------------------------------------------------------------------------
+Section "٥.٤ الجرد الميداني"
+
+# العطب الذي يمسكه هذا القسم: الجرد الدوري يبدأ بـ counted_quantity =
+# system_quantity، ولا حقل كان يميّز السطر الذي عُدَّ وطابق من السطر الذي لم
+# يره أحد. فعاملٌ مسح أربعين صنفاً من ثلاثمئة ثم أرسل، يقول له النظام «صفر
+# فروقات» — لأن مئتين وستين وافقت نفسها. وهذا أسوأ من غياب الجرد: يمنح ثقةً
+# لا سند لها.
+
+if (-not $canManageInventory) {
+    Skipped "الجرد الميداني" "يتطلّب inventory.manage و stock_count.manage"
+} else {
+
+$fieldProduct = Api POST "/products" -Token $token -Body @{
+    sku = "TEST-FIELD-$stamp"; barcode = "TESTBC$stamp"
+    name = "صنف الجرد الميداني $stamp"
+    salePrice = 8; costPrice = 4
+    unitBase = "piece"; tracksStock = $true; reorderLevel = 0
+}
+
+$newCount = Api POST "/stock-counts" -Token $token -Body @{ branchId = $branchId }
+
+if ($fieldProduct.Status -notin 200,201 -or $newCount.Status -notin 200,201) {
+    Skipped "الجرد الميداني" "تعذّر تجهيز الصنف أو الجرد (صنف $($fieldProduct.Status)، جرد $($newCount.Status))"
+} else {
+    $countId = $newCount.Body.id
+    $totalItems = @($newCount.Body.items).Count
+
+    Check "الجرد الجديد يبدأ وكل سطوره غير معدودة" ($newCount.Body.uncountedCount -eq $totalItems) `
+        "بقي $($newCount.Body.uncountedCount) من $totalItems — تساويهما هو ما يمنع «صفر فروقات» الكاذبة"
+
+    # ── المسار الناجح: مسح يجد سطره ──
+    $scanFound = Api GET "/stock-counts/$countId/scan/TESTBC$stamp" -Token $token
+    Check "مسح الباركود يجد سطر الجرد" ($scanFound.Status -eq 200 -and $scanFound.Body.outcome -eq 'found') `
+        "حالة $($scanFound.Status)، النتيجة $($scanFound.Body.outcome)"
+
+    # ── الاستثناء: رمز لا صنف له ──
+    $scanUnknown = Api GET "/stock-counts/$countId/scan/LAYUJAD$stamp" -Token $token
+    Check "رمز غير معروف يُسمّى صراحةً" ($scanUnknown.Body.outcome -eq 'unknown') `
+        "النتيجة $($scanUnknown.Body.outcome) — بلا تسمية يخرج العامل من النظام إلى ورقة"
+
+    # ── إنهاء بلا عدّ: يجب أن يُرفَض ──
+    $earlySubmit = Api POST "/stock-counts/$countId/submit" -Token $token -Body @{ force = $false }
+    Check "إنهاء العدّ وسطورٌ لم تُمَسّ يُرفَض" ($earlySubmit.Status -eq 400) `
+        "حالة $($earlySubmit.Status) — قبوله يُنتج «صفر فروقات» عن رفوف لم يقف أمامها أحد"
+    Check "الرفض يذكر كم بقي" ($earlySubmit.Body.uncountedCount -gt 0) `
+        "uncountedCount = $($earlySubmit.Body.uncountedCount)"
+
+    # ── العدّ يختم السطر ──
+    $itemId = $scanFound.Body.item.id
+    $setQty = Api PUT "/stock-counts/$countId/items/$itemId" -Token $token -Body @{ countedQuantity = 7 }
+    Check "تسجيل الكمية يمرّ" ($setQty.Status -in 200,204) "حالة $($setQty.Status)"
+
+    # ── الاستثناء: مسح ثانٍ لنفس الصنف لا يُكتب فوقه صامتاً ──
+    $scanAgain = Api GET "/stock-counts/$countId/scan/TESTBC$stamp" -Token $token
+    Check "مسح صنف عُدَّ من قبل يُنبَّه عليه" ($scanAgain.Body.outcome -eq 'already_counted') `
+        "النتيجة $($scanAgain.Body.outcome) — الكتابة الصامتة تخفي صنفاً مُرَّ عليه مرّتين"
+
+    $afterOne = Api GET "/stock-counts/$countId" -Token $token
+    Check "عدّاد «كم بقي» ينقص بعد العدّ" ($afterOne.Body.uncountedCount -eq ($totalItems - 1)) `
+        "بقي $($afterOne.Body.uncountedCount)، والمتوقّع $($totalItems - 1)"
+
+    # ── الاستثناء: صنف على الرفّ وليس في القائمة ──
+    # جرد موزَّع يستبعد ما عُدَّ حديثاً، فيقف العامل أمام صنف لا يجده.
+    $future = (Get-Date).AddYears(-50).ToString('yyyy-MM-dd')
+    $narrowCount = Api POST "/stock-counts" -Token $token -Body @{
+        branchId = $branchId; notCountedSince = $future
+    }
+    if ($narrowCount.Status -in 200,201) {
+        $narrowId = $narrowCount.Body.id
+        $scanUnlisted = Api GET "/stock-counts/$narrowId/scan/TESTBC$stamp" -Token $token
+        if ($scanUnlisted.Body.outcome -eq 'unlisted') {
+            Check "صنف خارج القائمة يُسمّى unlisted" $true ""
+            $added = Api POST "/stock-counts/$narrowId/items" -Token $token -Body @{
+                productId = $fieldProduct.Body.id
+            }
+            Check "إضافة صنف وُجد على الرفّ وليس في القائمة" ($added.Status -in 200,201) `
+                "حالة $($added.Status) — بلا هذا الطريق يكتب العامل على ورقة"
+            Check "المُضاف يبدأ غير معدود" ($null -eq $added.Body.countedAt) `
+                "الإضافة تسجيل وجود لا عدّ"
+        } else {
+            Skipped "صنف خارج القائمة" "الجرد الضيّق ضمّ الصنف (النتيجة $($scanUnlisted.Body.outcome))"
+        }
+        Api POST "/stock-counts/$narrowId/cancel" -Token $token -Body @{} | Out-Null
+    } else {
+        Skipped "صنف خارج القائمة" "تعذّر إنشاء جرد موزَّع (حالة $($narrowCount.Status))"
+    }
+
+    # ── الإنهاء الصريح رغم النقص ──
+    $forced = Api POST "/stock-counts/$countId/submit" -Token $token -Body @{ force = $true }
+    Check "الإنهاء الصريح مع النقص يمرّ" ($forced.Status -eq 200) "حالة $($forced.Status)"
+}
+
+}
+
+# -----------------------------------------------------------------------------
 Section "٦. العزل بين المنظمات"
 
 $otherOrgProduct = Api GET "/products/00000000-0000-0000-0000-000000000042" -Token $token

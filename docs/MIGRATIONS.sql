@@ -1688,6 +1688,72 @@ PRINT N'أنماط بطاقة المحفظة جاهزة';
 GO
 
 -- ----------------------------------------------------------------------------
+--  الجرد الميداني: تمييز «عُدَّ» من «لم يُمَسّ»
+--
+--  العطب: الجرد الدوري يبدأ بـ counted_quantity = system_quantity، ولا حقل
+--  يميّز السطر الذي عُدَّ وطابق من السطر الذي لم يره أحد. فعاملٌ مسح أربعين
+--  صنفاً من ثلاثمئة ثم أرسل، يقول له النظام «صفر فروقات» — لأن مئتين وستين
+--  وافقت نفسها. والفرق بين «طابق» و«لم يُنظَر إليه» هو الجرد كلّه.
+-- ----------------------------------------------------------------------------
+IF NOT EXISTS (SELECT 1 FROM sys.columns
+               WHERE object_id = OBJECT_ID('dbo.stock_count_items') AND name = 'counted_at')
+BEGIN
+    ALTER TABLE dbo.stock_count_items ADD counted_at DATETIME2 NULL;
+    PRINT N'أُضيف عمود stock_count_items.counted_at';
+END
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.columns
+               WHERE object_id = OBJECT_ID('dbo.stock_count_items') AND name = 'added_during_count')
+BEGIN
+    ALTER TABLE dbo.stock_count_items ADD added_during_count BIT NOT NULL
+        CONSTRAINT df_stock_count_items_added DEFAULT 0;
+    PRINT N'أُضيف عمود stock_count_items.added_during_count';
+END
+GO
+
+-- تعبئة رجعية: سطور الجرود **المغلقة** وحدها تُختَم بتاريخ إغلاقها.
+--
+--   • المغلقة اعتُمدت فعلاً بقرار بشري، فتركها NULL يجعل كل جرد تاريخي
+--     يُقرأ لاحقاً كأنه «لم يُعدّ منه شيء» — وهو أكذب من ختمها.
+--   • **والمفتوحة تُترك NULL عمداً**: لا نعرف أيّ سطر منها رآه العامل فعلاً،
+--     وختمها كلّها يعني تثبيت الكذبة التي جاء هذا العمود ليكشفها. وNULL
+--     تدفع إلى إعادة المسح — وهو الاتجاه الآمن. الكميات المُدخلة محفوظة كما
+--     هي، فلا يضيع عمل أحد.
+--
+-- والتحديث عبر مؤشّر لكل منظمة: RLS تحجب صفوف المنظمات الأخرى، فتحديثٌ
+-- واحد بلا سياق يُصيب صفر صفوف صامتاً (راجع رأس هذا الملف).
+IF EXISTS (SELECT 1 FROM sys.columns
+           WHERE object_id = OBJECT_ID('dbo.stock_count_items') AND name = 'counted_at')
+BEGIN
+    DECLARE @orgId UNIQUEIDENTIFIER;
+    DECLARE org_cursor CURSOR LOCAL FAST_FORWARD FOR
+        SELECT id FROM dbo.organizations;
+    OPEN org_cursor;
+    FETCH NEXT FROM org_cursor INTO @orgId;
+    WHILE @@FETCH_STATUS = 0
+    BEGIN
+        EXEC sp_set_session_context @key = N'organization_id', @value = @orgId;
+
+        UPDATE i
+        SET i.counted_at = c.closed_at
+        FROM dbo.stock_count_items i
+        JOIN dbo.stock_counts c ON c.id = i.stock_count_id
+        WHERE i.counted_at IS NULL
+          AND c.closed_at IS NOT NULL;
+
+        FETCH NEXT FROM org_cursor INTO @orgId;
+    END
+    CLOSE org_cursor;
+    DEALLOCATE org_cursor;
+    EXEC sp_set_session_context @key = N'organization_id', @value = NULL;
+END
+GO
+
+PRINT N'الجرد الميداني: تمييز العدّ جاهز';
+GO
+
+-- ----------------------------------------------------------------------------
 --  فهارس الأداء — ملف منفصل لأنه يُنفَّذ ويُعاد بلا خطر
 -- ----------------------------------------------------------------------------
 PRINT N'لا تنسَ تنفيذ docs\INDEXES.sql على هذه القاعدة أيضاً.';

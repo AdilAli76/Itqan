@@ -9,6 +9,7 @@ import '../../../core/theme/app_text_styles.dart';
 import '../../../shared/widgets/data_table_widget.dart';
 import '../../branches/data/branches_providers.dart';
 import '../data/stock_count_providers.dart';
+import 'field_count_screen.dart';
 import '../../../shared/widgets/filter_chip_button.dart';
 import '../../../shared/widgets/skeleton.dart';
 import '../../../core/auth/permissions.dart';
@@ -394,6 +395,18 @@ class _StockCountDetailDialogState extends ConsumerState<_StockCountDetailDialog
         ],
         if (status == 'open') ...[
           const SizedBox(height: 12),
+          // الوضع الميداني أولاً وبعرض كامل: هذه الشاشة جدولٌ يُقرأ على مكتب،
+          // والعدّ يقع بين الرفوف. من يمسك جهازاً بيد وصندوقاً بالأخرى لا
+          // يتصفّح جدولاً — راجع FieldCountScreen.
+          SizedBox(
+            height: 52,
+            child: FilledButton.icon(
+              onPressed: _working ? null : _startFieldMode,
+              icon: const Icon(Icons.barcode_reader),
+              label: const Text('ابدأ العدّ بالمسح'),
+            ),
+          ),
+          const SizedBox(height: 12),
           Row(
             children: [
               Expanded(
@@ -467,6 +480,20 @@ class _StockCountDetailDialogState extends ConsumerState<_StockCountDetailDialog
         setState(() => _error = _dioErrorMessage(e, 'تعذّر حفظ الكمية'));
       }
     }
+  }
+
+  /// يفتح الوضع الميداني.
+  ///
+  /// شاشة كاملة لا حوار: الحوار يترك الجدول خلفه فيغري بالعودة إليه، وهذه
+  /// عمليةٌ يقف فيها العامل بين الرفوف حتى ينتهي.
+  Future<void> _startFieldMode() async {
+    final done = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(builder: (_) => FieldCountScreen(countId: widget.countId)),
+    );
+    ref.invalidate(stockCountDetailProvider(widget.countId));
+    // إنهاء العدّ يقع داخل الشاشة الميدانية نفسها، فتُغلق هذه معها بنفس
+    // النتيجة — وإلا بقي المستخدم أمام جرد انتهى.
+    if (done == true && mounted) Navigator.pop(context, true);
   }
 
   /// إنهاء العدّ. الخادم يقرّر الوجهة: بلا فروقات يُعتمد فوراً، ومعها ينتقل

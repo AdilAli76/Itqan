@@ -597,6 +597,15 @@ CREATE TABLE stock_count_items (
   product_id UNIQUEIDENTIFIER NOT NULL REFERENCES products(id),
   system_quantity DECIMAL(14,3) NOT NULL,
   counted_quantity DECIMAL(14,3) NOT NULL,
+  -- متى عُدَّ هذا السطر فعلاً. NULL = لم يُمَسّ بعد.
+  --
+  -- الجرد الدوري يبدأ بـ counted_quantity = system_quantity، فسطرٌ لم يره
+  -- أحد يبدو «عُدَّ وطابق». الكمية وحدها لا تفرّق بين «طابق» و«لم يُنظَر
+  -- إليه»، والفرق بينهما هو الجرد كلّه.
+  counted_at DATETIME2 NULL,
+  -- أُضيف أثناء العدّ لأنه وُجد على الرفّ ولم يكن في القائمة (الجرد
+  -- الموزَّع يستبعد ما عُدَّ حديثاً، فيقف العامل أمام صنف لا يجده).
+  added_during_count BIT NOT NULL DEFAULT 0,
   variance AS (counted_quantity - system_quantity) PERSISTED
 );
 GO

@@ -708,6 +708,32 @@ public class StockCountItem
     public decimal SystemQuantity { get; set; }
     public decimal CountedQuantity { get; set; }
     public decimal Variance { get; set; }
+
+    /// <summary>
+    /// متى عُدَّ هذا السطر فعلاً. NULL = **لم يُمَسّ بعد**.
+    ///
+    /// <para><b>العطب الذي يصلحه:</b> الجرد الدوري يبدأ بـ
+    /// <c>CountedQuantity = SystemQuantity</c>، فسطرٌ لم يره أحد يبدو
+    /// «عُدَّ وطابق». عاملٌ مسح أربعين صنفاً من ثلاثمئة ثم أرسل، يقول له
+    /// النظام **صفر فروقات** — لأن مئتين وستين وافقت نفسها. الكمية وحدها
+    /// لا تفرّق بين «طابق» و«لم يُنظَر إليه»، والفرق بينهما هو الجرد كلّه.
+    /// </para>
+    ///
+    /// <para>وهو ما يجعل الشاشة الميدانية ممكنة أصلاً: سؤالها الدائم «كم
+    /// بقي» لا جواب له بلا هذا الحقل.</para>
+    /// </summary>
+    public DateTime? CountedAt { get; set; }
+
+    /// <summary>
+    /// أُضيف أثناء العدّ لأنه وُجد على الرفّ ولم يكن في القائمة.
+    ///
+    /// <para>الحالة التي يسمّيها myWMS <c>ConfirmUnexpectedUnitLoad</c>،
+    /// وتقع عندنا في الجرد الموزَّع: <c>NotCountedSince</c> يستبعد ما عُدَّ
+    /// حديثاً، فيقف العامل أمام صنف موجود لا يجده في قائمته. بلا زرٍّ يقول
+    /// «وجدتُ ما ليس في القائمة» يخرج من النظام ويكتب على ورقة — وتنتهي
+    /// صلاحية النظام كلّه.</para>
+    /// </summary>
+    public bool AddedDuringCount { get; set; }
 }
 
 /// <summary>
