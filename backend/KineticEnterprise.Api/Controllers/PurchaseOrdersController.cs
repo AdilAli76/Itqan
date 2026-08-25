@@ -36,6 +36,11 @@ public record PurchaseReceiptDto(
     string? ReceivedByName, string? Notes, DateTime CreatedAt,
     List<PurchaseReceiptItemDto> Items);
 
+/// <param name="Lines">ما يُعاد من كل صنف. الأصناف غير المذكورة لا تُعاد.</param>
+public record ReturnLineRequest(Guid ProductId, string BatchNumber, decimal Quantity);
+
+public record ReturnToSupplierRequest(List<ReturnLineRequest> Lines, string Reason);
+
 public record PurchaseOrderListItemDto(
     Guid Id, Guid BranchId, string BranchName, Guid? SupplierId, string SupplierName,
     string Status, decimal TotalAmount, int ItemCount, DateTime CreatedAt, bool IsAuto);
@@ -280,8 +285,207 @@ public class PurchaseOrdersController : ControllerBase
                 Lines = order.Items.Select(i => new { i.ProductId, i.Quantity, i.ReceivedQuantity }),
             });
         await _db.SaveChangesAsync();
+
+        await PostReceiptAsync(order, receipt);
+
         await transaction.CommitAsync();
         return NoContent();
+    }
+
+    /// <summary>
+    /// قيد استلام البضاعة.
+    ///
+    /// <code>
+    ///   من ح/ المخزون
+    ///       إلى ح/ الموردون
+    /// </code>
+    ///
+    /// <para><b>الفجوة التي يسدّها:</b> الاستلام كان يزيد المخزون في دفتر
+    /// المخزون **بلا أي مقابل في الدفتر المحاسبي**. فالميزان يعرف ما بيع وما
+    /// صُرف، ولا يعرف من أين جاءت البضاعة ولا كم تدين للموردين — أي طرفٌ
+    /// كامل ناقص منه.</para>
+    ///
+    /// <para><b>ولماذا «الموردون» لا «الصندوق»:</b> استلام البضاعة وسداد
+    /// ثمنها حدثان منفصلان في الزمن. قيدُها على الصندوق يفترض أن كل شحنة
+    /// دُفعت نقداً لحظة وصولها — فتظهر النقدية أقلّ ممّا في الدرج، ويختفي
+    /// الدَّين للموردين تماماً وهو أهمّ ما يريد التاجر معرفته.</para>
+    ///
+    /// <para>والسداد للمورّد ليس مبنياً بعد، فحساب «الموردون» يتراكم. وهذا
+    /// **نقصٌ معلوم لا خطأ**: الرقم فيه صحيح، وينقصه الطرف المقابل حين
+    /// يُبنى.</para>
+    ///
+    /// <para>وبالتكلفة المُثبَّتة على سطر الأمر (<c>item.UnitCost</c>) — وهي
+    /// نفسها التي دخل بها الدفتر المخزوني، فلا يفترق الدفتران.</para>
+    /// </summary>
+    private async Task PostReceiptAsync(PurchaseOrder order, PurchaseReceipt receipt)
+    {
+        var org = await _db.Organizations.FirstOrDefaultAsync();
+        var license = await _db.Licenses.FirstOrDefaultAsync();
+        if (org is null || !Ledger.IsEnabled(org, license)) return;
+
+        var total = receipt.Items.Sum(i => i.Quantity * i.UnitCost);
+        if (total <= 0) return;
+
+        await Ledger.PostAsync(_db, order.OrganizationId, order.BranchId,
+            JournalSources.PurchaseReceipt, receipt.Id,
+            $"استلام بضاعة — إشعار {receipt.SupplierNoteNumber ?? receipt.Id.ToString()[..8]}",
+            new[]
+            {
+                new PostingLine(AccountRoles.Inventory, total, 0),
+                new PostingLine(AccountRoles.Payables, 0, total),
+            },
+            CurrentUserId(),
+            // بتاريخ الاستلام الفعلي لا تاريخ الإدخال: شحنة وصلت الشهر
+            // الماضي وسُجّلت اليوم تنتمي محاسبياً إلى الشهر الماضي.
+            receipt.ReceivedOn);
+
+        await _db.SaveChangesAsync();
+    }
+
+    /// <summary>
+    /// مردود شراء — بضاعة تُعاد إلى المورّد.
+    ///
+    /// <para><b>لم يكن موجوداً إطلاقاً:</b> لا مخزنياً ولا محاسبياً. فبضاعة
+    /// تالفة أو خاطئة تُعاد إلى المورّد كانت تبقى في مخزون النظام إلى الأبد،
+    /// أو تُخرَج بـ«تعديل يدوي» بلا سبب ولا أثر على دَين المورّد. والنتيجة
+    /// مخزونٌ دفتري أعلى من الرفّ، ودَينٌ للمورّد أعلى من الحقيقة.</para>
+    ///
+    /// <code>
+    ///   من ح/ الموردون              (إنقاص الدَّين)
+    ///       إلى ح/ مردودات المشتريات
+    ///   من ح/ مردودات المشتريات
+    ///       إلى ح/ المخزون
+    /// </code>
+    ///
+    /// <para>وعملياً يُختصران إلى: <b>من ح/ الموردون إلى ح/ المخزون</b> —
+    /// وهو ما يُكتب فعلاً. لكن حساب «مردودات المشتريات» يبقى في الدليل لمن
+    /// يريد قياس حجم ما يُردّ إلى الموردين، ويُستعمل حين تُبنى فاتورة
+    /// المورّد بفروقها.</para>
+    ///
+    /// <para><b>ولا يُشترط أن يكون الأمر مستلَماً كاملاً:</b> شحنةٌ وصل
+    /// نصفها تالفاً تُعاد اليوم ويبقى الأمر منتظِراً بقيّته.</para>
+    /// </summary>
+    [HttpPost("{id:guid}/return-to-supplier")]
+    [RequirePermission("purchasing.manage")]
+    public async Task<IActionResult> ReturnToSupplier(Guid id, ReturnToSupplierRequest request)
+    {
+        var reason = (request.Reason ?? "").Trim();
+        if (reason.Length == 0)
+        {
+            // السبب إلزامي: بضاعة تخرج من المخزون بلا سبب مكتوب هي أوسع باب
+            // لإخفاء نقص. ومن يراجع بعد شهر يجب أن يعرف لماذا خرجت.
+            return BadRequest(new { message = "سبب الإرجاع إلزامي" });
+        }
+        if (request.Lines is null || request.Lines.Count == 0)
+        {
+            return BadRequest(new { message = "لا أصناف للإرجاع" });
+        }
+
+        var order = await _db.PurchaseOrders.Include(o => o.Items).FirstOrDefaultAsync(o => o.Id == id);
+        if (order is null) return NotFound();
+        if (order.Status is not ("ordered" or "received"))
+        {
+            return BadRequest(new { message = "لا يُعاد شيء من أمر لم تصل بضاعته بعد" });
+        }
+
+        await using var transaction = await _db.Database.BeginTransactionAsync();
+
+        // التحقّق كاملاً قبل أي كتابة: سطرٌ خاطئ في آخر القائمة كان سيترك
+        // مرتجعاً نصفَ مُنفَّذ — بضاعة خرجت وأخرى لم تخرج، بلا مستند يجمعهما.
+        var resolved = new List<(PurchaseOrderItem Item, string BatchNumber, decimal Quantity, decimal UnitCost)>();
+        foreach (var line in request.Lines)
+        {
+            if (line.Quantity <= 0)
+            {
+                return BadRequest(new { message = "الكمية المُعادة يجب أن تكون أكبر من صفر" });
+            }
+
+            var item = order.Items.FirstOrDefault(i => i.ProductId == line.ProductId);
+            if (item is null)
+            {
+                return BadRequest(new { message = "صنف ليس في هذا الأمر" });
+            }
+
+            // لا يُعاد أكثر ممّا استُلم من الأمر أصلاً.
+            if (line.Quantity > item.ReceivedQuantity)
+            {
+                var product = await _db.Products.FirstOrDefaultAsync(p => p.Id == line.ProductId);
+                return BadRequest(new
+                {
+                    message = $"لا يمكن إرجاع {line.Quantity:0.###} من «{product?.Name}» — المستلَم {item.ReceivedQuantity:0.###}",
+                });
+            }
+
+            resolved.Add((item, line.BatchNumber ?? "", line.Quantity, item.UnitCost));
+        }
+
+        decimal total = 0;
+        foreach (var (item, batchNumber, quantity, unitCost) in resolved)
+        {
+            // الإخراج عبر الدفتر لا على stock_levels: الطريق الوحيد، ومنه
+            // يأتي سطرٌ يحمل السبب والمصدر — راجع [StockLedger].
+            try
+            {
+                await StockLedger.IssueAsync(
+                    _db, order.OrganizationId, order.BranchId, warehouseId: null,
+                    productId: item.ProductId, quantity: quantity,
+                    sourceType: StockSourceTypes.PurchaseReturn, sourceId: order.Id,
+                    userId: CurrentUserId());
+            }
+            catch (InvalidOperationException ex)
+            {
+                // رصيدٌ لا يكفي: البضاعة بيعت بعد استلامها. تُشترى من مكان
+                // آخر أو يُعدَّل المرتجع — ولا تُخرَج كمية غير موجودة.
+                return BadRequest(new { message = ex.Message });
+            }
+
+            // المستلَم يُنقَص بما أُعيد: بلا ذلك يبقى الأمر «مستلَماً كاملاً»
+            // بينما نصف بضاعته عادت، فيُقاس أداء المورّد على توريدٍ لم يتمّ.
+            item.ReceivedQuantity -= quantity;
+            total += quantity * unitCost;
+        }
+
+        // الأمر يعود «مُرسَلاً» إن صار فيه ناقص: التوريد لم يكتمل فعلاً.
+        if (order.Status == "received" && order.Items.Any(i => i.RemainingQuantity > 0))
+        {
+            order.Status = "ordered";
+        }
+
+        _db.LogAudit(order.OrganizationId, CurrentUserId(), "purchase_order.returned",
+            "purchase_orders", order.Id,
+            newValues: new
+            {
+                Reason = reason,
+                Total = total,
+                Lines = resolved.Select(r => new { r.Item.ProductId, r.Quantity, r.BatchNumber }),
+            });
+        await _db.SaveChangesAsync();
+
+        await PostPurchaseReturnAsync(order, total, reason);
+
+        await transaction.CommitAsync();
+        return NoContent();
+    }
+
+    /// <summary>قيد مردود الشراء — من ح/ الموردون إلى ح/ المخزون.</summary>
+    private async Task PostPurchaseReturnAsync(PurchaseOrder order, decimal total, string reason)
+    {
+        var org = await _db.Organizations.FirstOrDefaultAsync();
+        var license = await _db.Licenses.FirstOrDefaultAsync();
+        if (org is null || !Ledger.IsEnabled(org, license)) return;
+        if (total <= 0) return;
+
+        await Ledger.PostAsync(_db, order.OrganizationId, order.BranchId,
+            JournalSources.PurchaseReturn, order.Id,
+            $"مردود شراء — {reason}",
+            new[]
+            {
+                new PostingLine(AccountRoles.Payables, total, 0),
+                new PostingLine(AccountRoles.Inventory, 0, total),
+            },
+            CurrentUserId());
+
+        await _db.SaveChangesAsync();
     }
 
     /// <summary>

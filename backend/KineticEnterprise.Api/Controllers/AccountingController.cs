@@ -119,10 +119,21 @@ public class AccountingController : ControllerBase
     {
         var orgId = Guid.Parse(User.FindFirstValue("organization_id")!);
         var seeded = await ChartOfAccounts.SeedAsync(_db, orgId);
+
+        // دليلٌ موجود يُفحَص ربطه: الأدوار تنمو مع كل نوع حركة جديد، ودليلٌ
+        // بُذر قبل إضافة دور يفشل عنده أول استلام أو مصروف. راجع
+        // ChartOfAccounts.RepairMappingsAsync.
+        var repaired = seeded ? new List<string>() : await ChartOfAccounts.RepairMappingsAsync(_db, orgId);
+
         return Ok(new
         {
             seeded,
-            message = seeded ? "بُذر دليل الحسابات الافتراضي" : "الدليل موجود — لم يُغيَّر شيء",
+            repairedRoles = repaired,
+            message = seeded
+                ? "بُذر دليل الحسابات الافتراضي"
+                : repaired.Count > 0
+                    ? $"أُكمل ربط {repaired.Count} دور محاسبي ناقص"
+                    : "الدليل موجود ومكتمل — لم يُغيَّر شيء",
         });
     }
 

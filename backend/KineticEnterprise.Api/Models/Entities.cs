@@ -478,6 +478,9 @@ public static class StockSourceTypes
     public const string TransferOut = "transfer_out";
     public const string TransferIn = "transfer_in";
     public const string StockCount = "stock_count";
+    /// <summary>بضاعة أُعيدت إلى المورّد — إخراجٌ من المخزون.</summary>
+    public const string PurchaseReturn = "purchase_return";
+
     public const string ManualAdjustment = "manual_adjustment";
     public const string Opening = "opening";
 }
@@ -1524,6 +1527,13 @@ public static class JournalSources
     public const string Invoice = "invoice";
     public const string InvoiceReturn = "invoice_return";
     public const string Expense = "expense";
+
+    /// <summary>استلام بضاعة من مورّد.</summary>
+    public const string PurchaseReceipt = "purchase_receipt";
+
+    /// <summary>بضاعة أُعيدت إلى المورّد.</summary>
+    public const string PurchaseReturn = "purchase_return";
+
     public const string WalletTopUp = "wallet_top_up";
     public const string Payment = "payment";
 
@@ -1616,6 +1626,12 @@ public static class AccountRoles
 {
     public const string Cash = "cash";
     public const string Receivables = "receivables";
+
+    /// <summary>الموردون — ما على المنشأة لهم مقابل بضاعة استُلمت.</summary>
+    public const string Payables = "payables";
+
+    /// <summary>مردودات المشتريات — بضاعة أُعيدت إلى المورّد.</summary>
+    public const string PurchaseReturns = "purchase_returns";
     public const string SalesRevenue = "sales_revenue";
     public const string SalesTax = "sales_tax";
     public const string Inventory = "inventory";
@@ -1630,8 +1646,8 @@ public static class AccountRoles
     /// <summary>ما لا يمكن للترحيل أن يعمل بدونه.</summary>
     public static readonly string[] Required =
     {
-        Cash, Receivables, SalesRevenue, SalesTax, Inventory,
-        CostOfGoodsSold, CustomerWallet, SalesReturns, GeneralExpense,
+        Cash, Receivables, Payables, SalesRevenue, SalesTax, Inventory,
+        CostOfGoodsSold, CustomerWallet, SalesReturns, PurchaseReturns, GeneralExpense,
     };
 }
 

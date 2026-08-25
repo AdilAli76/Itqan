@@ -43,7 +43,7 @@ public static class ChartOfAccounts
         // ── 2 الالتزامات وحقوق الملكية ──────────────────────────────────
         new("2", "الالتزامات وحقوق الملكية", AccountTypes.Liability),
         new("21", "الالتزامات المتداولة", AccountTypes.Liability),
-        new("2101", "الموردون (ذمم دائنة)", AccountTypes.Liability),
+        new("2101", "الموردون (ذمم دائنة)", AccountTypes.Liability, AccountRoles.Payables),
         // رصيد العميل المشحون **التزامٌ لا إيراد**: المال قُبض ولم تُسلَّم
         // بضاعة بعد، وللعميل أن يطلبه. تسجيله إيراداً يُضخّم أرباح الشهر
         // بمالٍ ليس ربحاً، ثم يُنقصها حين يُصرف فعلاً.
@@ -57,6 +57,9 @@ public static class ChartOfAccounts
         new("3", "الاستخدامات", AccountTypes.Expense),
         new("31", "تكلفة المبيعات", AccountTypes.Expense),
         new("3101", "تكلفة البضاعة المباعة", AccountTypes.Expense, AccountRoles.CostOfGoodsSold),
+        // مردودات المشتريات تحت تكلفة المبيعات لا تحت الإيرادات: البضاعة
+        // المُعادة إلى المورّد تُنقص التكلفة لا تزيد الدخل.
+        new("3102", "مردودات المشتريات", AccountTypes.Expense, AccountRoles.PurchaseReturns),
         new("32", "المصروفات التشغيلية", AccountTypes.Expense),
         new("3201", "مصروفات عمومية", AccountTypes.Expense, AccountRoles.GeneralExpense),
         new("3202", "رواتب وأجور", AccountTypes.Expense),
@@ -145,6 +148,63 @@ public static class ChartOfAccounts
 
         await db.SaveChangesAsync();
         return true;
+    }
+
+    /// <summary>
+    /// يُكمل ما نقص من الحسابات والربط في دليلٍ مبذور سابقاً.
+    ///
+    /// <para><b>لماذا يلزم:</b> الأدوار تنمو مع كل نوع حركة جديد. فحين
+    /// أُضيف ترحيل المشتريات لزم دور «الموردون»، ودليلٌ بُذر قبله لا يحمله —
+    /// فيفشل أول استلام بضاعة برسالة «لا حساب مربوط بالدور». وترقيةٌ تُعطّل
+    /// عملاً كان يعمل هي أسوأ ما يمكن أن تفعله ترقية.</para>
+    ///
+    /// <para>ويضيف ما نقص فقط: لا يلمس حساباً موجوداً ولا ربطاً قائماً —
+    /// محاسبٌ ربط دوراً بحسابٍ من عنده أدرى بنشاطه منّا.</para>
+    /// </summary>
+    /// <returns>الأدوار التي أُضيفت الآن.</returns>
+    public static async Task<List<string>> RepairMappingsAsync(AppDbContext db, Guid organizationId)
+    {
+        var added = new List<string>();
+        if (!await db.Accounts.AnyAsync()) return added;
+
+        var existingRoles = await db.AccountMappings.Select(m => m.Role).ToListAsync();
+        var byCode = await db.Accounts.ToDictionaryAsync(a => a.Code, a => a);
+
+        foreach (var seed in Default.Where(s => s.Role is not null))
+        {
+            if (existingRoles.Contains(seed.Role!)) continue;
+
+            // الحساب نفسه قد يكون ناقصاً أيضاً (أُضيف إلى الدليل الافتراضي
+            // بعد بذر هذه المنظمة) — فيُنشأ تحت أبيه.
+            if (!byCode.TryGetValue(seed.Code, out var account))
+            {
+                var parent = ParentCodeOf(seed.Code) is { } pc ? byCode.GetValueOrDefault(pc) : null;
+                account = new Account
+                {
+                    OrganizationId = organizationId,
+                    Code = seed.Code,
+                    Name = seed.Name,
+                    Type = seed.Type,
+                    ParentId = parent?.Id,
+                    IsSystem = true,
+                    IsPostable = true,
+                };
+                if (parent is not null) parent.IsPostable = false;
+                db.Accounts.Add(account);
+                byCode[seed.Code] = account;
+            }
+
+            db.AccountMappings.Add(new AccountMapping
+            {
+                OrganizationId = organizationId,
+                Role = seed.Role!,
+                AccountId = account.Id,
+            });
+            added.Add(seed.Role!);
+        }
+
+        if (added.Count > 0) await db.SaveChangesAsync();
+        return added;
     }
 
     /// <summary>رمز الأب: 1101 ← 11، و11 ← 1، و1 ← لا أب.</summary>

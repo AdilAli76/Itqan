@@ -378,10 +378,43 @@ class _PurchaseOrderDetailDialogState extends ConsumerState<_PurchaseOrderDetail
                 ),
               ],
             ),
+          // الإرجاع متاح ما دام شيء قد استُلم — لا يُشترط اكتمال الأمر:
+          // شحنةٌ وصل نصفها تالفاً تُعاد اليوم ويبقى الأمر منتظِراً بقيّته.
+          if (status == 'ordered' || status == 'received')
+            if (items.any((i) => ((i['receivedQuantity'] as num?) ?? 0) > 0)) ...[
+              const SizedBox(height: 10),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: _working ? null : () => _confirmReturn(items),
+                  icon: const Icon(Icons.assignment_return_outlined, size: 18),
+                  label: const Text('إرجاع إلى المورّد'),
+                ),
+              ),
+            ],
           _ReceiptsSection(orderId: widget.orderId, orderedAt: createdAt),
         ],
       ),
     );
+  }
+
+  /// نافذة الإرجاع إلى المورّد.
+  ///
+  /// بضاعة تالفة أو خاطئة تعود إلى المورّد، فتخرج من المخزون ويُنقص دَينه.
+  /// وبلا هذا الطريق تبقى في مخزون النظام إلى الأبد، أو تُخرَج بتعديل يدوي
+  /// بلا سبب ولا أثر على الدَّين.
+  Future<void> _confirmReturn(List<Map<String, dynamic>> items) async {
+    final returnable = items.where((i) => ((i['receivedQuantity'] as num?) ?? 0) > 0).toList();
+    if (returnable.isEmpty) return;
+
+    final result = await showDialog<Map<String, dynamic>>(
+      context: context,
+      builder: (_) => _ReturnToSupplierDialog(items: returnable),
+    );
+    if (result == null) return;
+
+    await _act('return-to-supplier',
+        body: result, successMessage: 'تم الإرجاع — خرجت الكمية من المخزون ونقص دَين المورّد');
   }
 
   /// نافذة الاستلام: الكمية الواصلة فعلياً لكل صنف، ومعها الدفعة والصلاحية
@@ -1301,5 +1334,142 @@ class _ReceiptsSection extends ConsumerWidget {
         ],
       ),
     );
+  }
+}
+
+
+/// اختيار ما يُعاد إلى المورّد وكمّه وسببه.
+class _ReturnToSupplierDialog extends StatefulWidget {
+  const _ReturnToSupplierDialog({required this.items});
+  final List<Map<String, dynamic>> items;
+
+  @override
+  State<_ReturnToSupplierDialog> createState() => _ReturnToSupplierDialogState();
+}
+
+class _ReturnToSupplierDialogState extends State<_ReturnToSupplierDialog> {
+  final _reasonController = TextEditingController();
+  // الكميات تبدأ **فارغة لا كاملة**: الإرجاع الكامل ليس الحالة الغالبة
+  // (بخلاف الاستلام)، وحقلٌ مملوء سلفاً يجعل ضغطةً واحدة تُخرج شحنة كاملة.
+  final _quantities = <String, TextEditingController>{};
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    for (final item in widget.items) {
+      _quantities[item['productId'] as String] = TextEditingController();
+    }
+  }
+
+  @override
+  void dispose() {
+    _reasonController.dispose();
+    for (final c in _quantities.values) {
+      c.dispose();
+    }
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('إرجاع إلى المورّد'),
+      content: SizedBox(
+        width: 460,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              TextField(
+                controller: _reasonController,
+                autofocus: true,
+                decoration: const InputDecoration(
+                  labelText: 'سبب الإرجاع',
+                  hintText: 'بضاعة تالفة، صنف خاطئ، قرب انتهاء الصلاحية…',
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'السبب إلزامي: بضاعة تخرج من المخزون بلا سبب مكتوب هي أوسع باب '
+                'لإخفاء نقص.',
+                style: AppTextStyles.caption(),
+              ),
+              const SizedBox(height: 16),
+              for (final item in widget.items)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(item['productName'] as String? ?? '',
+                                style: AppTextStyles.bodyMd(color: AppColors.textPrimary)),
+                            Text('المستلَم: ${item['receivedQuantity']}',
+                                style: AppTextStyles.labelMd()),
+                          ],
+                        ),
+                      ),
+                      SizedBox(
+                        width: 110,
+                        child: TextField(
+                          controller: _quantities[item['productId'] as String],
+                          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                          decoration: const InputDecoration(labelText: 'يُعاد'),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              if (_error != null) ...[
+                const SizedBox(height: 10),
+                Text(_error!, style: AppTextStyles.bodyMd(color: AppColors.danger)),
+              ],
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('إلغاء')),
+        FilledButton(onPressed: _submit, child: const Text('تأكيد الإرجاع')),
+      ],
+    );
+  }
+
+  void _submit() {
+    final reason = _reasonController.text.trim();
+    if (reason.isEmpty) {
+      setState(() => _error = 'السبب إلزامي');
+      return;
+    }
+
+    final lines = <Map<String, dynamic>>[];
+    for (final item in widget.items) {
+      final productId = item['productId'] as String;
+      final raw = _quantities[productId]!.text.trim();
+      if (raw.isEmpty) continue;
+
+      final quantity = double.tryParse(raw);
+      if (quantity == null || quantity <= 0) {
+        setState(() => _error = 'كمية غير صالحة عند «${item['productName']}»');
+        return;
+      }
+      final received = (item['receivedQuantity'] as num?)?.toDouble() ?? 0;
+      if (quantity > received) {
+        setState(() => _error = 'لا يمكن إرجاع أكثر من المستلَم عند «${item['productName']}»');
+        return;
+      }
+      lines.add({'productId': productId, 'batchNumber': '', 'quantity': quantity});
+    }
+
+    if (lines.isEmpty) {
+      setState(() => _error = 'أدخل كمية لصنف واحد على الأقل');
+      return;
+    }
+
+    Navigator.pop(context, {'lines': lines, 'reason': reason});
   }
 }

@@ -952,6 +952,57 @@ if (-not $canManageInventory) {
     }
 }
 
+# ── المشتريات: الاستلام والمردود ─────────────────────────────────────────
+#
+# الفجوة التي يمسكها: الاستلام كان يزيد المخزون في دفتر المخزون بلا أي مقابل
+# في الدفتر المحاسبي — أي أن الميزان يعرف ما بيع ولا يعرف من أين جاءت
+# البضاعة ولا كم تدين للموردين.
+
+if ($canManageInventory -and $accProduct -and $accProduct.Status -in 200,201) {
+    $po = Api POST "/purchase-orders" -Token $token -Body @{
+        branchId = $branchId
+        lines = @(@{ productId = $accProduct.Body.id; quantity = 10; unitCost = 12 })
+    }
+    if ($po.Status -in 200,201) {
+        Api POST "/purchase-orders/$($po.Body.id)/order" -Token $token -Body @{} | Out-Null
+        $recv = Api POST "/purchase-orders/$($po.Body.id)/receive" -Token $token -Body @{
+            lines = @(@{ productId = $accProduct.Body.id; quantity = 10 })
+        }
+        Check "استلام البضاعة يمرّ" ($recv.Status -in 200,204) "حالة $($recv.Status) — $($recv.Body.message)"
+
+        $j = Api GET "/accounting/journal" -Token $token
+        $recvEntry = @($j.Body) | Where-Object { $_.source -eq 'purchase_receipt' } | Select-Object -First 1
+        Check "الاستلام ولّد قيداً آلياً" ($null -ne $recvEntry) `
+            "بلا قيد يزيد المخزون الدفتري بلا مقابل في الموردين"
+        if ($recvEntry) {
+            $usesPayables = $recvEntry.lines | Where-Object { $_.accountCode -eq '2101' -and $_.credit -gt 0 }
+            Check "الاستلام يُقيَّد على «الموردون» لا «الصندوق»" ($null -ne $usesPayables) `
+                "قيدُه على الصندوق يفترض أن كل شحنة دُفعت نقداً لحظة وصولها"
+        }
+
+        # ── مردود الشراء ──
+        $pret = Api POST "/purchase-orders/$($po.Body.id)/return-to-supplier" -Token $token -Body @{
+            reason = "بضاعة تالفة"
+            lines = @(@{ productId = $accProduct.Body.id; batchNumber = ""; quantity = 3 })
+        }
+        Check "مردود الشراء يمرّ" ($pret.Status -in 200,204) "حالة $($pret.Status) — $($pret.Body.message)"
+
+        # السبب إلزامي: بضاعة تخرج بلا سبب مكتوب هي أوسع باب لإخفاء نقص.
+        $noReason = Api POST "/purchase-orders/$($po.Body.id)/return-to-supplier" -Token $token -Body @{
+            reason = ""; lines = @(@{ productId = $accProduct.Body.id; batchNumber = ""; quantity = 1 })
+        }
+        Check "مردود بلا سبب يُرفض" ($noReason.Status -eq 400) "حالة $($noReason.Status)"
+
+        # لا يُعاد أكثر ممّا استُلم.
+        $tooMuch = Api POST "/purchase-orders/$($po.Body.id)/return-to-supplier" -Token $token -Body @{
+            reason = "اختبار"; lines = @(@{ productId = $accProduct.Body.id; batchNumber = ""; quantity = 999 })
+        }
+        Check "إرجاع أكثر من المستلَم يُرفض" ($tooMuch.Status -eq 400) "حالة $($tooMuch.Status)"
+    } else {
+        Skipped "ترحيل المشتريات" "تعذّر إنشاء أمر شراء (حالة $($po.Status))"
+    }
+}
+
 # ── ميزان المراجعة ───────────────────────────────────────────────────────
 $tb = Api GET "/accounting/trial-balance" -Token $token
 Check "ميزان المراجعة يُقرأ" ($tb.Status -eq 200) "حالة $($tb.Status)"
