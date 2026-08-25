@@ -1,6 +1,7 @@
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_web_plugins/url_strategy.dart';
 import 'core/constants/app_constants.dart';
 import 'core/router/app_router.dart';
 import 'core/theme/app_colors.dart';
@@ -10,6 +11,19 @@ import 'core/theme/theme_mode_provider.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // مسارات بلا # — erp.droob-albayan.ly/pos بدل .../#/pos.
+  //
+  // **ليست تحسين سرعة:** التوجيه بالهاشتاق يقع داخل المتصفّح بلا أي طلب
+  // شبكي، فلا فرق في الأداء بينه وبين المسار. لكن الرابط النظيف يُنسَخ
+  // ويُرسَل ويُفهرَس، والرابط بـ# يُقطع في كثير من تطبيقات المراسلة عند
+  // علامة الهاشتاق فيصل ناقصاً.
+  //
+  // وشرطه على الخادم قائم أصلاً: MapFallbackToFile("index.html") في
+  // Program.cs يردّ التطبيق لأي مسار غير معروف — وبدونه كان فتح
+  // /pos مباشرةً يعطي 404.
+  usePathUrlStrategy();
+
   runApp(const ProviderScope(child: KineticApp()));
 }
 

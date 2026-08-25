@@ -23,7 +23,10 @@ param(
     [string]$SiteName = 'Kinetic',
     [string]$PoolName = 'KineticApi',
     # الترحيلات آمنة للإعادة، وتخطّيها يُترك للحالات التي نُفِّذت فيها للتوّ.
-    [switch]$SkipDb
+    [switch]$SkipDb,
+    # قاعدة البيانات التي تُرحَّل. تُشتقّ من ملف أسرار النشر نفسه إن تُركت
+    # فارغة — راجع ResolveDatabase أدناه.
+    [string]$Database
 )
 
 $ErrorActionPreference = 'Stop'
@@ -32,6 +35,19 @@ $OutputEncoding = [Console]::OutputEncoding = [Text.Encoding]::UTF8
 function Step($n, $t) { Write-Host "`n[$n] $t" -ForegroundColor Cyan }
 function Ok($t)   { Write-Host "    $t" -ForegroundColor Green }
 function Warn($t) { Write-Host "    $t" -ForegroundColor Yellow }
+
+function Resolve-DatabaseName([string]$SecretsPath) {
+    if (-not (Test-Path $SecretsPath)) { return $null }
+    try {
+        $cfg = Get-Content $SecretsPath -Raw | ConvertFrom-Json
+        $conn = $cfg.ConnectionStrings.Default
+        if (-not $conn) { return $null }
+        # Database= أو Initial Catalog= — كلاهما شائع في سلاسل الاتصال.
+        $m = [regex]::Match($conn, '(?i)(?:Database|Initial\s+Catalog)\s*=\s*([^;]+)')
+        if ($m.Success) { return $m.Groups[1].Value.Trim() }
+    } catch { }
+    return $null
+}
 
 function Test-Admin {
     ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
@@ -102,6 +118,16 @@ try {
         Ok 'ملفات SQL مُحدَّثة'
     }
 
+    # سكربتات التشغيل تُحدَّث مع الحزمة أيضاً. بلا هذا يبقى على الخادم
+    # server_setup القديم بينما الترحيلات والفحوص الجديدة تفترض سلوكه
+    # الجديد — وهو عطب صامت: السكربت «موجود ويعمل» وينفّذ منطق نسخة سابقة.
+    $srcTool = Join-Path $staging 'tool'
+    if (Test-Path $srcTool) {
+        New-Item -ItemType Directory -Force -Path (Join-Path $Target 'tool') | Out-Null
+        Copy-Item -Path (Join-Path $srcTool '*') -Destination (Join-Path $Target 'tool') -Recurse -Force
+        Ok 'سكربتات التشغيل مُحدَّثة'
+    }
+
     # ── 5. إعادة الأسرار ────────────────────────────────────────────────
     Step 5 'إعادة ملف الأسرار'
     if (Test-Path $backup) {
@@ -125,23 +151,67 @@ try {
 # ── 7. الترحيلات ────────────────────────────────────────────────────────
 if (-not $SkipDb) {
     Step 7 'تنفيذ ترحيلات قاعدة البيانات'
-    $setup = Join-Path $Target 'server_setup.ps1'
-    if (Test-Path $setup) {
-        & $setup -Stage db -PackagePath $Target
+    # tool\ أولاً وهو موضعه في الحزمة الحالية، ثم الجذر للنشرات القديمة
+    # التي سبقت ضمّ السكربتات إلى الحزمة.
+    $setup = @(
+        (Join-Path $Target 'tool\server_setup.ps1'),
+        (Join-Path $Target 'server_setup.ps1')
+    ) | Where-Object { Test-Path $_ } | Select-Object -First 1
+
+    if ($setup) {
+        # ⚠ اسم القاعدة يُمرَّر صراحةً دائماً.
+        #
+        # بدونه يسقط server_setup على افتراضيه KineticEnterprise — أي أن
+        # **نشر التجربة كان يُرحّل قاعدة الإنتاج**. وهذا يُبطل معنى بيئة
+        # التجربة كلّه: العزل شرط لا تحسين، وترحيلٌ تجريبي يُطبَّق على دفاتر
+        # يعتمد عليها أحد هو الخطر الذي أُنشئت التجربة لتفاديه.
+        #
+        # والاسم يُقرأ من ملف أسرار النشر نفسه: هو المصدر الوحيد الذي لا
+        # يكذب عن أي قاعدة يخدمها هذا الموقع فعلاً.
+        $dbName = $Database
+        if (-not $dbName) { $dbName = Resolve-DatabaseName $secrets }
+        if (-not $dbName) {
+            Warn 'تعذّر تحديد اسم القاعدة من ملف الأسرار — تُخطّى الترحيلات.'
+            Warn 'مرّر -Database صراحةً ثم أعد التشغيل.'
+        }
+        else {
+            Ok "الترحيلات على القاعدة: $dbName"
+            & $setup -Stage db -PackagePath $Target -Database $dbName
+        }
     } else {
-        Warn "server_setup.ps1 غير موجود في $Target — نفّذ الترحيلات يدوياً."
+        Warn "server_setup.ps1 غير موجود في $Target — نفّذ الترحيلات يدوياً من sql\."
     }
 }
 
 # ── 8. فحص سريع ─────────────────────────────────────────────────────────
 Step 8 'فحص الاستجابة'
+
+# ترويسة المضيف تُقرأ من ارتباطات الموقع لا تُفترض 'localhost'.
+#
+# موقعٌ مربوط بترويسة مضيف (وهو الوضع الطبيعي مع نطاق حقيقي) يردّ 404 على
+# أي ترويسة أخرى — فكان الفحص يُنذر بعد ترقية ناجحة تماماً، وهو أسوأ من
+# غياب الفحص: إنذار كاذب متكرّر يُدرَّب المستخدم على تجاهله.
+$hosts = @('localhost')
 try {
-    $r = Invoke-WebRequest -Uri 'http://127.0.0.1/' -Headers @{ Host = 'localhost' } `
-        -UseBasicParsing -TimeoutSec 20
-    Ok "الموقع يردّ ($($r.StatusCode))"
-} catch {
-    Warn "لم يردّ محلياً: $($_.Exception.Message.Split([char]10)[0])"
-    Warn 'قد يكون الموقع مربوطاً بترويسة مضيف — جرّب بالنطاق الحقيقي.'
+    $bound = (Get-WebBinding -Name $SiteName -ErrorAction SilentlyContinue |
+              ForEach-Object { ($_.bindingInformation -split ':')[2] } |
+              Where-Object { $_ }) 
+    if ($bound) { $hosts = @($bound) + $hosts }
+} catch { }
+
+$answered = $false
+foreach ($h in ($hosts | Select-Object -Unique)) {
+    try {
+        $r = Invoke-WebRequest -Uri 'http://127.0.0.1/' -Headers @{ Host = $h } `
+            -UseBasicParsing -TimeoutSec 20
+        Ok "الموقع يردّ ($($r.StatusCode)) على ترويسة $h"
+        $answered = $true
+        break
+    } catch { }
+}
+if (-not $answered) {
+    Warn "لم يردّ محلياً على أيٍّ من: $($hosts -join ', ')"
+    Warn 'راجع سجل IIS ومجمّع التطبيقات — أو جرّب الرابط العام إن كان خلف نفق.'
 }
 
 Remove-Item -LiteralPath $staging -Recurse -Force -ErrorAction SilentlyContinue
@@ -158,4 +228,8 @@ Write-Host "  سُجّلت في $(Join-Path $Target 'deploy.log')" -ForegroundCo
 Write-Host ""
 Write-Host "  تمّت الترقية. نسخة الأسرار الاحتياطية باقية في:" -ForegroundColor Green
 Write-Host "    $backup" -ForegroundColor Gray
-Write-Host "  ونفق cloudflared لا يتأثّر بهذه العملية — الرابط كما هو." -ForegroundColor Gray
+# الرسالة مشروطة بوجود النفق فعلاً: النشر انتقل إلى تعريض مباشر بسجلّات A،
+# وطمأنةٌ عن نفق غير قائم تُوحي بأن الرابط العام محميّ بطبقة ليست موجودة.
+if (Get-Process -Name 'cloudflared' -ErrorAction SilentlyContinue) {
+    Write-Host "  ونفق cloudflared لا يتأثّر بهذه العملية — الرابط كما هو." -ForegroundColor Gray
+}

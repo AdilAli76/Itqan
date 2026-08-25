@@ -1,0 +1,26 @@
+{
+  "windowDays": 90,
+  "coverageDays": 14,
+  "from": "2026-05-27T00:00:00Z",
+  "to": "2026-08-24T00:00:00Z",
+  "items": [
+    {
+      "productId": "c78cf9c2-0159-408f-b01c-3ad35ca0ef5a",
+      "sku": "MED-003",
+      "productName": "إيبوبروفين 400 مجم",
+      "unitBase": "piece",
+      "supplierId": null,
+      "supplierName": null,
+      "quantity": 5.0,
+      "configuredReorderLevel": 15.0,
+      "avgDailyUsage": 0.444,
+      "leadTimeDays": 7,
+      "suggestedReorderLevel": 9.33,
+      "suggestedOrderQuantity": 4.33,
+      "daysOfCover": 11.3,
+      "costPrice": 1.8,
+      "onOrderQuantity": 24.0,
+      "projectedQuantity": 29.0
+    }
+  ]
+}

@@ -10,17 +10,35 @@ using KineticEnterprise.Api.Models;
 namespace KineticEnterprise.Api.Controllers;
 
 public record PurchaseOrderLineRequest(Guid ProductId, decimal Quantity, decimal UnitCost, decimal? SalePrice);
-public record CreatePurchaseOrderRequest(Guid BranchId, Guid? SupplierId, List<PurchaseOrderLineRequest> Lines);
+public record CreatePurchaseOrderRequest(
+    Guid BranchId, Guid? SupplierId, List<PurchaseOrderLineRequest> Lines,
+    /// أُنشئ من اقتراح إعادة الطلب لا بيد مستخدم — راجع PurchaseOrder.IsAuto.
+    bool IsAuto = false);
 
 public record ReceiveLineRequest(
     Guid ProductId, string? BatchNumber, DateTime? ExpiryDate,
     /// المستلَم فعلياً من هذا السطر. NULL = المتبقّي كاملاً (وهو الغالب).
     decimal? Quantity = null);
-public record ReceivePurchaseOrderRequest(List<ReceiveLineRequest> Lines);
+public record ReceivePurchaseOrderRequest(
+    List<ReceiveLineRequest> Lines,
+    /// رقم إشعار المورّد — راجع PurchaseReceipt.SupplierNoteNumber.
+    string? SupplierNoteNumber = null,
+    /// تاريخ الوصول الفعلي. NULL = الآن. راجع PurchaseReceipt.ReceivedOn.
+    DateTime? ReceivedOn = null,
+    string? Notes = null);
+
+public record PurchaseReceiptItemDto(
+    Guid ProductId, string ProductName, decimal Quantity,
+    string BatchNumber, DateTime? ExpiryDate, decimal UnitCost);
+
+public record PurchaseReceiptDto(
+    Guid Id, Guid PurchaseOrderId, string? SupplierNoteNumber, DateTime ReceivedOn,
+    string? ReceivedByName, string? Notes, DateTime CreatedAt,
+    List<PurchaseReceiptItemDto> Items);
 
 public record PurchaseOrderListItemDto(
     Guid Id, Guid BranchId, string BranchName, Guid? SupplierId, string SupplierName,
-    string Status, decimal TotalAmount, int ItemCount, DateTime CreatedAt);
+    string Status, decimal TotalAmount, int ItemCount, DateTime CreatedAt, bool IsAuto);
 
 public record PurchaseOrderDetailItemDto(
     Guid ProductId, string ProductName, bool TrackExpiry, decimal Quantity, decimal UnitCost,
@@ -59,7 +77,7 @@ public class PurchaseOrdersController : ControllerBase
         return orders.Select(o => new PurchaseOrderListItemDto(
             o.Id, o.BranchId, branchNames.GetValueOrDefault(o.BranchId, "-"),
             o.SupplierId, o.SupplierId.HasValue ? supplierNames.GetValueOrDefault(o.SupplierId.Value, "-") : "-",
-            o.Status, o.TotalAmount, o.Items.Count, o.CreatedAt)).ToList();
+            o.Status, o.TotalAmount, o.Items.Count, o.CreatedAt, o.IsAuto)).ToList();
     }
 
     [HttpGet("{id:guid}")]
@@ -84,6 +102,7 @@ public class PurchaseOrdersController : ControllerBase
             OrganizationId = Guid.Parse(User.FindFirstValue("organization_id")!),
             BranchId = request.BranchId,
             SupplierId = request.SupplierId,
+            IsAuto = request.IsAuto,
             CreatedBy = CurrentUserId(),
         };
         foreach (var line in request.Lines)
@@ -167,6 +186,29 @@ public class PurchaseOrdersController : ControllerBase
 
         await using var transaction = await _db.Database.BeginTransactionAsync();
 
+        // مستند الشحنة يُنشأ مع كل استلام — راجع PurchaseReceipt.
+        //
+        // التاريخ من المستخدم لا من الساعة: الشحنة تصل الخميس ويُدخلها أمين
+        // المخزن الأحد. ويُرفض تاريخ في المستقبل — بضاعة لم تصل بعد لا
+        // تُستلَم، والخطأ المطبعي في السنة يفسد كل قياس لاحق لمهلة التوريد.
+        var receivedOn = request.ReceivedOn ?? DateTime.UtcNow;
+        if (receivedOn.Date > DateTime.UtcNow.Date.AddDays(1))
+        {
+            return BadRequest(new { message = "تاريخ الاستلام في المستقبل" });
+        }
+
+        var receipt = new PurchaseReceipt
+        {
+            OrganizationId = order.OrganizationId,
+            BranchId = order.BranchId,
+            PurchaseOrderId = order.Id,
+            SupplierNoteNumber = string.IsNullOrWhiteSpace(request.SupplierNoteNumber)
+                ? null : request.SupplierNoteNumber.Trim(),
+            ReceivedOn = receivedOn,
+            ReceivedBy = CurrentUserId(),
+            Notes = string.IsNullOrWhiteSpace(request.Notes) ? null : request.Notes.Trim(),
+        };
+
         foreach (var item in order.Items)
         {
             var product = await _db.Products.FirstOrDefaultAsync(p => p.Id == item.ProductId);
@@ -180,27 +222,31 @@ public class PurchaseOrdersController : ControllerBase
             var batchNumber = product?.TrackExpiry == true ? (receiveLine?.BatchNumber ?? "") : "";
             var expiryDate = product?.TrackExpiry == true ? receiveLine?.ExpiryDate : null;
 
-            var stock = await _db.StockLevels.FirstOrDefaultAsync(
-                s => s.BranchId == order.BranchId && s.ProductId == item.ProductId && s.BatchNumber == batchNumber);
-            if (stock is null)
-            {
-                _db.StockLevels.Add(new StockLevel
-                {
-                    OrganizationId = order.OrganizationId,
-                    BranchId = order.BranchId,
-                    ProductId = item.ProductId,
-                    BatchNumber = batchNumber,
-                    Quantity = receiving,
-                    ExpiryDate = expiryDate,
-                });
-            }
-            else
-            {
-                stock.Quantity += receiving;
-                if (expiryDate.HasValue) stock.ExpiryDate = expiryDate;
-            }
+            // سطر الإدخال في الدفتر يشير إلى **مستند الاستلام** لا إلى أمر
+            // الشراء: الأمر قد يصل على ثلاث شحنات، ونسبة البضاعة إليه تجعل
+            // «متى وصلت هذه القطعة» بلا جواب. راجع PurchaseReceipt.
+            await StockLedger.ReceiveAsync(
+                _db, order.OrganizationId, order.BranchId, warehouseId: null,
+                productId: item.ProductId,
+                quantity: receiving,
+                unitCost: item.UnitCost,
+                sourceType: StockSourceTypes.PurchaseReceipt, sourceId: receipt.Id,
+                userId: CurrentUserId(),
+                batchNumber: batchNumber, expiryDate: expiryDate,
+                trackExpiry: product?.TrackExpiry == true,
+                postedAt: receivedOn);
 
             item.ReceivedQuantity += receiving;
+
+            receipt.Items.Add(new PurchaseReceiptItem
+            {
+                PurchaseOrderItemId = item.Id,
+                ProductId = item.ProductId,
+                Quantity = receiving,
+                BatchNumber = batchNumber,
+                ExpiryDate = expiryDate,
+                UnitCost = item.UnitCost,
+            });
 
             if (product is not null)
             {
@@ -212,15 +258,67 @@ public class PurchaseOrdersController : ControllerBase
         // الأمر يُغلَق حين يصل كل شيء فقط. وما دام سطر واحد ناقصاً يبقى
         // «مُرسَلاً» فيظهر في قائمة المنتظَر من الموردين — وهذا هو الغرض:
         // توريد ناقص يجب أن يبقى مرئياً حتى يكتمل أو يُلغى.
+        // استلامٌ لم يصل فيه شيء لا يُنتج مستنداً: أمرٌ ضُغط عليه بالخطأ
+        // وكل سطوره مكتملة كان سيولّد مستنداً فارغاً يُفسد عدّ الشحنات
+        // ويُشوّه أي قياس لمهلة التوريد.
+        if (receipt.Items.Count == 0)
+        {
+            return BadRequest(new { message = "لا كمية مستلَمة في هذا الطلب" });
+        }
+        _db.PurchaseReceipts.Add(receipt);
+
         var fullyReceived = order.Items.All(i => i.RemainingQuantity <= 0);
         if (fullyReceived) order.Status = "received";
         _db.LogAudit(order.OrganizationId, CurrentUserId(),
             fullyReceived ? "purchase_order.received" : "purchase_order.partially_received",
             "purchase_orders", order.Id,
-            newValues: new { Lines = order.Items.Select(i => new { i.ProductId, i.Quantity, i.ReceivedQuantity }) });
+            newValues: new
+            {
+                ReceiptId = receipt.Id,
+                receipt.SupplierNoteNumber,
+                receipt.ReceivedOn,
+                Lines = order.Items.Select(i => new { i.ProductId, i.Quantity, i.ReceivedQuantity }),
+            });
         await _db.SaveChangesAsync();
         await transaction.CommitAsync();
         return NoContent();
+    }
+
+    /// <summary>
+    /// شحنات هذا الأمر — الأقدم أولاً، كما وصلت.
+    ///
+    /// <para>هو الجواب عن «متى وصلت البضاعة وبأي إشعار»، وهو ما كان
+    /// <c>ReceivedQuantity</c> التراكمي يبتلعه. ومنه تُقاس مهلة التوريد
+    /// الحقيقية: الفرق بين تاريخ الأمر وأول شحنة.</para>
+    /// </summary>
+    [HttpGet("{id:guid}/receipts")]
+    public async Task<ActionResult<List<PurchaseReceiptDto>>> Receipts(Guid id)
+    {
+        var receipts = await _db.PurchaseReceipts
+            .Include(r => r.Items)
+            .Where(r => r.PurchaseOrderId == id)
+            .OrderBy(r => r.ReceivedOn)
+            .ToListAsync();
+
+        if (receipts.Count == 0) return new List<PurchaseReceiptDto>();
+
+        var productIds = receipts.SelectMany(r => r.Items).Select(i => i.ProductId).Distinct().ToList();
+        var productNames = await _db.Products
+            .Where(p => productIds.Contains(p.Id))
+            .ToDictionaryAsync(p => p.Id, p => p.Name);
+
+        var userIds = receipts.Where(r => r.ReceivedBy.HasValue).Select(r => r.ReceivedBy!.Value).Distinct().ToList();
+        var userNames = userIds.Count == 0
+            ? new Dictionary<Guid, string>()
+            : await _db.AppUsers.Where(u => userIds.Contains(u.Id)).ToDictionaryAsync(u => u.Id, u => u.FullName);
+
+        return receipts.Select(r => new PurchaseReceiptDto(
+            r.Id, r.PurchaseOrderId, r.SupplierNoteNumber, r.ReceivedOn,
+            r.ReceivedBy is null ? null : userNames.GetValueOrDefault(r.ReceivedBy.Value),
+            r.Notes, r.CreatedAt,
+            r.Items.Select(i => new PurchaseReceiptItemDto(
+                i.ProductId, productNames.GetValueOrDefault(i.ProductId, "-"),
+                i.Quantity, i.BatchNumber, i.ExpiryDate, i.UnitCost)).ToList())).ToList();
     }
 
     // إلغاء مسموح فقط قبل الاستلام (بلا أثر مخزوني بعد) — نفس قيد

@@ -17,7 +17,8 @@
       "sponsorId": null,
       "sponsorName": null,
       "entitlementCeiling": 0.0,
-      "entitlementExpiresOn": null
+      "entitlementExpiresOn": null,
+      "creditDays": 30
     }
   ],
   "totalCount": 1,

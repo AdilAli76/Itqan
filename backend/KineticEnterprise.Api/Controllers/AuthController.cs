@@ -10,7 +10,13 @@ using KineticEnterprise.Api.Models;
 namespace KineticEnterprise.Api.Controllers;
 
 public record LoginRequest(string EmailOrUsername, string Password);
-public record LoginResponse(string Token, string Role, Guid OrganizationId, Guid? BranchId, string FullName);
+public record LoginResponse(
+    string Token, string Role, Guid OrganizationId, Guid? BranchId, string FullName,
+    /// لوح خلفية فرع المستخدم — راجع Branch.ThemePalette.
+    ///
+    /// يُرسَل مع الدخول لا بطلب ثانٍ: الشاشة الأولى يجب أن تظهر بلوحها
+    /// الصحيح، لا أن تومض بالمحايد ثم تتبدّل أمام المستخدم.
+    string BranchPalette);
 
 [ApiController]
 [Route("api/auth")]
@@ -95,12 +101,22 @@ public class AuthController : ControllerBase
             signingCredentials: creds
         );
 
+        // لوح الفرع يُقرأ بلا سياق عزل: المستخدم لم يُصادَق بعد في هذه
+        // اللحظة، وقراءة صفّ فرعه هو بمعرّفه المعلوم لا تُسرّب شيئاً.
+        var branchPalette = user.BranchId.HasValue
+            ? await _db.Branches
+                .Where(b => b.Id == user.BranchId.Value)
+                .Select(b => b.ThemePalette)
+                .FirstOrDefaultAsync() ?? "default"
+            : "default";
+
         return new LoginResponse(
             new JwtSecurityTokenHandler().WriteToken(token),
             user.Role,
             user.OrganizationId,
             user.BranchId,
-            user.FullName
+            user.FullName,
+            branchPalette
         );
     }
 }

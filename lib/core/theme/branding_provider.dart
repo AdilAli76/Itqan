@@ -19,7 +19,7 @@ class OrganizationBranding {
   // 'sidebar' أو 'navbar' — تفضيل عرض بحت يختاره كل عميل، راجع AdaptiveScaffold.
   final String navLayout;
 
-  /// شكل النظام: standard | wallet | trial | enterprise.
+  /// شكل النظام: standard | wallet | pharmacy | trial | enterprise.
   ///
   /// يُقرَّر عند إنشاء المنظمة ولا يُغيَّر من الواجهة — تغييره بعد التشغيل
   /// يعني إخفاء وحدات فيها بيانات قائمة.
@@ -28,6 +28,14 @@ class OrganizationBranding {
   /// إصدار المحفظة: بطاقات وأرصدة بلا بضاعة. نقطة البيع تُدخِل مبلغاً،
   /// ولا كتالوج ولا مخزون ولا مشتريات.
   bool get isWallet => edition == 'wallet';
+
+  /// إصدار الصيدليات: نشرة الدواء مربوطة بالأصناف وتُعرض لحظة الصرف.
+  ///
+  /// مقصور على من اشتراه: النظام يُباع لبقالة ومحل قطع غيار أيضاً، وحقول
+  /// «موانع الاستعمال» و«الجرعة» في شاشة أصنافهم ضوضاء تُربك ولا تُفيد.
+  /// والإخفاء هنا للواجهة فقط — الحارس الفعلي على الخادم
+  /// (RequireModule("pharmacy")).
+  bool get isPharmacy => edition == 'pharmacy';
 
   static const fallback = OrganizationBranding(
     displayName: 'Kinetic Enterprise',

@@ -378,6 +378,7 @@ class _PurchaseOrderDetailDialogState extends ConsumerState<_PurchaseOrderDetail
                 ),
               ],
             ),
+          _ReceiptsSection(orderId: widget.orderId, orderedAt: createdAt),
         ],
       ),
     );
@@ -392,12 +393,13 @@ class _PurchaseOrderDetailDialogState extends ConsumerState<_PurchaseOrderDetail
     final pending = items.where((i) => ((i['remainingQuantity'] as num?) ?? 0) > 0).toList();
     final target = pending.isEmpty ? items : pending;
 
-    final lines = await showDialog<List<Map<String, dynamic>>>(
+    final payload = await showDialog<Map<String, dynamic>>(
       context: context,
       builder: (_) => _ReceiveExpiryDialog(items: target),
     );
-    if (lines == null) return; // ألغى المستخدم
+    if (payload == null) return; // ألغى المستخدم
 
+    final lines = List<Map<String, dynamic>>.from(payload['lines'] as List);
     final full = lines.every((l) =>
         (l['quantity'] as num?) ==
         (target.firstWhere((i) => i['productId'] == l['productId'])['remainingQuantity'] as num?));
@@ -406,7 +408,7 @@ class _PurchaseOrderDetailDialogState extends ConsumerState<_PurchaseOrderDetail
         successMessage: full
             ? 'تم استلام البضاعة وتحديث المخزون'
             : 'تم استلام جزئي — الأمر يبقى مفتوحاً حتى يكتمل',
-        body: {'lines': lines});
+        body: payload);
   }
 
   Future<void> _act(String action, {required String successMessage, Object? body}) async {
@@ -452,6 +454,12 @@ class _ReceiveExpiryDialogState extends State<_ReceiveExpiryDialog> {
   };
   final Map<String, DateTime> _expiryDates = {};
 
+  // ترويسة مستند الاستلام — راجع PurchaseReceipt في Entities.cs.
+  final _noteController = TextEditingController();
+  // اليوم افتراضاً، وقابل للتغيير: الشحنة قد تكون وصلت قبل يومين وتُسجَّل
+  // اليوم، وقياس مهلة التوريد يعتمد على التاريخ الحقيقي لا على تاريخ الإدخال.
+  DateTime _receivedOn = DateTime.now();
+
   @override
   void dispose() {
     for (final c in _batchControllers.values) {
@@ -460,6 +468,7 @@ class _ReceiveExpiryDialogState extends State<_ReceiveExpiryDialog> {
     for (final c in _qtyControllers.values) {
       c.dispose();
     }
+    _noteController.dispose();
     super.dispose();
   }
 
@@ -473,7 +482,41 @@ class _ReceiveExpiryDialogState extends State<_ReceiveExpiryDialog> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: widget.items.map((item) {
+            children: [
+              // الترويسة قبل الأصناف: هي ما يجعل الاستلام **مستنداً** لا
+              // مجرّد زيادة رقم — رقم الإشعار هو المرجع الوحيد عند الخلاف
+              // مع المورّد، والتاريخ هو ما تُقاس به مهلة التوريد.
+              TextField(
+                controller: _noteController,
+                decoration: const InputDecoration(
+                  labelText: 'رقم إشعار المورّد (اختياري)',
+                  helperText: 'كما هو مكتوب على ورقة التسليم',
+                  isDense: true,
+                ),
+              ),
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  Expanded(
+                    child: Text('تاريخ الوصول: ${DateFormat('yyyy-MM-dd').format(_receivedOn)}',
+                        style: AppTextStyles.bodyMd()),
+                  ),
+                  TextButton(
+                    onPressed: () async {
+                      final picked = await showDatePicker(
+                        context: context,
+                        initialDate: _receivedOn,
+                        firstDate: DateTime.now().subtract(const Duration(days: 365)),
+                        lastDate: DateTime.now(),
+                      );
+                      if (picked != null) setState(() => _receivedOn = picked);
+                    },
+                    child: const Text('تغيير'),
+                  ),
+                ],
+              ),
+              const Divider(height: 24),
+              ...widget.items.map((item) {
               final productId = item['productId'] as String;
               final expiry = _expiryDates[productId];
               final remaining = ((item['remainingQuantity'] as num?) ?? (item['quantity'] as num?) ?? 0);
@@ -526,7 +569,8 @@ class _ReceiveExpiryDialogState extends State<_ReceiveExpiryDialog> {
                   ],
                 ),
               );
-            }).toList(),
+              }),
+            ],
           ),
         ),
       ),
@@ -545,7 +589,12 @@ class _ReceiveExpiryDialogState extends State<_ReceiveExpiryDialog> {
                 'expiryDate': _expiryDates[productId]?.toIso8601String(),
               };
             }).toList();
-            Navigator.pop(context, lines);
+            Navigator.pop(context, {
+              'lines': lines,
+              'supplierNoteNumber':
+                  _noteController.text.trim().isEmpty ? null : _noteController.text.trim(),
+              'receivedOn': _receivedOn.toIso8601String(),
+            });
           },
           child: const Text('متابعة الاستلام'),
         ),
@@ -1159,6 +1208,98 @@ class _PurchaseAttachmentsState extends State<_PurchaseAttachments> {
         if (_error != null)
           Text(_error!, style: AppTextStyles.bodyMd(color: AppColors.danger)),
       ],
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// سجلّ الشحنات — ما وصل فعلاً، ومتى، وبأي إشعار
+// ---------------------------------------------------------------------------
+
+/// يظهر فقط حين توجد شحنة: أمرٌ لم يصل منه شيء لا يحتاج قسماً فارغاً يشغل
+/// نصف الشاشة ويوحي بعطب.
+class _ReceiptsSection extends ConsumerWidget {
+  const _ReceiptsSection({required this.orderId, required this.orderedAt});
+  final String orderId;
+  final DateTime? orderedAt;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final receiptsAsync = ref.watch(purchaseOrderReceiptsProvider(orderId));
+
+    return receiptsAsync.when(
+      loading: () => const SizedBox.shrink(),
+      error: (_, __) => const SizedBox.shrink(),
+      data: (receipts) {
+        if (receipts.isEmpty) return const SizedBox.shrink();
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Divider(height: 28),
+            Text('الشحنات الواصلة (${receipts.length})', style: AppTextStyles.labelMd()),
+            const SizedBox(height: 8),
+            for (final r in receipts) _tile(context, r),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _tile(BuildContext context, Map<String, dynamic> r) {
+    final receivedOn = DateTime.tryParse(r['receivedOn'] as String? ?? '');
+    final items = List<Map<String, dynamic>>.from(r['items'] as List? ?? []);
+    final note = r['supplierNoteNumber'] as String?;
+
+    // مهلة التوريد المقيسة: من تاريخ الأمر إلى وصول هذه الشحنة. هي الرقم
+    // الذي كان LeadTimeDays يُدخَل بالظنّ بدلاً منه.
+    final leadDays = (orderedAt != null && receivedOn != null)
+        ? receivedOn.difference(orderedAt!).inDays
+        : null;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        border: Border.all(color: AppColors.border),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  receivedOn != null ? DateFormat('yyyy-MM-dd').format(receivedOn) : '-',
+                  style: AppTextStyles.labelMd(),
+                ),
+              ),
+              if (leadDays != null && leadDays >= 0)
+                Text('خلال $leadDays ${leadDays == 1 ? "يوم" : "يوماً"}',
+                    style: AppTextStyles.labelMd(color: AppColors.textMuted)),
+            ],
+          ),
+          if (note != null && note.isNotEmpty) ...[
+            const SizedBox(height: 2),
+            Text('إشعار المورّد: $note',
+                style: AppTextStyles.bodyMd(color: AppColors.textSecondary)),
+          ],
+          const SizedBox(height: 4),
+          for (final i in items)
+            Text(
+              '  • ${i['productName']} × ${i['quantity']}'
+              '${(i['batchNumber'] as String? ?? '').isNotEmpty ? '  (دفعة ${i['batchNumber']})' : ''}',
+              style: AppTextStyles.bodyMd(color: AppColors.textSecondary),
+            ),
+          if (r['receivedByName'] != null) ...[
+            const SizedBox(height: 4),
+            Text('استلمها ${r['receivedByName']}',
+                style: AppTextStyles.labelMd(color: AppColors.textMuted)),
+          ],
+        ],
+      ),
     );
   }
 }

@@ -31,6 +31,16 @@ const _notifications = NavItem(Icons.notifications_outlined, 'الإشعارات
 const kPlatformNavItem = NavItem(Icons.add_business_outlined, 'إنشاء منظمة جديدة', '/platform/organizations/new');
 const kPlatformManageItem = NavItem(Icons.apartment_outlined, 'الشركات المشترَكة', '/platform/organizations');
 
+// نشرات الأدوية جدول على مستوى المنصّة يديره مالكها ويقرأه كل عملاء إصدار
+// الصيدليات — فمكانه مع عناصر مالك المنصّة لا في قائمة أي عميل.
+const kMedicineReferenceItem =
+    NavItem(Icons.medical_information_outlined, 'نشرات الأدوية', '/medicine-reference');
+
+// دفتر الوصفات بيانات الصيدلية نفسها (بخلاف النشرات المشتركة على مستوى
+// المنصّة)، فيظهر لعملاء إصدار الصيدليات لا لمالك المنصّة وحده.
+const kPrescriptionsItem =
+    NavItem(Icons.assignment_outlined, 'دفتر الوصفات', '/prescriptions');
+
 const _salesGroup = NavGroup(
   icon: Icons.point_of_sale_outlined,
   label: 'المبيعات',
@@ -48,6 +58,9 @@ const _inventoryGroup = NavGroup(
   items: [
     NavItem(Icons.inventory_2_outlined, 'المخزون والموردين', '/inventory'),
     NavItem(Icons.shopping_cart_outlined, 'المشتريات', '/purchasing'),
+    // بجوار المشتريات لا في التقارير: مخرَجه قرار شراء يُنفَّذ فوراً، لا رقم
+    // يُقرأ ويُنسى. المكان يحدّد هل تُقرأ الشاشة أم لا.
+    NavItem(Icons.shopping_cart_checkout_outlined, 'إعادة الطلب', '/reorder'),
     NavItem(Icons.sync_alt_outlined, 'تحويل المخزون بين الفروع', '/stock-transfer'),
     NavItem(Icons.fact_check_outlined, 'الجرد الدوري', '/stock-count'),
     NavItem(Icons.qr_code_outlined, 'تخصيص ملصق الباركود', '/barcode-designer'),
@@ -93,6 +106,14 @@ List<NavGroup> navGroupsFor({required bool isPlatformAdmin, String edition = 'st
       // ثلاثة مواضع تعرض هذه القائمة (الشريط الجانبي والعلوي ولوحة
       // الأوامر)، وإخفاء يُنفَّذ في اثنين يترك الشاشة قابلة للفتح من الثالث.
       if (edition != 'wallet') _inventoryGroup,
+      // مجموعة تظهر لإصدار الصيدليات وحده — النظام يُباع لبقالة ومحل قطع
+      // غيار، ودفتر الوصفات في قائمتهم بند لا معنى له.
+      if (edition == 'pharmacy')
+        const NavGroup(
+          icon: Icons.local_pharmacy_outlined,
+          label: 'الصيدلية',
+          items: [kPrescriptionsItem],
+        ),
       _reportsGroup,
       NavGroup(icon: _notifications.icon, label: _notifications.label, items: const [_notifications]),
       _adminGroup,
@@ -101,6 +122,7 @@ List<NavGroup> navGroupsFor({required bool isPlatformAdmin, String edition = 'st
         label: _systemGroup.label,
         items: [
           ..._systemGroup.items,
+          if (isPlatformAdmin) kMedicineReferenceItem,
           if (isPlatformAdmin) kPlatformManageItem,
           if (isPlatformAdmin) kPlatformNavItem,
         ],

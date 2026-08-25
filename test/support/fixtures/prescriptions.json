@@ -1,0 +1,21 @@
+{
+  "items": [
+    {
+      "id": "55197241-687a-4dcb-ace4-705a70b7700e",
+      "prescriptionNumber": "RX-2026-0417",
+      "doctorName": "د. خالد المبروك",
+      "doctorLicense": "LY-4471",
+      "patientName": "ليلى عمر",
+      "patientPhone": "0917778899",
+      "issuedOn": "2026-08-22",
+      "notes": "كورس 7 أيام",
+      "invoiceId": "d58e83eb-cee1-4994-aa75-a6a165456a25",
+      "invoiceNumber": "INV-20260824105236686",
+      "dispensedBy": "مدير الصيدلية",
+      "createdAt": "2026-08-24T10:52:36.6927162"
+    }
+  ],
+  "totalCount": 1,
+  "page": 1,
+  "pageSize": 50
+}

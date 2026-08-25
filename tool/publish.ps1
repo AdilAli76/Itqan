@@ -6,9 +6,10 @@
     يُنتج مجلداً واحداً (وملف ZIP) يحوي كل ما يحتاجه السيرفر:
 
         publish/
-          backend/     ← الخادم مبنياً للإنتاج (win-x64)
-          web/         ← تطبيق الويب مبنياً
+          backend/     ← الخادم مبنياً للإنتاج (win-x64)، وتطبيق الويب
+                         داخل backend\wwwroot (موقع IIS واحد يخدمهما معاً)
           sql/         ← المخطط والترحيلات والفهارس
+          tool/        ← سكربتات التشغيل على السيرفر
           appsettings.Production.template.json
           README-النشر.txt
 
@@ -20,7 +21,7 @@
 .PARAMETER ApiUrl
     اختياري. الويب يشتقّ عنوان الـAPI من أصل الصفحة وقت التشغيل، فالحزمة
     الواحدة تعمل على أي نطاق بلا إعادة بناء. مرّره فقط إن كان الـAPI على
-    أصل مختلف عن الصفحة. مثال: https://erp.example.ly/api
+    أصل مختلف عن الصفحة. مثال: https://erp.droob-albayan.ly/api
 
 .PARAMETER Output
     مجلد الإخراج. الافتراضي publish/ في جذر المشروع.
@@ -29,8 +30,8 @@
     تخطّي بناء الويب (للنشر على خادم API فقط).
 
 .EXAMPLE
-    .	ool\publish.ps1
-    .	ool\publish.ps1 -ApiUrl https://erp.example.ly/api
+    .\tool\publish.ps1
+    .\tool\publish.ps1 -ApiUrl https://erp.droob-albayan.ly/api
 #>
 [CmdletBinding()]
 param(
@@ -134,6 +135,19 @@ if (-not $SkipWeb) {
     if (Test-Path $wwwroot) { Remove-Item $wwwroot -Recurse -Force }
     Copy-Item -Path (Join-Path $root 'build\web') -Destination $wwwroot -Recurse
     Ok 'الويب جاهز داخل backend\wwwroot'
+
+    # ── ضغط الأصول مرّة واحدة بأقصى جودة ────────────────────────────────
+    #
+    # يُنفَّذ بالحزمة نفسها لا بـPowerShell: BrotliStream غير موجود في
+    # Windows PowerShell 5.1 (يحتاج .NET Core)، وهو المثبَّت افتراضياً على
+    # ويندوز. راجع WebAssetCompressor لسبب الضغط وقت البناء لا وقت الطلب.
+    $apiDll = Join-Path $backendOut 'KineticEnterprise.Api.dll'
+    if (Test-Path $apiDll) {
+        & dotnet $apiDll compress-web $wwwroot
+        if ($LASTEXITCODE -ne 0) { throw 'ضغط أصول الويب فشل' }
+    } else {
+        Warn 'لم يُعثر على الحزمة لتشغيل ضغط الأصول — تُنشر بلا ضغط مسبق'
+    }
 }
 
 # ── 5. ملفات SQL ────────────────────────────────────────────────────────
@@ -143,6 +157,33 @@ New-Item -ItemType Directory -Path $sqlOut | Out-Null
 foreach ($f in @('docs\DATABASE_SCHEMA_SQLSERVER.sql', 'docs\MIGRATIONS.sql', 'docs\INDEXES.sql')) {
     $p = Join-Path $root $f
     if (Test-Path $p) { Copy-Item $p $sqlOut; Ok (Split-Path $f -Leaf) }
+}
+
+# لقطة المخطّط المتوقَّع — ما يجعل schema_check يعمل على السيرفر.
+#
+# الفاحص يقرأ Entities.cs وAppDbContext.cs، وهما غير موجودين على السيرفر
+# (هناك DLL مبنيّة فقط). واللقطة تُبنى هنا من المصدر نفسه فتسافر مع الحزمة،
+# فيبقى الفحص ممكناً في المكان الذي يهمّ فيه أكثر: بعد الترقية على الإنتاج.
+& (Join-Path $root 'tool\schema_check.ps1') -Emit (Join-Path $sqlOut 'expected_schema.json')
+Ok 'expected_schema.json'
+
+# ── 5.5 سكربتات السيرفر ─────────────────────────────────────────────────
+#
+#  كانت الحزمة تصل بلا أي سكربت، فتصبح تعليمات README تركيباً يدوياً كاملاً
+#  في IIS — وهي بالضبط الخطوات التي كتبنا server_setup.ps1 لأتمتتها. ومن
+#  يفتح الحزمة على السيرفر لا يملك المستودع أصلاً، فأمرٌ مثل
+#  `tool\server_setup.ps1` كان يفشل عنده بـ«الملف غير موجود».
+#
+#  ولا تدخل الحزمة أدوات التطوير (publish، run_local، capture_fixtures،
+#  generate_app_icons): لا معنى لها على سيرفر بلا مستودع ولا Flutter، ووجودها
+#  يوحي بأنها جزء من التشغيل.
+Step 5.5 'سكربتات السيرفر'
+$toolOut = Join-Path $Output 'tool'
+New-Item -ItemType Directory -Path $toolOut | Out-Null
+foreach ($f in @('server_setup.ps1', 'setup_staging.ps1', 'backup.ps1',
+                 'deploy_update.ps1', 'schema_check.ps1', 'api_test.ps1')) {
+    $p = Join-Path $root "tool\$f"
+    if (Test-Path $p) { Copy-Item $p $toolOut; Ok $f }
 }
 
 # ── 6. قالب الإعدادات ───────────────────────────────────────────────────
@@ -160,7 +201,7 @@ Step 6 'قالب الإعدادات'
     "Issuer": "KineticEnterprise.Api",
     "Audience": "KineticEnterprise.Client"
   },
-  "AllowedOrigins": "https://erp.example.ly"
+  "AllowedOrigins": "https://erp.droob-albayan.ly"
 }
 '@ | Out-File -LiteralPath (Join-Path $Output 'appsettings.Production.template.json') -Encoding utf8
 Ok 'appsettings.Production.template.json'
@@ -191,14 +232,28 @@ Step 7 'تعليمات مرافقة'
          [Convert]::ToBase64String((1..48|%{Get-Random -Max 256}))
      - AllowedOrigins             نطاقك الحقيقي لا localhost
 
-3) الخادم
-   انسخ backend\ إلى C:\inetpub\kinetic-api ثم أنشئ موقعاً في IIS يشير إليه
-   بـ Application Pool من نوع "No Managed Code".
-   تأكّد من تثبيت ASP.NET Core 8 Hosting Bundle أولاً.
+3) الخادم والويب معاً — موقع IIS واحد
+   تطبيق الويب مبنيٌّ داخل backend\wwwroot، فالخادم يخدمه من جذره ولا حاجة
+   إلى موقع ثانٍ ولا إلى CORS أصلاً.
 
-4) الويب
-   انسخ web\ إلى موقع IIS آخر (أو مجلد فرعي) على النطاق نفسه.
-   إن اختلف النطاق فأضفه إلى AllowedOrigins وإلا حجبه CORS.
+   من نافذة PowerShell **كمسؤول**، ومن مجلد الحزمة نفسه:
+     .\tool\server_setup.ps1 -Stage iis -Domain erp.droob-albayan.ly
+
+   ثم بعد ربط شهادة HTTPS:
+     .\tool\server_setup.ps1 -Stage verify -Domain erp.droob-albayan.ly
+
+   مرحلة verify هي ما يفعّل UseHttpsRedirection — لا تُفعّله يدوياً قبل
+   الشهادة، فكل طلب يُحوَّل إلى https على خادم بلا شهادة يفشل تماماً.
+
+   يدوياً إن لزم: انسخ backend\ إلى C:\inetpub\kinetic-api وأنشئ موقعاً
+   بـ Application Pool من نوع "No Managed Code". وثبّت
+   ASP.NET Core 8 Hosting Bundle أولاً في الحالتين.
+
+4) بيئة التجربة (اختياري)
+     .\tool\setup_staging.ps1
+   النطاق الافتراضي staging-erp.droob-albayan.ly، وقاعدة وموقع ومجمّع
+   مستقلّة تماماً عن الإنتاج. تأخذ بياناتها من آخر نسخة احتياطية —
+   خذ واحدة بـ tool\backup.ps1 أولاً وإلا أُنشئت قاعدة فارغة.
 
 5) أول حساب
    من مجلد الخادم على السيرفر:
@@ -208,6 +263,12 @@ Step 7 'تعليمات مرافقة'
 6) قبل التسليم
    راجع "ملخص فحص ما قبل الإطلاق" في DEPLOYMENT.md — وخاصةً:
    HTTPS بشهادة حقيقية، ونسخ احتياطي مجدوَل ومختبَر الاسترجاع.
+
+   وفحصان جاهزان في tool\:
+     .\tool\schema_check.ps1 -SqlInstance .\SQLEXPRESS -Database KineticEnterprise
+        يكشف عموداً في الكود بلا نظير في القاعدة، وجدولاً بلا عزل صفوف.
+     .\tool\api_test.ps1 -BaseUrl https://erp.droob-albayan.ly/api
+        يختبر قواعد العمل على الخادم نفسه. يكتب بيانات باسم TEST- .
 "@ | Out-File -LiteralPath (Join-Path $Output 'README-النشر.txt') -Encoding utf8
 Ok 'README-النشر.txt'
 

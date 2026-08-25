@@ -274,6 +274,9 @@ class _CustomerFormDialogState extends State<_CustomerFormDialog> {
   late final _cardController = TextEditingController(text: widget.customer?['cardBarcode'] as String?);
   late final _creditLimitController =
       TextEditingController(text: (widget.customer?['creditLimit'] as num?)?.toString() ?? '0');
+  // مهلة السداد — منها يُشتقّ تاريخ استحقاق كل بيع آجل لهذا العميل.
+  late final _creditDaysController =
+      TextEditingController(text: '${(widget.customer?['creditDays'] as num?)?.toInt() ?? 0}');
   late final _ceilingController =
       TextEditingController(text: (widget.customer?['entitlementCeiling'] as num?)?.toString() ?? '0');
   late bool _isBranchOnly = widget.customer?['branchId'] != null;
@@ -297,6 +300,7 @@ class _CustomerFormDialogState extends State<_CustomerFormDialog> {
     _notesController.dispose();
     _cardController.dispose();
     _creditLimitController.dispose();
+    _creditDaysController.dispose();
     _ceilingController.dispose();
     super.dispose();
   }
@@ -355,6 +359,24 @@ class _CustomerFormDialogState extends State<_CustomerFormDialog> {
                   validator: (v) {
                     if (v == null || v.trim().isEmpty) return 'حقل إلزامي';
                     return double.tryParse(v) == null ? 'قيمة غير صحيحة' : null;
+                  },
+                ),
+                const SizedBox(height: 12),
+                // بجوار السقف لا في شاشة إعدادات: السقف يقول «كم»، والمهلة
+                // تقول «إلى متى» — وهما وجها قرار ائتماني واحد يُتخذ للعميل
+                // مرّة. وصفر يعني مستحقّاً يوم البيع، وهو الافتراض الآمن.
+                TextFormField(
+                  controller: _creditDaysController,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(
+                    labelText: 'مهلة السداد (أيام)',
+                    helperText: 'صفر = مستحقّ يوم البيع. منها يُحسب تاريخ الاستحقاق وأعمار الديون.',
+                  ),
+                  validator: (v) {
+                    if (v == null || v.trim().isEmpty) return 'حقل إلزامي';
+                    final parsed = int.tryParse(v.trim());
+                    if (parsed == null) return 'قيمة غير صحيحة';
+                    return parsed < 0 ? 'لا تقبل السالب' : null;
                   },
                 ),
                 const Divider(height: 28),
@@ -491,6 +513,7 @@ class _CustomerFormDialogState extends State<_CustomerFormDialog> {
       'notes': _notesController.text.trim().isEmpty ? null : _notesController.text.trim(),
       'cardBarcode': _cardController.text.trim().isEmpty ? null : _cardController.text.trim(),
       'creditLimit': double.parse(_creditLimitController.text),
+      'creditDays': int.parse(_creditDaysController.text.trim()),
       // فرع المستخدم الحالي وحده متاح بلا شاشة اختيار فروع بعد — راجع
       // نفس القيد في تعديل الكمية بشاشة المخزون.
       'branchId': _isBranchOnly ? await readCurrentBranchId() : null,

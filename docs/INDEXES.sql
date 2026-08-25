@@ -1,4 +1,4 @@
--- ============================================================================
+﻿-- ============================================================================
 --  Kinetic Enterprise — فهارس الأداء
 --
 --  آمن للتنفيذ على قاعدة بيانات تعمل بالفعل: كل فهرس محمي بـ IF NOT EXISTS،
@@ -21,8 +21,10 @@
 --  التنفيذ:  sqlcmd -S .\SQLEXPRESS -d KineticEnterprise -i docs\INDEXES.sql
 -- ============================================================================
 
-USE KineticEnterprise;
-GO
+-- لا USE هنا عمداً: هذا الملف يُنفَّذ بـ -d (راجع سطر التنفيذ أعلاه)، وسطر
+-- USE ثابت كان يتجاوز الاسم المُمرَّر فيكتب الكائنات في KineticEnterprise
+-- مهما كانت القاعدة المقصودة — وهو ما كان يُعطّل tool/run_local.ps1 -Database
+-- ويجعله يلوّث قاعدة التطوير بدل قاعدة التجربة.
 
 -- إلزامي: كثير من الفهارس أدناه **مفلترة** (WHERE ...)، و SQL Server يرفض
 -- إنشاءها إن كان QUOTED_IDENTIFIER مطفأً — برسالة تتحدث عن "indexed views"
@@ -180,6 +182,92 @@ GO
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_stock_levels_org_product' AND object_id = OBJECT_ID('dbo.stock_levels'))
 CREATE INDEX IX_stock_levels_org_product ON dbo.stock_levels (organization_id, product_id)
   INCLUDE (branch_id);
+GO
+
+-- ترتيب الصرف — InvoicesController.cs: قراءة كل دفعات الصنف في الفرع عند كل
+-- بيع، ثم ترتيبها بـ strategy_date (وهو تاريخ الانتهاء للصنف المتتبَّع
+-- وتاريخ الإدخال لغيره — راجع StockLevel.StrategyDate). تضمين quantity
+-- وbatch_number وis_locked يجعل الفهرس مغطّياً فلا يعود الاستعلام إلى الجدول.
+--
+-- الفهرس القديم على expiry_date يُسقَط: العمود لم يعد أساس الترتيب، وإبقاء
+-- فهرس لا يخدم استعلاماً هو كلفة كتابة بلا مقابل قراءة.
+IF EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_stock_levels_fefo' AND object_id = OBJECT_ID('dbo.stock_levels'))
+DROP INDEX IX_stock_levels_fefo ON dbo.stock_levels;
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_stock_levels_issue_order' AND object_id = OBJECT_ID('dbo.stock_levels'))
+CREATE INDEX IX_stock_levels_issue_order ON dbo.stock_levels (branch_id, product_id, strategy_date)
+  INCLUDE (quantity, batch_number, expiry_date, is_locked);
+GO
+
+-- أعمار الديون (DebtAging.ComputeAsync): كل فاتورة بيع بدفع جزئي. الفهرس
+-- مفلتر فيبقى صغيراً مهما كبر جدول الفواتير — البيع النقدي هو الغالب.
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_invoices_credit_due' AND object_id = OBJECT_ID('dbo.invoices'))
+CREATE INDEX IX_invoices_credit_due ON dbo.invoices (customer_id, due_date)
+  INCLUDE (total_amount, paid_amount, created_at)
+  WHERE paid_amount IS NOT NULL AND customer_id IS NOT NULL;
+GO
+
+-- آخر تذكير لكل عميل — يُقرأ مع كل فتح لتقرير الأعمار.
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_debt_reminders_customer' AND object_id = OBJECT_ID('dbo.debt_reminders'))
+CREATE INDEX IX_debt_reminders_customer ON dbo.debt_reminders (customer_id, sent_at DESC)
+  INCLUDE (stage, amount_at_reminder);
+GO
+
+-- دفتر حركة المخزون — أثقل قراءتين فيه:
+--
+-- ١. اختيار الإدخالات التي يُصرَف منها (StockLedger.IssueAsync) عند **كل
+--    بيع**: فرع + صنف + مستودع + ما بقي فيه شيء، مرتّبةً بالصلاحية.
+--    الفهرس مفلتر على remaining_quantity > 0 فيبقى صغيراً مهما كبر الدفتر:
+--    سطور الصرف وسطور الإدخال المستنفدة خارجه تماماً.
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_stock_ledger_open_lots' AND object_id = OBJECT_ID('dbo.stock_ledger_entries'))
+CREATE INDEX IX_stock_ledger_open_lots
+  ON dbo.stock_ledger_entries (branch_id, product_id, warehouse_id, expiry_date, posted_at)
+  INCLUDE (batch_number, remaining_quantity, unit_cost)
+  WHERE remaining_quantity > 0 AND is_cancelled = 0;
+GO
+
+-- ٢. كارت الصنف: كل حركات صنف في فرع بترتيب زمني.
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_stock_ledger_product_posted' AND object_id = OBJECT_ID('dbo.stock_ledger_entries'))
+CREATE INDEX IX_stock_ledger_product_posted
+  ON dbo.stock_ledger_entries (organization_id, product_id, posted_at DESC)
+  INCLUDE (branch_id, batch_number, quantity_change, balance_after, unit_cost, source_type);
+GO
+
+-- التتبّع العكسي: «هذه الدفعة معيبة — من اشتراها؟» يقرأ سطور الصرف بمعرّف
+-- إدخالها. بلا فهرس يصبح مسحاً كاملاً للدفتر — وهو أكبر جدول في النظام.
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_stock_ledger_source_entry' AND object_id = OBJECT_ID('dbo.stock_ledger_entries'))
+CREATE INDEX IX_stock_ledger_source_entry ON dbo.stock_ledger_entries (source_entry_id)
+  WHERE source_entry_id IS NOT NULL;
+GO
+
+-- المستند إلى حركاته: «ماذا حرّكت هذه الفاتورة».
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_stock_ledger_source' AND object_id = OBJECT_ID('dbo.stock_ledger_entries'))
+CREATE INDEX IX_stock_ledger_source ON dbo.stock_ledger_entries (source_type, source_id);
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_warehouses_branch' AND object_id = OBJECT_ID('dbo.warehouses'))
+CREATE INDEX IX_warehouses_branch ON dbo.warehouses (branch_id, kind) INCLUDE (name, is_active);
+GO
+
+-- مستند الاستلام: القراءة الغالبة «شحنات هذا الأمر مرتّبةً بتاريخ الوصول»
+-- (PurchaseOrdersController.Receipts)، والسطور تُجلب بمعرّف مستندها.
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_purchase_receipts_order' AND object_id = OBJECT_ID('dbo.purchase_receipts'))
+CREATE INDEX IX_purchase_receipts_order ON dbo.purchase_receipts (purchase_order_id, received_on)
+  INCLUDE (supplier_note_number, received_by);
+GO
+
+-- مفتاح أجنبي بـ ON DELETE CASCADE بلا فهرس = مسح كامل للجدول الابن عند
+-- حذف الأب (راجع §٢ أعلاه).
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_purchase_receipt_items_receipt' AND object_id = OBJECT_ID('dbo.purchase_receipt_items'))
+CREATE INDEX IX_purchase_receipt_items_receipt ON dbo.purchase_receipt_items (purchase_receipt_id);
+GO
+
+-- invoice_item_batches.invoice_item_id — مفتاح أجنبي بـ ON DELETE CASCADE.
+-- بلا فهرس يصبح حذف سطر فاتورة مسحاً كاملاً للجدول الابن (راجع §٢ أعلاه).
+-- والمرتجع يقرأ تخصيص الدفعات لكل سطر من الفاتورة الأصلية.
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_invoice_item_batches_item' AND object_id = OBJECT_ID('dbo.invoice_item_batches'))
+CREATE INDEX IX_invoice_item_batches_item ON dbo.invoice_item_batches (invoice_item_id);
 GO
 
 -- products: القائم IX_products_org_name يخدم الترتيب بالاسم، وIX_products_barcode

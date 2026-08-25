@@ -581,6 +581,9 @@ class _BranchFormDialogState extends State<_BranchFormDialog> {
   late final _addressController = TextEditingController(text: widget.branch?['address'] as String?);
   late final _phoneController = TextEditingController(text: widget.branch?['phone'] as String?);
   late bool _isActive = widget.branch?['isActive'] as bool? ?? true;
+  // لوح خلفية الفرع — راجع BranchPalettes في app_colors.dart.
+  late String _palette =
+      BranchPalettes.normalize(widget.branch?['themePalette'] as String?);
   bool _saving = false;
   String? _error;
 
@@ -638,6 +641,33 @@ class _BranchFormDialogState extends State<_BranchFormDialog> {
                   keyboardType: TextInputType.phone,
                   decoration: const InputDecoration(labelText: 'الهاتف (اختياري)'),
                 ),
+                const SizedBox(height: 14),
+                // اللوح يميّز **المكان**: موظف ينتقل بين فرعين يعرف من اللون
+                // أين هو الآن، فلا يُدخل بيانات في الفرع الخطأ. ولا يمسّ
+                // ألوان علامة الشركة — تبقى واحدة في كل فروعها.
+                Align(
+                  alignment: AlignmentDirectional.centerStart,
+                  child: Text('لوح الخلفية', style: AppTextStyles.labelMd()),
+                ),
+                const SizedBox(height: 6),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: BranchPalettes.options.entries.map((e) {
+                    final selected = _palette == e.key;
+                    final tint = e.value.$2;
+                    return ChoiceChip(
+                      selected: selected,
+                      onSelected: (_) => setState(() => _palette = e.key),
+                      avatar: CircleAvatar(
+                        radius: 8,
+                        backgroundColor:
+                            tint.a == 0 ? AppColors.border : tint,
+                      ),
+                      label: Text(e.value.$1),
+                    );
+                  }).toList(),
+                ),
                 if (_isEdit) ...[
                   const SizedBox(height: 4),
                   SwitchListTile(
@@ -681,6 +711,7 @@ class _BranchFormDialogState extends State<_BranchFormDialog> {
       'address': _addressController.text.trim().isEmpty ? null : _addressController.text.trim(),
       'phone': _phoneController.text.trim().isEmpty ? null : _phoneController.text.trim(),
       if (_isEdit) 'isActive': _isActive,
+      'themePalette': _palette,
     };
 
     try {

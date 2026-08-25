@@ -1,4 +1,4 @@
-using System.Security.Claims;
+﻿using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -55,6 +55,41 @@ public class FilesController : ControllerBase
     }
 
     private Guid OrgId() => Guid.Parse(User.FindFirstValue("organization_id")!);
+
+    /// <summary>
+    /// مجلد المنظمة داخل مجلد التخزين، ويُنشأ عند أول رفع.
+    ///
+    /// <para><b>لماذا مجلد لكل منظمة:</b> الوصول كان معزولاً أصلاً (التنزيل
+    /// يمرّ بجدول attachments المحميّ بعزل الصفوف)، لكن **التشغيل** كان
+    /// مكسوراً: لا يمكن أخذ نسخة احتياطية لعميل واحد ولا استعادتها، ولا
+    /// مسح ملفات عميل انتهى عقده، ولا قياس ما يستهلكه من تخزين — والنظام
+    /// يُحاسِبه عليه (License.StorageFee).</para>
+    ///
+    /// <para>وعشرات الآلاف من الملفات في مجلد واحد على NTFS تُبطئ كل عملية
+    /// عليه، ولو لم يكن هناك سبب آخر.</para>
+    /// </summary>
+    private string OrgFolder()
+    {
+        var folder = Path.Combine(_root, OrgId().ToString("N"));
+        Directory.CreateDirectory(folder);
+        return folder;
+    }
+
+    /// <summary>
+    /// مسار ملف مخزَّن، مع رجوع إلى الجذر للملفات التي رُفعت قبل التقسيم.
+    ///
+    /// <para>الرجوع دائم لا مؤقّت: نقل الملفات القديمة عملية على قرص خادم
+    /// عميل، وفشلها في المنتصف يترك مرفقات لا تُفتح. والبحث في موضعين
+    /// أرخص من أي ترحيل ملفات.</para>
+    /// </summary>
+    private string? ResolvePath(Attachment row)
+    {
+        var scoped = Path.Combine(_root, row.OrganizationId.ToString("N"), row.StoredName);
+        if (System.IO.File.Exists(scoped)) return scoped;
+
+        var legacy = Path.Combine(_root, row.StoredName);
+        return System.IO.File.Exists(legacy) ? legacy : null;
+    }
     private Guid? CurrentUserId() =>
         Guid.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirstValue("sub"), out var id)
             ? id : null;
@@ -86,7 +121,7 @@ public class FilesController : ControllerBase
         // الاسم على القرص يُولَّد ولا يُشتقّ من اسم المستخدم للملف: اسم مثل
         // ‎..\..\web.config يكتب خارج المجلد، وهي أقدم ثغرة رفع ملفات.
         var storedName = $"{Guid.NewGuid():N}{ext.ToLowerInvariant()}";
-        var fullPath = Path.Combine(_root, storedName);
+        var fullPath = Path.Combine(OrgFolder(), storedName);
         await using (var stream = System.IO.File.Create(fullPath))
         {
             await file.CopyToAsync(stream);
@@ -119,8 +154,8 @@ public class FilesController : ControllerBase
         var row = await _db.Attachments.FirstOrDefaultAsync(a => a.Id == id);
         if (row is null) return NotFound();
 
-        var path = Path.Combine(_root, row.StoredName);
-        if (!System.IO.File.Exists(path))
+        var path = ResolvePath(row);
+        if (path is null)
             return NotFound(new { message = "الملف مفقود من مجلد التخزين" });
 
         return PhysicalFile(path, row.ContentType, row.FileName);
@@ -133,10 +168,10 @@ public class FilesController : ControllerBase
         var row = await _db.Attachments.FirstOrDefaultAsync(a => a.Id == id);
         if (row is null) return NotFound();
 
-        var path = Path.Combine(_root, row.StoredName);
+        var path = ResolvePath(row);
         // الصف يُحذف حتى لو غاب الملف: صف يشير إلى ملف غير موجود لا فائدة
         // منه، وبقاؤه يجعل القائمة تعرض مرفقاً لا يُفتح.
-        if (System.IO.File.Exists(path))
+        if (path is not null)
         {
             try { System.IO.File.Delete(path); } catch (IOException) { /* مقفول — يُنظَّف لاحقاً */ }
         }

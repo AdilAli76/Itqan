@@ -37,3 +37,27 @@ final inventorySummaryProvider = FutureProvider.autoDispose<Map<String, dynamic>
   final response = await ApiClient.instance.dio.get('/reports/inventory-summary');
   return response.data as Map<String, dynamic>;
 });
+
+/// أعمار الديون — لا يتبع فترة التقرير: الدَّين حالة قائمة الآن لا حصيلة
+/// نافذة زمنية، وتقييده بـ«آخر 7 أيام» كان سيُخفي أقدم الديون وأخطرها.
+final debtAgingProvider = FutureProvider.autoDispose<Map<String, dynamic>>((ref) async {
+  final response = await ApiClient.instance.dio.get('/reports/debt-aging');
+  return response.data as Map<String, dynamic>;
+});
+
+/// قيمة المخزون بالتكلفة الحقيقية — من الدفتر لا من سعر تكلفة الصنف.
+///
+/// مقيَّد بوحدة `valuation` (إصدار المؤسسات)، فيردّ الخادم 403 لغيره —
+/// والشاشة تُخفي القسم بدل عرض خطأ لا حيلة للمستخدم فيه.
+final inventoryValuationProvider =
+    FutureProvider.autoDispose<Map<String, dynamic>>((ref) async {
+  final response = await ApiClient.instance.dio.get('/reports/inventory-valuation');
+  return response.data as Map<String, dynamic>;
+});
+
+/// كارت الصنف — كل حركة عليه بترتيب زمني.
+final itemCardProvider =
+    FutureProvider.autoDispose.family<Map<String, dynamic>, String>((ref, productId) async {
+  final response = await ApiClient.instance.dio.get('/reports/item-card/$productId');
+  return response.data as Map<String, dynamic>;
+});

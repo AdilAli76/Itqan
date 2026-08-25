@@ -290,7 +290,10 @@ if ($newProduct.Status -eq 403) {
     $existing = Api GET "/products/inventory" -Token $token
     # سعر أكبر من صفر شرط لا تفصيل: صنف بسعر 0.00 يجعل اختبار "سعر مخالف
     # يُرفض" أضعف مما يبدو، ويُنشئ فواتير بقيمة صفر في الدفتر الحقيقي.
-    $sellable = $existing.Body |
+    # ‎.Body.items لا ‎.Body — الرد صفحة {items, totalCount, page, pageSize}
+    # (ProductInventoryPageDto). تمرير الصفحة نفسها عبر Where-Object كان يُرجع
+    # لا شيء دائماً، فتُتخطّى اختبارات المخزون بصمت وتبدو ناجحة.
+    $sellable = $existing.Body.items |
         Where-Object { $_.quantity -gt 1 -and $_.tracksStock -ne $false -and [decimal]$_.salePrice -gt 0 } |
         Select-Object -First 1
     if ($sellable) {
@@ -305,6 +308,25 @@ if ($newProduct.Status -eq 403) {
 } else {
     Check "إنشاء صنف" ($newProduct.Status -in 200,201) "حالة $($newProduct.Status) — $($newProduct.Body.message)"
     $productId = $newProduct.Body.id
+
+    # رسالة انتهاك القيد بالعربية — DbConstraintMessageMiddleware.
+    #
+    # يُختبر على الخادم لا في الواجهة: الحماية الحقيقية هي القيد الفريد في
+    # قاعدة البيانات (الفحص المسبق في الكود يسقط أمام طلبين متزامنين)، والمهم
+    # أن رسالته تصل عربية مفهومة لا نصّ SQL Server خاماً.
+    $duplicate = Api POST "/products" -Token $token -Body @{
+        sku = "TEST-$stamp"
+        name = "صنف مكرّر $stamp"
+        salePrice = $productPrice
+        costPrice = 60
+        unitBase = "piece"
+    }
+    Check "رفض تكرار رمز الصنف (409)" ($duplicate.Status -eq 409) "حالة $($duplicate.Status)"
+    # يذكر SKU صراحةً: رسالة عامة («القيمة مستعملة») تترك المستخدم يخمّن أي
+    # حقل يصحّح، وهو ما تُوجد هذه الطبقة لتفاديه.
+    Check "الرسالة عربية وتسمّي الحقل" `
+        ($duplicate.Body.message -and $duplicate.Body.message -match 'SKU|رمز الصنف') `
+        "الرسالة: $($duplicate.Body.message)"
 }
 
 if ($productId -and $branchId -and $canManageInventory) {
@@ -317,7 +339,7 @@ if ($productId -and $branchId -and $canManageInventory) {
     # صفراً (اسم حقل خاطئ يعني ربطاً صامتاً بصفر)، فبلا هذا الفحص تتتالى
     # كل اختبارات البيع بعده فاشلة لسبب غير حقيقي.
     $check = Api GET "/products/inventory?search=TEST-$stamp" -Token $token
-    $qty = ($check.Body | Where-Object { $_.id -eq $productId }).quantity
+    $qty = ($check.Body.items | Where-Object { $_.id -eq $productId }).quantity
     Check "الرصيد الافتتاحي وصل فعلاً (10)" ([decimal]$qty -eq 10) "الرصيد المقروء: $qty" 
 }
 
@@ -374,7 +396,7 @@ if (-not ($productId -and $branchId)) {
     Section "٤. المخزون والتزامن"
 
     $available = Api GET "/products/inventory?search=TEST-$stamp" -Token $token
-    $currentQty = ($available.Body | Where-Object { $_.id -eq $productId }).quantity
+    $currentQty = ($available.Body.items | Where-Object { $_.id -eq $productId }).quantity
     Write-Host "         الرصيد الحالي: $currentQty" -ForegroundColor DarkGray
 
     $overSell = Api POST "/invoices" -Token $token -Body @{
@@ -390,7 +412,7 @@ if (-not ($productId -and $branchId)) {
     # سباق حقيقي: طلبان متزامنان على آخر قطعة.
     # يُضبط الرصيد إلى 1 ثم يُرسَل طلبان معاً؛ يجب أن ينجح واحد فقط.
     $reset = Api GET "/products/inventory?search=TEST-$stamp" -Token $token
-    $qtyNow = ($reset.Body | Where-Object { $_.id -eq $productId }).quantity
+    $qtyNow = ($reset.Body.items | Where-Object { $_.id -eq $productId }).quantity
     if ($qtyNow -gt 1) {
         Api POST "/products/$productId/stock-adjustments" -Token $token -Body @{
             branchId = $branchId; quantityDelta = -($qtyNow - 1)
@@ -429,7 +451,7 @@ if (-not ($productId -and $branchId)) {
     }
 
     $after = Api GET "/products/inventory?search=TEST-$stamp" -Token $token
-    $finalQty = ($after.Body | Where-Object { $_.id -eq $productId }).quantity
+    $finalQty = ($after.Body.items | Where-Object { $_.id -eq $productId }).quantity
     Check "الرصيد لم يصبح سالباً" ($finalQty -ge 0) "الرصيد النهائي: $finalQty"
     }
 
@@ -495,6 +517,110 @@ if (-not $canManageInventory) {
     Check "قالب الاستيراد يُنزَّل" ($tpl.Status -eq 200) "حالة $($tpl.Status)"
 
     Remove-Item $csvPath, $goodPath -ErrorAction SilentlyContinue
+}
+
+# -----------------------------------------------------------------------------
+Section "٥.٢ صرف الدفعات — FEFO"
+
+# الخطأ الذي يمسكه هذا القسم: البيع كان يقرأ صفّ رصيد واحداً بـ FirstOrDefault
+# بلا ORDER BY، بينما UQ_stock_levels يسمح بصفٍّ لكل دفعة. فكان يرفض بيع 15
+# والمتاح 30 موزّعة على ثلاث دفعات، ويخصم من دفعة يقرّرها مخطّط SQL — فتُصرَّف
+# البعيدة الانتهاء وتتلف القريبة على الرفّ.
+
+if (-not $canManageInventory) {
+    Skipped "صرف الدفعات (FEFO)" "إنشاء الدفعات يتطلّب inventory.manage — يُشغَّل بحساب إداري"
+} else {
+
+$fefoProduct = Api POST "/products" -Token $token -Body @{
+    sku = "TEST-FEFO-$stamp"
+    name = "دواء اختبار الدفعات $stamp"
+    salePrice = 10; costPrice = 5
+    unitBase = "piece"; tracksStock = $true; trackExpiry = $true; reorderLevel = 0
+}
+
+if ($fefoProduct.Status -notin 200,201) {
+    Skipped "صرف الدفعات (FEFO)" "تعذّر إنشاء صنف الاختبار (حالة $($fefoProduct.Status))"
+} else {
+    $fefoId = $fefoProduct.Body.id
+    $today  = (Get-Date).Date
+
+    # ثلاث دفعات بكميات متساوية وتواريخ مختلفة، مُدخَلة بترتيب غير ترتيب
+    # الصلاحية عمداً — حتى لا ينجح الاختبار بمجرّد أن يلتقط النظام الأقدم إدخالاً.
+    $batches = @(
+        @{ n = "B-LATE-$stamp"; d = $today.AddDays(180); q = 10 },
+        @{ n = "B-SOON-$stamp"; d = $today.AddDays(30);  q = 10 },
+        @{ n = "B-MID-$stamp";  d = $today.AddDays(90);  q = 10 }
+    )
+    foreach ($b in $batches) {
+        Api POST "/products/$fefoId/stock-adjustments" -Token $token -Body @{
+            branchId = $branchId; quantityDelta = $b.q
+            batchNumber = $b.n; expiryDate = $b.d.ToString('yyyy-MM-dd')
+        } | Out-Null
+    }
+
+    # الرد صفحة {items, totalCount, page, pageSize} لا مصفوفة — راجع
+    # ProductInventoryPageDto في ProductsController.cs.
+    $inv = Api GET "/products/inventory?search=TEST-FEFO-$stamp" -Token $token
+    $totalQty = ($inv.Body.items | Where-Object { $_.id -eq $fefoId }).quantity
+    Check "المتاح مجموع الدفعات الثلاث" ([decimal]$totalQty -eq 30) "المعروض: $totalQty (المتوقَّع 30)"
+
+    # 15 لا تسعها دفعة واحدة (10) — هذا هو البيع الذي كان يُرفض.
+    $spanSale = Api POST "/invoices" -Token $token -Body @{
+        branchId = $branchId; paymentMethod = "cash"
+        lines = @(@{ productId = $fefoId; quantity = 15; unitPrice = 10 })
+    }
+    Check "بيع كمية تمتدّ على أكثر من دفعة ينجح" ($spanSale.Status -in 200,201) `
+        "حالة $($spanSale.Status) — الرفض يعني أن الفحص ما زال على دفعة واحدة"
+
+    # قراءة رصيد كل دفعة بتعديل صفري: يُرجِع صفّ الرصيد بلا تغييره.
+    function Get-BatchQty([string]$name) {
+        $r = Api POST "/products/$fefoId/stock-adjustments" -Token $token -Body @{
+            branchId = $branchId; quantityDelta = 0; batchNumber = $name
+        }
+        if ($r.Status -in 200,201) { return [decimal]$r.Body.quantity }
+        return $null
+    }
+
+    $qSoon = Get-BatchQty "B-SOON-$stamp"
+    $qMid  = Get-BatchQty "B-MID-$stamp"
+    $qLate = Get-BatchQty "B-LATE-$stamp"
+    Write-Host "         بعد بيع 15 — القريبة: $qSoon | الوسطى: $qMid | البعيدة: $qLate" -ForegroundColor DarkGray
+
+    Check "الأقرب انتهاءً تُستنفد أولاً" ($qSoon -eq 0) "المتبقّي في القريبة: $qSoon (المتوقَّع 0)"
+    Check "الفائض يُؤخذ من التالية بالترتيب" ($qMid -eq 5) "المتبقّي في الوسطى: $qMid (المتوقَّع 5)"
+    Check "البعيدة انتهاءً لم تُمَسّ" ($qLate -eq 10) "المتبقّي في البعيدة: $qLate (المتوقَّع 10)"
+
+    # دفعة منتهية الصلاحية: كمية كبيرة لا يجوز أن تُحتسب ضمن المتاح للبيع.
+    Api POST "/products/$fefoId/stock-adjustments" -Token $token -Body @{
+        branchId = $branchId; quantityDelta = 100
+        batchNumber = "B-EXPIRED-$stamp"; expiryDate = $today.AddDays(-10).ToString('yyyy-MM-dd')
+    } | Out-Null
+
+    # المتبقّي الصالح 15 فقط (5 وسطى + 10 بعيدة) رغم أن المجموع 115.
+    $expiredSale = Api POST "/invoices" -Token $token -Body @{
+        branchId = $branchId; paymentMethod = "cash"
+        lines = @(@{ productId = $fefoId; quantity = 20; unitPrice = 10 })
+    }
+    Check "المنتهي الصلاحية لا يُباع ولا يُحتسب متاحاً" ($expiredSale.Status -eq 400) `
+        "حالة $($expiredSale.Status) — القبول يعني صرف دواء منتهي الصلاحية"
+
+    $qExpired = Get-BatchQty "B-EXPIRED-$stamp"
+    Check "الدفعة المنتهية بقيت كما هي" ($qExpired -eq 100) "المتبقّي: $qExpired (المتوقَّع 100)"
+
+    # المرتجع يعيد كل كمية إلى دفعتها لا إلى دفعة عامة.
+    if ($spanSale.Status -in 200,201) {
+        $saleId = $spanSale.Body.id
+        $ret = Api POST "/invoices/$saleId/refund" -Token $token
+        if ($ret.Status -in 200,201) {
+            $qSoonBack = Get-BatchQty "B-SOON-$stamp"
+            $qMidBack  = Get-BatchQty "B-MID-$stamp"
+            Check "المرتجع يعيد الكمية إلى دفعتها الأصلية" (($qSoonBack -eq 10) -and ($qMidBack -eq 10)) `
+                "القريبة: $qSoonBack (10) | الوسطى: $qMidBack (10) — رجوعها إلى دفعة عامة يحرّف أرصدة الدفعات"
+        } else {
+            Skipped "المرتجع يعيد الكمية إلى دفعتها الأصلية" "تعذّر الاسترجاع (حالة $($ret.Status))"
+        }
+    }
+}
 }
 
 # -----------------------------------------------------------------------------

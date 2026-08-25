@@ -1,7 +1,9 @@
 import 'package:fl_chart/fl_chart.dart';
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
+import '../../../core/network/api_client.dart';
 import '../../../core/responsive/adaptive_scaffold.dart';
 import '../../../core/responsive/breakpoints.dart';
 import '../../../core/theme/app_colors.dart';
@@ -12,6 +14,7 @@ import '../../../shared/widgets/stat_card.dart';
 import '../data/reports_providers.dart';
 import '../../../shared/widgets/skeleton.dart';
 import '../../../core/auth/permissions.dart';
+import '../../../shared/widgets/app_surface.dart';
 
 // ux-audit: ignore UX-03 — صفوف التقارير ناتج تجميع (GROUP BY) لا سجلات
 // خام: عددها محكوم بعدد الفئات أو الفروع أو الأيام في الفترة المختارة.
@@ -72,6 +75,12 @@ class ReportsScreen extends ConsumerWidget {
           Text('المخزون', style: AppTextStyles.headlineMd()),
           const SizedBox(height: 12),
           const _InventorySection(),
+          const SizedBox(height: 32),
+          Text('أعمار الديون', style: AppTextStyles.headlineMd()),
+          const SizedBox(height: 12),
+          const _DebtAgingSection(),
+          // القسم يُخفي نفسه لغير إصدار المؤسسات — راجع _ValuationSection.
+          const _ValuationSection(),
         ],
       ),
     );
@@ -468,4 +477,321 @@ class _InventorySection extends ConsumerWidget {
       CurrencyBadge(amount: (item['estimatedLossValue'] as num?)?.toDouble() ?? 0),
     ];
   }
+}
+
+// ---------------------------------------------------------------------------
+// أعمار الديون
+// ---------------------------------------------------------------------------
+
+/// من يدين، بكم، ومنذ متى — مرتّباً بأولوية التحصيل.
+///
+/// الشرائح أفقية قبل الجدول: مدير يريد أولاً أن يعرف **كم مالٍ عالق وكم
+/// منه قديم**، ثم من هم. عرض الأسماء أولاً يجعله يقرأ عشرين سطراً ليصل إلى
+/// رقم واحد.
+class _DebtAgingSection extends ConsumerWidget {
+  const _DebtAgingSection();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final agingAsync = ref.watch(debtAgingProvider);
+
+    return agingAsync.when(
+      loading: () => const TableSkeleton(),
+      error: (_, __) => _ErrorBox(
+        message: 'تعذّر تحميل أعمار الديون',
+        onRetry: () => ref.invalidate(debtAgingProvider),
+      ),
+      data: (report) {
+        final items = List<Map<String, dynamic>>.from(report['items'] as List? ?? []);
+        if (items.isEmpty) {
+          return AppSurface(
+            padding: const EdgeInsets.all(24),
+            child: Center(
+              child: Text('لا ديون مستحقّة على أي عميل.',
+                  style: AppTextStyles.bodyMd(color: AppColors.textSecondary)),
+            ),
+          );
+        }
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              children: [
+                _bucket('الإجمالي', report['totalOutstanding'], AppColors.textPrimary),
+                _bucket('لم يحن أجله', report['notYetDue'], AppColors.textSecondary),
+                _bucket('1–30 يوماً', report['days1To30'], AppColors.warning),
+                _bucket('31–60', report['days31To60'], AppColors.warning),
+                _bucket('61–90', report['days61To90'], AppColors.danger),
+                // أكثر من تسعين يوماً هو الرقم الذي يُقرَّر عنده أن الدَّين
+                // قد لا يُحصَّل أصلاً — فيُفرَد بلونه.
+                _bucket('أكثر من 90', report['over90'], AppColors.danger),
+              ],
+            ),
+            const SizedBox(height: 16),
+            AppDataTable(
+              title: 'المدينون (${items.length})',
+              columns: const [
+                AppColumn('العميل'),
+                AppColumn('الهاتف'),
+                AppColumn('المستحقّ'),
+                AppColumn('التأخّر'),
+                AppColumn('المرحلة'),
+                AppColumn('آخر تذكير'),
+                AppColumn(''),
+              ],
+              rows: items.map((r) => _row(context, ref, r)).toList(),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _bucket(String label, Object? value, Color color) {
+    final amount = (value as num?)?.toDouble() ?? 0;
+    return AppSurface(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(label, style: AppTextStyles.labelMd(color: AppColors.textMuted)),
+          const SizedBox(height: 4),
+          Text(NumberFormat('#,##0.00', 'en').format(amount),
+              style: AppTextStyles.headlineMd(color: color)),
+        ],
+      ),
+    );
+  }
+
+  List<Widget> _row(BuildContext context, WidgetRef ref, Map<String, dynamic> r) {
+    final days = (r['daysOverdue'] as num?)?.toInt() ?? 0;
+    final stage = (r['stage'] as num?)?.toInt() ?? 0;
+    final lastAt = r['lastReminderAt'] != null
+        ? DateTime.tryParse(r['lastReminderAt'] as String)
+        : null;
+    final lastStage = (r['lastReminderStage'] as num?)?.toInt();
+
+    return [
+      Text(r['customerName'] as String? ?? '-'),
+      Text(r['phone'] as String? ?? '-'),
+      CurrencyBadge(amount: (r['totalOutstanding'] as num?)?.toDouble() ?? 0),
+      Text(
+        days == 0 ? 'في الموعد' : 'منذ $days يوماً',
+        style: AppTextStyles.bodyMd(
+            color: days == 0
+                ? AppColors.textSecondary
+                : (days > 60 ? AppColors.danger : AppColors.warning)),
+      ),
+      Text(stage == 0 ? '-' : 'المرحلة $stage',
+          style: AppTextStyles.labelMd(
+              color: stage >= 3 ? AppColors.danger : AppColors.textSecondary)),
+      // المرحلة الأخيرة مع تاريخها: من ذُكِّر ثلاث مرّات ولم يسدّد حالة
+      // مختلفة تماماً عمّن لم يُطالَب قطّ، والعمودان معاً هما ما يُظهر ذلك.
+      Text(
+        lastAt == null
+            ? 'لم يُذكَّر'
+            : '${lastStage ?? "-"} — ${DateFormat('yyyy-MM-dd').format(lastAt)}',
+        style: AppTextStyles.labelMd(
+            color: lastAt == null ? AppColors.textMuted : AppColors.textSecondary),
+      ),
+      // التسجيل بعد المطالبة لا قبلها: الزرّ لا يُرسل شيئاً — النظام لا يملك
+      // قناة إرسال — بل يوثّق أن إنساناً طالَب فعلاً. راجع DebtReminder.
+      IconButton(
+        tooltip: 'تسجيل تذكير',
+        icon: const Icon(Icons.campaign_outlined, size: 18),
+        onPressed: stage == 0
+            ? null
+            : () => _recordReminder(context, ref, r['customerId'] as String,
+                r['customerName'] as String? ?? ''),
+      ),
+    ];
+  }
+
+  Future<void> _recordReminder(
+      BuildContext context, WidgetRef ref, String customerId, String name) async {
+    final note = await showDialog<String>(
+      context: context,
+      builder: (_) => _ReminderNoteDialog(customerName: name),
+    );
+    if (note == null) return;
+
+    try {
+      await ApiClient.instance.dio.post(
+        '/customers/$customerId/debt-reminders',
+        data: {'note': note.trim().isEmpty ? null : note.trim()},
+      );
+      ref.invalidate(debtAgingProvider);
+      if (context.mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('سُجِّل التذكير')));
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text((e is DioException && e.response?.data is Map && (e.response!.data as Map)['message'] is String)
+                    ? (e.response!.data as Map)['message'] as String
+                    : 'تعذّر تسجيل التذكير')));
+      }
+    }
+  }
+}
+
+/// نافذة التسجيل — تسأل عمّا حدث لا عمّا سيحدث.
+class _ReminderNoteDialog extends StatefulWidget {
+  const _ReminderNoteDialog({required this.customerName});
+  final String customerName;
+
+  @override
+  State<_ReminderNoteDialog> createState() => _ReminderNoteDialogState();
+}
+
+class _ReminderNoteDialogState extends State<_ReminderNoteDialog> {
+  final _controller = TextEditingController();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text('تسجيل تذكير — ${widget.customerName}'),
+      content: SizedBox(
+        width: 380,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              'سجّل بعد أن تُطالِب فعلاً. المرحلة تُحسب من عمر الدَّين ولا '
+              'تُختار — وإلا فقد السلّم معناه.',
+              style: AppTextStyles.bodyMd(color: AppColors.textSecondary),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _controller,
+              autofocus: true,
+              maxLength: 300,
+              decoration: const InputDecoration(
+                labelText: 'ملاحظة (اختياري)',
+                hintText: 'مثال: اتصال هاتفي — وعد بالسداد نهاية الأسبوع',
+              ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('إلغاء')),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, _controller.text),
+          child: const Text('تسجيل'),
+        ),
+      ],
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// قيمة المخزون بالتكلفة الحقيقية — إصدار المؤسسات
+// ---------------------------------------------------------------------------
+
+/// من الدفتر لا من سعر تكلفة الصنف.
+///
+/// **لماذا يُعرَض الفارق:** سعر التكلفة على الصنف رقم واحد يُكتب فوقه عند كل
+/// استلام، فمخزونٌ اشتُري على ثلاث دفعات بأسعار مختلفة كان يُقيَّم بسعر
+/// آخرها كلّه. عرض القيمتين جنباً إلى جنب يجعل الفرق مفهوماً بدل أن يبدو
+/// رقماً تغيّر بلا سبب.
+///
+/// ويُخفي نفسه كاملاً حين يردّ الخادم 403 (وحدة `valuation` غير مملوكة):
+/// عرض «تعذّر التحميل» لمن لا يملك الوحدة يدفعه إلى الدعم بلا سبب.
+class _ValuationSection extends ConsumerWidget {
+  const _ValuationSection();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final valuationAsync = ref.watch(inventoryValuationProvider);
+
+    return valuationAsync.when(
+      loading: () => const SizedBox.shrink(),
+      error: (_, __) => const SizedBox.shrink(),
+      data: (report) {
+        final items = List<Map<String, dynamic>>.from(report['items'] as List? ?? []);
+        if (items.isEmpty) return const SizedBox.shrink();
+
+        final real = (report['totalValue'] as num?)?.toDouble() ?? 0;
+        final legacy = (report['legacyValue'] as num?)?.toDouble() ?? 0;
+        final gap = real - legacy;
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const SizedBox(height: 32),
+            Text('قيمة المخزون بالتكلفة', style: AppTextStyles.headlineMd()),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              children: [
+                _card('القيمة الفعلية (من الدفتر)', real, AppColors.textPrimary),
+                _card('التقدير السابق (سعر التكلفة)', legacy, AppColors.textSecondary),
+                _card(gap >= 0 ? 'فرق زائد' : 'فرق ناقص', gap.abs(),
+                    gap.abs() < 0.005 ? AppColors.textMuted : AppColors.warning),
+              ],
+            ),
+            const SizedBox(height: 16),
+            AppDataTable(
+              title: 'الأصناف (${items.length})',
+              columns: const [
+                AppColumn('الصنف'),
+                AppColumn('الكمية'),
+                AppColumn('متوسط التكلفة'),
+                AppColumn('سعر الصنف'),
+                AppColumn('الشحنات'),
+                AppColumn('القيمة'),
+              ],
+              rows: items.map((i) {
+                final avg = (i['averageCost'] as num?)?.toDouble() ?? 0;
+                final listed = (i['productCostPrice'] as num?)?.toDouble() ?? 0;
+                final drifted = (avg - listed).abs() > 0.005;
+                return [
+                  Text(i['productName'] as String? ?? '-'),
+                  Text('${i['quantity']} ${i['unitBase'] ?? ''}'),
+                  Text(NumberFormat('#,##0.00', 'en').format(avg),
+                      style: AppTextStyles.bodyMd(
+                          color: drifted ? AppColors.warning : AppColors.textPrimary)),
+                  Text(NumberFormat('#,##0.00', 'en').format(listed),
+                      style: AppTextStyles.bodyMd(color: AppColors.textSecondary)),
+                  // عدد الشحنات التي بقي منها شيء: صنفٌ من سبع شحنات بأسعار
+                  // مختلفة هو حيث يكون التقدير القديم أبعد ما يكون عن الحقيقة.
+                  Text('${i['lotCount'] ?? 0}',
+                      style: AppTextStyles.labelMd(color: AppColors.textMuted)),
+                  CurrencyBadge(amount: (i['totalValue'] as num?)?.toDouble() ?? 0),
+                ];
+              }).toList(),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _card(String label, double value, Color color) => AppSurface(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(label, style: AppTextStyles.labelMd(color: AppColors.textMuted)),
+            const SizedBox(height: 4),
+            Text(NumberFormat('#,##0.00', 'en').format(value),
+                style: AppTextStyles.headlineMd(color: color)),
+          ],
+        ),
+      );
 }

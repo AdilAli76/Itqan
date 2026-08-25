@@ -19,6 +19,8 @@ public class AppDbContext : DbContext
     public DbSet<ProductCategory> ProductCategories => Set<ProductCategory>();
     public DbSet<Attachment> Attachments => Set<Attachment>();
     public DbSet<StockLevel> StockLevels => Set<StockLevel>();
+    public DbSet<StockLedgerEntry> StockLedgerEntries => Set<StockLedgerEntry>();
+    public DbSet<Warehouse> Warehouses => Set<Warehouse>();
     public DbSet<StockTransfer> StockTransfers => Set<StockTransfer>();
     public DbSet<StockTransferItem> StockTransferItems => Set<StockTransferItem>();
     public DbSet<StockCount> StockCounts => Set<StockCount>();
@@ -29,13 +31,19 @@ public class AppDbContext : DbContext
     public DbSet<CustomerPinAttempt> CustomerPinAttempts => Set<CustomerPinAttempt>();
     public DbSet<Invoice> Invoices => Set<Invoice>();
     public DbSet<InvoiceItem> InvoiceItems => Set<InvoiceItem>();
+    public DbSet<InvoiceItemBatch> InvoiceItemBatches => Set<InvoiceItemBatch>();
+    public DbSet<MedicineReference> MedicineReferences => Set<MedicineReference>();
+    public DbSet<Prescription> Prescriptions => Set<Prescription>();
     public DbSet<InvoicePayment> InvoicePayments => Set<InvoicePayment>();
+    public DbSet<DebtReminder> DebtReminders => Set<DebtReminder>();
     public DbSet<NotificationItem> Notifications => Set<NotificationItem>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
     public DbSet<Permission> Permissions => Set<Permission>();
     public DbSet<RolePermission> RolePermissions => Set<RolePermission>();
     public DbSet<PurchaseOrder> PurchaseOrders => Set<PurchaseOrder>();
     public DbSet<PurchaseOrderItem> PurchaseOrderItems => Set<PurchaseOrderItem>();
+    public DbSet<PurchaseReceipt> PurchaseReceipts => Set<PurchaseReceipt>();
+    public DbSet<PurchaseReceiptItem> PurchaseReceiptItems => Set<PurchaseReceiptItem>();
     public DbSet<PlatformOrganizationRecord> PlatformOrganizations => Set<PlatformOrganizationRecord>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -53,6 +61,8 @@ public class AppDbContext : DbContext
         modelBuilder.Entity<Sponsor>().ToTable("sponsors");
         modelBuilder.Entity<ProductCategory>().ToTable("product_categories");
         modelBuilder.Entity<StockLevel>().ToTable("stock_levels");
+        modelBuilder.Entity<StockLedgerEntry>().ToTable("stock_ledger_entries");
+        modelBuilder.Entity<Warehouse>().ToTable("warehouses");
         modelBuilder.Entity<StockTransfer>().ToTable("stock_transfers");
         modelBuilder.Entity<StockTransferItem>().ToTable("stock_transfer_items");
         modelBuilder.Entity<StockCount>().ToTable("stock_counts");
@@ -77,7 +87,11 @@ public class AppDbContext : DbContext
             // بصيغة الخاصية يجعل الفهرس يشير إلى عمود غير موجود.
             .HasFilter("[client_request_id] IS NOT NULL");
         modelBuilder.Entity<InvoiceItem>().ToTable("invoice_items");
+        modelBuilder.Entity<InvoiceItemBatch>().ToTable("invoice_item_batches");
+        modelBuilder.Entity<MedicineReference>().ToTable("medicine_reference");
+        modelBuilder.Entity<Prescription>().ToTable("prescriptions");
         modelBuilder.Entity<InvoicePayment>().ToTable("invoice_payments");
+        modelBuilder.Entity<DebtReminder>().ToTable("debt_reminders");
         modelBuilder.Entity<NotificationItem>().ToTable("notifications");
         modelBuilder.Entity<AuditLog>().ToTable("audit_logs");
         modelBuilder.Entity<Permission>().ToTable("permissions").HasKey(p => p.Code);
@@ -85,6 +99,8 @@ public class AppDbContext : DbContext
             .HasKey(rp => new { rp.OrganizationId, rp.Role, rp.PermissionCode });
         modelBuilder.Entity<PurchaseOrder>().ToTable("purchase_orders");
         modelBuilder.Entity<PurchaseOrderItem>().ToTable("purchase_order_items");
+        modelBuilder.Entity<PurchaseReceipt>().ToTable("purchase_receipts");
+        modelBuilder.Entity<PurchaseReceiptItem>().ToTable("purchase_receipt_items");
         modelBuilder.Entity<PlatformOrganizationRecord>().ToTable("platform_organizations");
 
         modelBuilder.Entity<Invoice>()
@@ -96,6 +112,11 @@ public class AppDbContext : DbContext
             .HasMany(i => i.Payments)
             .WithOne()
             .HasForeignKey(p => p.InvoiceId);
+
+        modelBuilder.Entity<InvoiceItem>()
+            .HasMany(i => i.Batches)
+            .WithOne()
+            .HasForeignKey(b => b.InvoiceItemId);
 
         modelBuilder.Entity<StockTransfer>()
             .HasMany(t => t.Items)

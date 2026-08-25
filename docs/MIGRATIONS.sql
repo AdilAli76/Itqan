@@ -1,4 +1,4 @@
--- ============================================================================
+﻿-- ============================================================================
 --  ترقيات المخطط للقواعد القائمة
 --
 --  sql.sql هو المخطط الكامل لقاعدة بيانات **جديدة**. أي قاعدة تعمل بالفعل
@@ -23,8 +23,10 @@
 --  الترحيلات أدناه تدور على المنظمات وتضبط السياق لكل واحدة.
 -- ============================================================================
 
-USE KineticEnterprise;
-GO
+-- لا USE هنا عمداً: هذا الملف يُنفَّذ بـ -d (راجع سطر التنفيذ أعلاه)، وسطر
+-- USE ثابت كان يتجاوز الاسم المُمرَّر فيكتب الكائنات في KineticEnterprise
+-- مهما كانت القاعدة المقصودة — وهو ما كان يُعطّل tool/run_local.ps1 -Database
+-- ويجعله يلوّث قاعدة التطوير بدل قاعدة التجربة.
 
 -- ----------------------------------------------------------------------------
 --  2026-08-17 — نقطة البيع: السماح بالأصناف مفتوحة القيمة (إعداد المنظمة)
@@ -344,6 +346,28 @@ WHERE EXISTS (
 );');
 GO
 
+-- ── دالة الحفيد: سطر الدفعة يصل إلى المنظمة عبر قفزتين ──────────────────
+--
+-- invoice_item_batches لا يحمل invoice_id ولا organization_id، بل
+-- invoice_item_id وحده. فبقي **الجدول الوحيد بلا عزل** بينما أبوه محميّ —
+-- وحمايةُ الأب لا تحمي الابن: أي استعلام مباشر على الحفيد يقرأ أرقام دفعات
+-- كل المنظمات وكمّياتها. وهو ليس جدولاً هامشياً: منه يُبنى المرتجع، ومنه
+-- يُعرف ما بيع من أي شحنة.
+IF OBJECT_ID('Security.fn_InvoiceGrandChild', 'IF') IS NULL
+EXEC('
+CREATE FUNCTION Security.fn_InvoiceGrandChild(@InvoiceItemId UNIQUEIDENTIFIER)
+RETURNS TABLE
+WITH SCHEMABINDING
+AS
+RETURN SELECT 1 AS fn_result
+WHERE EXISTS (
+    SELECT 1 FROM dbo.invoice_items ii
+    JOIN dbo.invoices i ON i.id = ii.invoice_id
+    WHERE ii.id = @InvoiceItemId
+      AND i.organization_id = CAST(SESSION_CONTEXT(N''organization_id'') AS UNIQUEIDENTIFIER)
+);');
+GO
+
 IF OBJECT_ID('Security.fn_PurchaseOrderChild', 'IF') IS NULL
 EXEC('
 CREATE FUNCTION Security.fn_PurchaseOrderChild(@PurchaseOrderId UNIQUEIDENTIFIER)
@@ -652,6 +676,938 @@ END
 GO
 
 PRINT N'شروط العقد المالية جاهزة';
+GO
+
+-- ----------------------------------------------------------------------------
+--  تخصيص دفعات سطر الفاتورة — شرط FEFO وصحّة المرتجع
+--
+--  البيع كان يلتقط دفعة واحدة عشوائياً (FirstOrDefault بلا ORDER BY) بينما
+--  UQ_stock_levels يسمح بصفٍّ لكل دفعة، فوقع خطآن: رفض بيع 15 والمتاح 30
+--  موزّعة على ثلاث دفعات، وخصمٌ من دفعة بعيدة الانتهاء بينما القريبة تتلف.
+--
+--  والمرتجع كان يعيد الكمية إلى دفعة عامة ("") لتعذّر معرفة الأصل — فينتفخ
+--  رصيد بلا تاريخ صلاحية وتبقى الدفعة الحقيقية ناقصة.
+--
+--  الفواتير المُنشأة قبل هذا الترحيل بلا صفوف هنا، وتُسترجَع بالسلوك القديم
+--  (دفعة عامة) عمداً — راجع ReturnInvoice في InvoicesController.cs.
+-- ----------------------------------------------------------------------------
+IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'invoice_item_batches')
+BEGIN
+    CREATE TABLE dbo.invoice_item_batches (
+        id UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
+        invoice_item_id UNIQUEIDENTIFIER NOT NULL
+            REFERENCES dbo.invoice_items(id) ON DELETE CASCADE,
+        batch_number NVARCHAR(60) NOT NULL DEFAULT '',
+        quantity DECIMAL(14,3) NOT NULL
+    );
+    PRINT N'أُنشئ جدول invoice_item_batches';
+END
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = 'IX_invoice_item_batches_item')
+BEGIN
+    CREATE INDEX IX_invoice_item_batches_item
+        ON dbo.invoice_item_batches (invoice_item_id);
+    PRINT N'أُنشئ فهرس IX_invoice_item_batches_item';
+END
+GO
+
+-- عزل صفوف جدول الحفيد — **بعد إنشائه لا قبله**.
+--
+-- كانت هذه الكتلة بين سياسات الجداول الأبناء أعلاه، أي قبل الترحيل الذي
+-- يُنشئ invoice_item_batches بمئتَي سطر. على قاعدة جديدة لا أثر للترتيب
+-- (المخطّط الكامل يُنشئ الجدول أولاً)، وعلى **قاعدة قائمة تسبق هذا الجدول**
+-- كانت الترقية تتوقّف بـ«Cannot find the object dbo.invoice_item_batches».
+--
+-- وشرط وجود الجدول مضاف فوق الترتيب: الترتيب وحده يعتمد على ألّا يُعاد
+-- تنظيم الملف، والشرط لا يعتمد على شيء.
+IF EXISTS (SELECT 1 FROM sys.tables WHERE name = 'invoice_item_batches')
+   AND NOT EXISTS (SELECT 1 FROM sys.security_policies WHERE name = 'InvoiceItemBatchesPolicy')
+EXEC('
+CREATE SECURITY POLICY Security.InvoiceItemBatchesPolicy
+  ADD FILTER PREDICATE Security.fn_InvoiceGrandChild(invoice_item_id) ON dbo.invoice_item_batches,
+  ADD BLOCK PREDICATE Security.fn_InvoiceGrandChild(invoice_item_id) ON dbo.invoice_item_batches AFTER INSERT
+  WITH (STATE = ON);');
+GO
+
+PRINT N'تخصيص دفعات الفواتير جاهز';
+GO
+
+-- ----------------------------------------------------------------------------
+--  نشرة الدواء — إصدار الصيدليات وحده
+--
+--  الجدول على مستوى المنصّة (بلا organization_id وبلا Security Policy):
+--  «باراسيتامول 500 مجم» له نفس موانع الاستعمال في كل صيدلية، وربطه
+--  بالمنظمة كان يعني أن كل عميل يبدأ بنشرات فارغة فتُهمَل الميزة.
+--
+--  يُنشأ في كل قاعدة لكن لا يُقرأ إلا لمن يملك وحدة pharmacy — النظام يُباع
+--  لبقالة ومحل قطع غيار أيضاً. راجع Editions.ModulesOf في Entities.cs
+--  و RequireModule("pharmacy") على MedicineReferenceController.
+-- ----------------------------------------------------------------------------
+IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'medicine_reference')
+BEGIN
+    CREATE TABLE dbo.medicine_reference (
+        id UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
+        name NVARCHAR(200) NOT NULL,
+        active_ingredient NVARCHAR(200) NOT NULL,
+        strength NVARCHAR(60) NULL,
+        form NVARCHAR(60) NULL,
+        indications NVARCHAR(1000) NULL,
+        contraindications NVARCHAR(1000) NULL,
+        cautions NVARCHAR(1000) NULL,
+        side_effects NVARCHAR(1000) NULL,
+        requires_prescription BIT NOT NULL DEFAULT 0,
+        is_deleted BIT NOT NULL DEFAULT 0,
+        created_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+        updated_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
+    );
+    PRINT N'أُنشئ جدول medicine_reference';
+END
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.columns
+               WHERE object_id = OBJECT_ID('dbo.products') AND name = 'medicine_ref_id')
+BEGIN
+    -- NULL دائماً مسموح: الصيدلية نفسها تبيع مستحضرات تجميل وحفاضات وأدوات.
+    ALTER TABLE dbo.products ADD medicine_ref_id UNIQUEIDENTIFIER NULL
+        CONSTRAINT FK_products_medicine_ref REFERENCES dbo.medicine_reference(id);
+    PRINT N'أُضيف عمود products.medicine_ref_id';
+END
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_medicine_reference_ingredient')
+BEGIN
+    -- البحث بالمادة الفعّالة هو مدخل الصيدلي الطبيعي (بديل، تكرار مادة).
+    CREATE INDEX IX_medicine_reference_ingredient
+        ON dbo.medicine_reference (active_ingredient) WHERE is_deleted = 0;
+    PRINT N'أُنشئ فهرس IX_medicine_reference_ingredient';
+END
+GO
+
+PRINT N'نشرة الدواء جاهزة';
+GO
+
+-- ----------------------------------------------------------------------------
+--  دفتر الوصفات — إصدار الصيدليات
+--
+--  سجلٌّ لكل صرف دواء مقيَّد بوصفة. بيانات منظمة لا معرفة عامة (بخلاف
+--  medicine_reference)، فيحمل organization_id وbranch_id وتُطبَّق عليه سياسة
+--  العزل. مرتبط بالفاتورة لأن الوصفة تُقدَّم لحظة الصرف — وربطها بما صُرِف
+--  فعلاً هو ما يجعل الدفتر قابلاً للمراجعة.
+-- ----------------------------------------------------------------------------
+IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'prescriptions')
+BEGIN
+    CREATE TABLE dbo.prescriptions (
+        id UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
+        organization_id UNIQUEIDENTIFIER NOT NULL
+            REFERENCES dbo.organizations(id) ON DELETE CASCADE,
+        branch_id UNIQUEIDENTIFIER NOT NULL
+            REFERENCES dbo.branches(id) ON DELETE NO ACTION,
+        invoice_id UNIQUEIDENTIFIER NULL
+            REFERENCES dbo.invoices(id) ON DELETE NO ACTION,
+        prescription_number NVARCHAR(60) NULL,
+        doctor_name NVARCHAR(150) NOT NULL,
+        doctor_license NVARCHAR(60) NULL,
+        patient_name NVARCHAR(150) NOT NULL,
+        patient_phone NVARCHAR(30) NULL,
+        issued_on DATE NULL,
+        notes NVARCHAR(500) NULL,
+        created_by UNIQUEIDENTIFIER NULL REFERENCES dbo.app_users(id),
+        created_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
+    );
+    PRINT N'أُنشئ جدول prescriptions';
+END
+GO
+
+-- سياسة العزل تُنشأ منفصلة عن الجدول: قد يكون الجدول موجوداً من ترحيل سابق
+-- بلا سياسة، وتركه بلا عزل يعني أن صيدلية تقرأ وصفات صيدلية أخرى.
+IF NOT EXISTS (SELECT 1 FROM sys.security_policies WHERE name = 'PrescriptionsPolicy')
+   AND EXISTS (SELECT 1 FROM sys.tables WHERE name = 'prescriptions')
+BEGIN
+    EXEC(N'CREATE SECURITY POLICY Security.PrescriptionsPolicy
+        ADD FILTER PREDICATE Security.fn_TenantPredicate(organization_id, branch_id) ON dbo.prescriptions,
+        ADD BLOCK PREDICATE Security.fn_TenantPredicate(organization_id, branch_id) ON dbo.prescriptions AFTER INSERT
+        WITH (STATE = ON);');
+    PRINT N'أُنشئت سياسة العزل PrescriptionsPolicy';
+END
+GO
+
+IF NOT EXISTS (SELECT 1 FROM dbo.permissions WHERE code = 'prescriptions.dispense')
+BEGIN
+    INSERT INTO dbo.permissions (code, label_ar, module)
+    VALUES ('prescriptions.dispense', N'صرف الأدوية المقيَّدة بوصفة وتسجيلها', N'pharmacy');
+    PRINT N'أُضيفت صلاحية prescriptions.dispense';
+END
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_prescriptions_org_branch_date')
+BEGIN
+    -- الدفتر يُراجَع بالتاريخ (تفتيش، مراجعة شهرية) لا بالمعرّف.
+    CREATE INDEX IX_prescriptions_org_branch_date
+        ON dbo.prescriptions (organization_id, branch_id, created_at DESC);
+    PRINT N'أُنشئ فهرس IX_prescriptions_org_branch_date';
+END
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_prescriptions_invoice')
+BEGIN
+    CREATE INDEX IX_prescriptions_invoice ON dbo.prescriptions (invoice_id)
+        WHERE invoice_id IS NOT NULL;
+    PRINT N'أُنشئ فهرس IX_prescriptions_invoice';
+END
+GO
+
+PRINT N'دفتر الوصفات جاهز';
+GO
+
+-- ----------------------------------------------------------------------------
+--  البيع بالوحدة الجزئية — الصيدلية تشتري شريطاً وتبيع حبّة
+--
+--  المخزون يُعدّ بالوحدة الأساسية دائماً، والبيع الجزئي يخصم كسراً منها
+--  (stock_levels.quantity من نوع DECIMAL(14,3) فيتّسع للكسر أصلاً).
+--
+--  وسعر الوحدة الجزئية مستقلٌّ لا يُشتقّ بالقسمة: الصيدلية تربح على التجزئة،
+--  فحبّة من شريط بثمانية دنانير تُباع بدينار لا بـ0.80. اشتقاقه بالقسمة كان
+--  يعني بيعاً بالتكلفة بلا أن ينتبه أحد.
+--
+--  ليست مقصورة على إصدار الصيدليات: بقالة تبيع البيضة من الطبق، ومحل قطع
+--  غيار يبيع البرغي من العلبة. فلا RequireModule عليها.
+-- ----------------------------------------------------------------------------
+IF NOT EXISTS (SELECT 1 FROM sys.columns
+               WHERE object_id = OBJECT_ID('dbo.products') AND name = 'sub_unit_name')
+BEGIN
+    ALTER TABLE dbo.products ADD
+        sub_unit_name NVARCHAR(30) NULL,
+        sub_units_per_base DECIMAL(10,3) NOT NULL
+            CONSTRAINT df_products_sub_units_per_base DEFAULT 0,
+        sub_unit_price DECIMAL(14,2) NOT NULL
+            CONSTRAINT df_products_sub_unit_price DEFAULT 0;
+    PRINT N'أُضيفت أعمدة البيع بالوحدة الجزئية إلى products';
+END
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.columns
+               WHERE object_id = OBJECT_ID('dbo.invoice_items') AND name = 'sold_as_sub_unit')
+BEGIN
+    -- الكمية والسعر يُحفَظان كما بيعا فعلاً؛ هذان العمودان يوثّقان بأي وحدة
+    -- كان البيع، وبأي معامل تحويل وقتها — فيعيد المرتجع ما خرج فعلاً.
+    ALTER TABLE dbo.invoice_items ADD
+        sold_as_sub_unit BIT NOT NULL
+            CONSTRAINT df_invoice_items_sold_as_sub_unit DEFAULT 0,
+        sub_units_per_base DECIMAL(10,3) NOT NULL
+            CONSTRAINT df_invoice_items_sub_units_per_base DEFAULT 0;
+    PRINT N'أُضيفت أعمدة الوحدة الجزئية إلى invoice_items';
+END
+GO
+
+PRINT N'البيع بالوحدة الجزئية جاهز';
+GO
+
+-- ----------------------------------------------------------------------------
+--  مهلة التوريد — نصف معادلة إعادة الطلب
+--
+--  حدّ إعادة الطلب رقم يُدخله المستخدم يدوياً ويُنسى، فيبقى على قيمته الأولى
+--  بينما يتغيّر الاستهلاك. المشتقّ منه = متوسط الاستهلاك اليومي × مهلة
+--  التوريد، ولا يمكن اشتقاقه بلا معرفة المهلة.
+--
+--  ولا يُكتب المشتقّ فوق اليدوي: اقتراحٌ يُعرض في التقرير ويطبّقه المدير إن
+--  اقتنع. الكتابة الصامتة فوق قرار إداري تُفقد الثقة بالنظام كلّه.
+-- ----------------------------------------------------------------------------
+IF NOT EXISTS (SELECT 1 FROM sys.columns
+               WHERE object_id = OBJECT_ID('dbo.products') AND name = 'lead_time_days')
+BEGIN
+    ALTER TABLE dbo.products ADD lead_time_days INT NOT NULL
+        CONSTRAINT df_products_lead_time_days DEFAULT 7;
+    PRINT N'أُضيف عمود products.lead_time_days';
+END
+GO
+
+PRINT N'مهلة التوريد جاهزة';
+GO
+
+-- ----------------------------------------------------------------------------
+--  قفل المخزون — إيقاف دفعة عن الصرف مع بقائها في مكانها
+--
+--  الحالة: تصل دفعة بشبهة عيب، أو ينتظر صنف نتيجة فحص، أو تُرتجع بضاعة يجب
+--  ألّا تُباع قبل معاينتها. الحلول الثلاثة المتاحة قبل هذه الأعمدة كانت كلها
+--  معطوبة: حذف الصفّ يفقد الكمية ويكسر التدقيق، وتركه يعني أن يبيعها
+--  الكاشير، ونقلها إلى فرع وهمي يشوّه كل تقارير الفروع.
+--
+--  الموقوف يخرج من: البيع (FEFO في InvoicesController)، وحساب إعادة الطلب،
+--  والتحويل بين الفروع. ويبقى في: الجرد، وقيمة المخزون، وتقرير الصلاحية —
+--  فهو مالٌ مملوك فعلاً وموجود على الرفّ.
+--
+--  الافتراضي 0 على كل الصفوف القائمة، فلا أثر على أي بيانات موجودة.
+-- ----------------------------------------------------------------------------
+IF NOT EXISTS (SELECT 1 FROM sys.columns
+               WHERE object_id = OBJECT_ID('dbo.stock_levels') AND name = 'is_locked')
+BEGIN
+    ALTER TABLE dbo.stock_levels ADD
+        is_locked BIT NOT NULL CONSTRAINT df_stock_levels_is_locked DEFAULT 0,
+        lock_reason NVARCHAR(300) NULL,
+        locked_by UNIQUEIDENTIFIER NULL,
+        locked_at DATETIME2 NULL;
+    PRINT N'أُضيفت أعمدة قفل المخزون إلى stock_levels';
+END
+GO
+
+-- المفتاح الأجنبي في دفعة منفصلة: ALTER TABLE ADD أعلاه لا يرى الأعمدة التي
+-- أنشأها هو نفسه في الدفعة ذاتها.
+IF NOT EXISTS (SELECT 1 FROM sys.foreign_keys WHERE name = 'fk_stock_levels_locked_by')
+   AND EXISTS (SELECT 1 FROM sys.columns
+               WHERE object_id = OBJECT_ID('dbo.stock_levels') AND name = 'locked_by')
+BEGIN
+    ALTER TABLE dbo.stock_levels ADD CONSTRAINT fk_stock_levels_locked_by
+        FOREIGN KEY (locked_by) REFERENCES dbo.app_users(id);
+    PRINT N'أُضيف قيد stock_levels.locked_by';
+END
+GO
+
+PRINT N'قفل المخزون جاهز';
+GO
+
+-- ----------------------------------------------------------------------------
+--  تاريخ الاستراتيجية — ترتيب الصرف بحقل واحد يوحّد FEFO وFIFO
+--
+--  الصيدلية يجب أن تصرف الأقرب انتهاءً، والبقالة تكفيها الأقدم دخولاً. فبدل
+--  قاعدتَي ترتيب منفصلتين، تاريخٌ واحد يُملأ بحسب طبيعة الصنف:
+--
+--      صنف بصلاحية   → تاريخ الانتهاء  ⇒ FEFO
+--      صنف بلا صلاحية → تاريخ الإدخال   ⇒ FIFO
+--
+--  العطب الذي يصلحه: ترتيب الصرف كان `ORDER BY expiry_date, batch_number`.
+--  والصنف بلا صلاحية كل دفعاته expiry_date = NULL، فيسقط الترتيب كلّه على
+--  رقم الدفعة أبجدياً — أي عشوائياً فعلياً. النتيجة دفعة قديمة تبقى على
+--  الرفّ إلى ما لا نهاية لأن رقمها يبدأ بحرف متأخّر.
+-- ----------------------------------------------------------------------------
+IF NOT EXISTS (SELECT 1 FROM sys.columns
+               WHERE object_id = OBJECT_ID('dbo.stock_levels') AND name = 'strategy_date')
+BEGIN
+    ALTER TABLE dbo.stock_levels ADD strategy_date DATETIME2 NULL;
+    PRINT N'أُضيف عمود stock_levels.strategy_date';
+END
+GO
+
+-- التعبئة الرجعية للصفوف القائمة، بنفس قاعدة StockLevel.StampStrategyDate:
+--
+--   ذات صلاحية                    → تاريخ الانتهاء.
+--   صنف لا يتتبّع الصلاحية أصلاً    → updated_at، أقرب تقريب متاح لتاريخ
+--                                    الإدخال (لا يوجد created_at على الجدول).
+--   صنف يتتبّع الصلاحية بلا تاريخ   → يُترك NULL فيُؤخَّر في الصرف — وهو
+--                                    السلوك القائم اليوم حرفياً، فلا تتغيّر
+--                                    نتيجة أي صرف بسبب هذا الترحيل.
+-- ⚠ stock_levels محمي بسياسة عزل: التعبئة بلا SESSION_CONTEXT تُطبَّق على
+-- صفر صفوف بصمت (راجع تحذير رأس الملف). فيُدار على المنظمات كما في ترحيل
+-- role_permissions أعلاه.
+DECLARE @sdOrg UNIQUEIDENTIFIER;
+DECLARE @sdFilled INT = 0;
+DECLARE sd_cursor CURSOR LOCAL FAST_FORWARD FOR
+    SELECT DISTINCT organization_id FROM dbo.app_users;
+OPEN sd_cursor;
+FETCH NEXT FROM sd_cursor INTO @sdOrg;
+WHILE @@FETCH_STATUS = 0
+BEGIN
+    EXEC sp_set_session_context @key = N'organization_id', @value = @sdOrg;
+
+    UPDATE sl
+    SET strategy_date = COALESCE(
+            CAST(sl.expiry_date AS DATETIME2),
+            CASE WHEN p.track_expiry = 0 THEN sl.updated_at END)
+    FROM dbo.stock_levels sl
+    JOIN dbo.products p ON p.id = sl.product_id
+    WHERE sl.strategy_date IS NULL;
+    SET @sdFilled = @sdFilled + @@ROWCOUNT;
+
+    FETCH NEXT FROM sd_cursor INTO @sdOrg;
+END
+CLOSE sd_cursor;
+DEALLOCATE sd_cursor;
+EXEC sp_set_session_context @key = N'organization_id', @value = NULL;
+PRINT N'تاريخ الاستراتيجية: عُبِّئ ' + CAST(@sdFilled AS NVARCHAR) + N' صفّاً';
+GO
+
+PRINT N'تاريخ الاستراتيجية جاهز';
+GO
+
+-- ----------------------------------------------------------------------------
+--  خطوة اعتماد فروقات الجرد
+--
+--  كان الجرد ينتقل من open إلى reconciled بضغطة واحدة، فيُطبَّق فرقٌ ناتج عن
+--  خطأ عدّ على المخزون بلا أن يراه أحد. والفرق ليس رقماً محايداً: زيادة
+--  تُخفي سرقة، ونقصٌ يشطب بضاعة موجودة على الرفّ.
+--
+--  الحالة الجديدة pending_review تفرض قراراً بشرياً بخيارين لا ثالث لهما:
+--  اقبل الفرق، أو أعد العدّ. وجردٌ بلا فرق واحد لا يمرّ بها — إجبار المستخدم
+--  على تأكيد «لا شيء تغيّر» يُعلّمه أن يضغط بلا قراءة، وهو نقيض الغرض.
+-- ----------------------------------------------------------------------------
+IF NOT EXISTS (SELECT 1 FROM sys.columns
+               WHERE object_id = OBJECT_ID('dbo.stock_counts') AND name = 'submitted_by')
+BEGIN
+    ALTER TABLE dbo.stock_counts ADD
+        submitted_by UNIQUEIDENTIFIER NULL,
+        submitted_at DATETIME2 NULL,
+        reviewed_by UNIQUEIDENTIFIER NULL,
+        reviewed_at DATETIME2 NULL,
+        recount_reason NVARCHAR(300) NULL,
+        recount_rounds INT NOT NULL CONSTRAINT df_stock_counts_recount_rounds DEFAULT 0;
+    PRINT N'أُضيفت أعمدة اعتماد فروقات الجرد';
+END
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.foreign_keys WHERE name = 'fk_stock_counts_submitted_by')
+   AND EXISTS (SELECT 1 FROM sys.columns
+               WHERE object_id = OBJECT_ID('dbo.stock_counts') AND name = 'submitted_by')
+BEGIN
+    ALTER TABLE dbo.stock_counts ADD
+        CONSTRAINT fk_stock_counts_submitted_by FOREIGN KEY (submitted_by) REFERENCES dbo.app_users(id),
+        CONSTRAINT fk_stock_counts_reviewed_by  FOREIGN KEY (reviewed_by)  REFERENCES dbo.app_users(id);
+    PRINT N'أُضيفت قيود stock_counts.submitted_by/reviewed_by';
+END
+GO
+
+-- توسيع قيد الحالة ليقبل pending_review.
+--
+-- القيد القديم مكتوب داخل تعريف العمود، فاسمه مولَّد بلاحقة هاش تختلف بين
+-- القواعد (CK__stock_cou__statu__32AB8735) — فيُبحَث عنه بالجدول والعمود لا
+-- بالاسم. والجديد **مسمّى صراحةً**: بلا اسم ثابت لا يمكن ربط رسالة عربية به
+-- في DbConstraintMessageMiddleware، ولا توسيعه لاحقاً بأمان.
+IF NOT EXISTS (SELECT 1 FROM sys.check_constraints WHERE name = 'CK_stock_counts_status')
+BEGIN
+    DECLARE @old SYSNAME = (
+        SELECT TOP 1 cc.name
+        FROM sys.check_constraints cc
+        JOIN sys.columns c ON c.object_id = cc.parent_object_id AND c.column_id = cc.parent_column_id
+        WHERE cc.parent_object_id = OBJECT_ID('dbo.stock_counts') AND c.name = 'status');
+
+    IF @old IS NOT NULL
+        EXEC('ALTER TABLE dbo.stock_counts DROP CONSTRAINT [' + @old + ']');
+
+    ALTER TABLE dbo.stock_counts ADD CONSTRAINT CK_stock_counts_status
+        CHECK (status IN ('open','pending_review','reconciled','cancelled'));
+    PRINT N'وُسِّع قيد stock_counts.status ليقبل pending_review';
+END
+GO
+
+PRINT N'خطوة اعتماد فروقات الجرد جاهزة';
+GO
+
+-- ----------------------------------------------------------------------------
+--  مستند الاستلام — شحنة واحدة من أمر شراء
+--
+--  received_quantity رقم تراكمي يبتلع ثلاث شحنات في واحدة. فتضيع تواريخ
+--  الوصول (ومعها قياس مهلة التوريد الحقيقية بدل lead_time_days المُدخَل
+--  بالظنّ)، ورقم إشعار المورّد وهو المرجع الوحيد عند الخلاف، وأي شحنة تخصّ
+--  أي فاتورة مورّد حين تُبنى المطابقة.
+--
+--  شرط مسبق لدفتر حركة المخزون: سطر الإدخال يشير إلى مستند وصول حقيقي.
+-- ----------------------------------------------------------------------------
+IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'purchase_receipts')
+BEGIN
+    CREATE TABLE dbo.purchase_receipts (
+        id UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
+        organization_id UNIQUEIDENTIFIER NOT NULL REFERENCES dbo.organizations(id) ON DELETE CASCADE,
+        branch_id UNIQUEIDENTIFIER NOT NULL REFERENCES dbo.branches(id) ON DELETE NO ACTION,
+        purchase_order_id UNIQUEIDENTIFIER NOT NULL REFERENCES dbo.purchase_orders(id) ON DELETE NO ACTION,
+        supplier_note_number NVARCHAR(60) NULL,
+        received_on DATETIME2 NOT NULL,
+        received_by UNIQUEIDENTIFIER NULL REFERENCES dbo.app_users(id),
+        notes NVARCHAR(300) NULL,
+        created_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
+    );
+    PRINT N'أُنشئ جدول purchase_receipts';
+END
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'purchase_receipt_items')
+BEGIN
+    CREATE TABLE dbo.purchase_receipt_items (
+        id UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
+        purchase_receipt_id UNIQUEIDENTIFIER NOT NULL
+            REFERENCES dbo.purchase_receipts(id) ON DELETE CASCADE,
+        purchase_order_item_id UNIQUEIDENTIFIER NOT NULL
+            REFERENCES dbo.purchase_order_items(id) ON DELETE NO ACTION,
+        product_id UNIQUEIDENTIFIER NOT NULL REFERENCES dbo.products(id),
+        quantity DECIMAL(14,3) NOT NULL,
+        batch_number NVARCHAR(60) NOT NULL DEFAULT '',
+        expiry_date DATE NULL,
+        unit_cost DECIMAL(14,2) NOT NULL DEFAULT 0
+    );
+    PRINT N'أُنشئ جدول purchase_receipt_items';
+END
+GO
+
+-- العزل بعد إنشاء الجدول — وبشرط وجوده، لا بترتيب السطور وحده. (الترتيب
+-- وحده هو ما أوقف ترقية 2026-08-24 على قاعدة إنتاج تسبق invoice_item_batches.)
+IF EXISTS (SELECT 1 FROM sys.tables WHERE name = 'purchase_receipts')
+   AND NOT EXISTS (SELECT 1 FROM sys.security_policies WHERE name = 'PurchaseReceiptsPolicy')
+EXEC('
+CREATE SECURITY POLICY Security.PurchaseReceiptsPolicy
+  ADD FILTER PREDICATE Security.fn_TenantPredicate(organization_id, branch_id) ON dbo.purchase_receipts,
+  ADD BLOCK PREDICATE Security.fn_TenantPredicate(organization_id, branch_id) ON dbo.purchase_receipts AFTER INSERT
+  WITH (STATE = ON);');
+GO
+
+-- سطور المستند تصل إلى المنظمة عبر أبيها، كبقية جداول الأبناء.
+IF OBJECT_ID('Security.fn_PurchaseReceiptChild', 'IF') IS NULL
+   AND EXISTS (SELECT 1 FROM sys.tables WHERE name = 'purchase_receipts')
+EXEC('
+CREATE FUNCTION Security.fn_PurchaseReceiptChild(@ReceiptId UNIQUEIDENTIFIER)
+RETURNS TABLE
+WITH SCHEMABINDING
+AS
+RETURN SELECT 1 AS fn_result
+WHERE EXISTS (
+    SELECT 1 FROM dbo.purchase_receipts r
+    WHERE r.id = @ReceiptId
+      AND r.organization_id = CAST(SESSION_CONTEXT(N''organization_id'') AS UNIQUEIDENTIFIER)
+);');
+GO
+
+IF EXISTS (SELECT 1 FROM sys.tables WHERE name = 'purchase_receipt_items')
+   AND NOT EXISTS (SELECT 1 FROM sys.security_policies WHERE name = 'PurchaseReceiptItemsPolicy')
+EXEC('
+CREATE SECURITY POLICY Security.PurchaseReceiptItemsPolicy
+  ADD FILTER PREDICATE Security.fn_PurchaseReceiptChild(purchase_receipt_id) ON dbo.purchase_receipt_items,
+  ADD BLOCK PREDICATE Security.fn_PurchaseReceiptChild(purchase_receipt_id) ON dbo.purchase_receipt_items AFTER INSERT
+  WITH (STATE = ON);');
+GO
+
+PRINT N'مستند الاستلام جاهز';
+GO
+
+-- ----------------------------------------------------------------------------
+--  الديون: تاريخ استحقاق، وسلّم تذكير، وأعمار
+--
+--  البيع الآجل كان يقيّد الفرق دَيناً على محفظة العميل — وهو تصميم سليم
+--  محاسبياً — لكنه دَينٌ **بلا موعد**: لا يُقال عنه «متأخّر»، فلا تقرير
+--  أعمار ولا تذكير ولا أولوية تحصيل.
+--
+--  والتذكير يُسجَّل عند الإرسال لا عند حلول الموعد: صفٌّ آلي يجعل النظام
+--  يدّعي مطالبةً لم تقع، فتُترك المطالبة الحقيقية.
+-- ----------------------------------------------------------------------------
+IF NOT EXISTS (SELECT 1 FROM sys.columns
+               WHERE object_id = OBJECT_ID('dbo.customers') AND name = 'credit_days')
+BEGIN
+    ALTER TABLE dbo.customers ADD credit_days INT NOT NULL
+        CONSTRAINT df_customers_credit_days DEFAULT 0;
+    PRINT N'أُضيف عمود customers.credit_days';
+END
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.columns
+               WHERE object_id = OBJECT_ID('dbo.invoices') AND name = 'due_date')
+BEGIN
+    ALTER TABLE dbo.invoices ADD due_date DATETIME2 NULL;
+    PRINT N'أُضيف عمود invoices.due_date';
+END
+GO
+
+-- الفواتير الآجلة السابقة لهذا الترحيل تُملأ بتاريخ إصدارها: افتراض
+-- «مستحقّ يوم البيع» أصدق من تركها فارغة، لأن الفراغ يُخفي ديناً قديماً في
+-- خانة «لم يحن أجله بعد». (وDebtAging يعامل NULL بالمنطق نفسه احتياطاً.)
+-- invoices محميّ بسياسة عزل — التعبئة بلا سياق تُطبَّق على صفر صفوف بصمت.
+DECLARE @ddOrg UNIQUEIDENTIFIER;
+DECLARE @ddFilled INT = 0;
+DECLARE dd_cursor CURSOR LOCAL FAST_FORWARD FOR
+    SELECT DISTINCT organization_id FROM dbo.app_users;
+OPEN dd_cursor;
+FETCH NEXT FROM dd_cursor INTO @ddOrg;
+WHILE @@FETCH_STATUS = 0
+BEGIN
+    EXEC sp_set_session_context @key = N'organization_id', @value = @ddOrg;
+
+    UPDATE dbo.invoices
+    SET due_date = created_at
+    WHERE due_date IS NULL
+      AND invoice_type = 'sale'
+      AND paid_amount IS NOT NULL
+      AND paid_amount < total_amount;
+    SET @ddFilled = @ddFilled + @@ROWCOUNT;
+
+    FETCH NEXT FROM dd_cursor INTO @ddOrg;
+END
+CLOSE dd_cursor;
+DEALLOCATE dd_cursor;
+EXEC sp_set_session_context @key = N'organization_id', @value = NULL;
+PRINT N'تاريخ الاستحقاق: عُبِّئ ' + CAST(@ddFilled AS NVARCHAR) + N' فاتورة';
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'debt_reminders')
+BEGIN
+    CREATE TABLE dbo.debt_reminders (
+        id UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
+        organization_id UNIQUEIDENTIFIER NOT NULL REFERENCES dbo.organizations(id) ON DELETE CASCADE,
+        customer_id UNIQUEIDENTIFIER NOT NULL REFERENCES dbo.customers(id) ON DELETE NO ACTION,
+        stage INT NOT NULL CONSTRAINT CK_debt_reminders_stage CHECK (stage BETWEEN 1 AND 3),
+        due_on DATETIME2 NOT NULL,
+        sent_at DATETIME2 NOT NULL CONSTRAINT df_debt_reminders_sent_at DEFAULT SYSUTCDATETIME(),
+        sent_by UNIQUEIDENTIFIER NULL REFERENCES dbo.app_users(id),
+        amount_at_reminder DECIMAL(14,2) NOT NULL CONSTRAINT df_debt_reminders_amount DEFAULT 0,
+        note NVARCHAR(300) NULL
+    );
+    PRINT N'أُنشئ جدول debt_reminders';
+END
+GO
+
+IF EXISTS (SELECT 1 FROM sys.tables WHERE name = 'debt_reminders')
+   AND NOT EXISTS (SELECT 1 FROM sys.security_policies WHERE name = 'DebtRemindersPolicy')
+EXEC('
+CREATE SECURITY POLICY Security.DebtRemindersPolicy
+  ADD FILTER PREDICATE Security.fn_OrgOnlyPredicate(organization_id) ON dbo.debt_reminders,
+  ADD BLOCK PREDICATE Security.fn_OrgOnlyPredicate(organization_id) ON dbo.debt_reminders AFTER INSERT
+  WITH (STATE = ON);');
+GO
+
+PRINT N'الديون والتذكير والأعمار جاهزة';
+GO
+
+-- ----------------------------------------------------------------------------
+--  الجرد الموزَّع، والجرد الابتدائي، والكمية المتوقَّعة
+--
+--  ثلاثة أعمدة تُكمل ثلاثة عيوب:
+--
+--  products.last_counted_at   الجرد كان كلّه أو لا شيء — إغلاق المحل يوماً
+--                             كاملاً. بهذا العمود يُعدّ ما لم يُعدّ منذ مدّة.
+--  stock_counts.kind          كل زبون جديد كان يُدخل مخزونه الأول صنفاً صنفاً
+--                             من شاشة تعديل الكمية، بلا مستند ولا مراجعة.
+--  purchase_orders.is_auto    الأمر المولَّد آلياً لا يُميَّز عن اليدوي، فلا
+--                             تُراجَع المعادلة التي ولّدته.
+-- ----------------------------------------------------------------------------
+IF NOT EXISTS (SELECT 1 FROM sys.columns
+               WHERE object_id = OBJECT_ID('dbo.products') AND name = 'last_counted_at')
+BEGIN
+    ALTER TABLE dbo.products ADD last_counted_at DATETIME2 NULL;
+    PRINT N'أُضيف عمود products.last_counted_at';
+END
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.columns
+               WHERE object_id = OBJECT_ID('dbo.purchase_orders') AND name = 'is_auto')
+BEGIN
+    ALTER TABLE dbo.purchase_orders ADD is_auto BIT NOT NULL
+        CONSTRAINT df_purchase_orders_is_auto DEFAULT 0;
+    PRINT N'أُضيف عمود purchase_orders.is_auto';
+END
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.columns
+               WHERE object_id = OBJECT_ID('dbo.stock_counts') AND name = 'kind')
+BEGIN
+    ALTER TABLE dbo.stock_counts ADD kind NVARCHAR(20) NOT NULL
+        CONSTRAINT df_stock_counts_kind DEFAULT 'periodic';
+    PRINT N'أُضيف عمود stock_counts.kind';
+END
+GO
+
+-- قيد مسمّى صراحةً — راجع القاعدة في ARCHITECTURE.md §2.16: القيد المكتوب
+-- داخل تعريف العمود يولّد اسماً بلاحقة هاش تختلف بين القواعد.
+IF NOT EXISTS (SELECT 1 FROM sys.check_constraints WHERE name = 'CK_stock_counts_kind')
+   AND EXISTS (SELECT 1 FROM sys.columns
+               WHERE object_id = OBJECT_ID('dbo.stock_counts') AND name = 'kind')
+BEGIN
+    ALTER TABLE dbo.stock_counts ADD CONSTRAINT CK_stock_counts_kind
+        CHECK (kind IN ('periodic','initial'));
+    PRINT N'أُضيف قيد CK_stock_counts_kind';
+END
+GO
+
+-- تعبئة رجعية لآخر عدّ: الجرود المعتمَدة السابقة تُثبت أن أصنافها عُدّت
+-- يومها. بدونها يظهر كل صنف في أول جرد موزَّع وكأنه لم يُعدّ قطّ.
+-- products وstock_counts محميّان بسياسة عزل — نفس السبب أعلاه.
+DECLARE @lcOrg UNIQUEIDENTIFIER;
+DECLARE @lcFilled INT = 0;
+DECLARE lc_cursor CURSOR LOCAL FAST_FORWARD FOR
+    SELECT DISTINCT organization_id FROM dbo.app_users;
+OPEN lc_cursor;
+FETCH NEXT FROM lc_cursor INTO @lcOrg;
+WHILE @@FETCH_STATUS = 0
+BEGIN
+    EXEC sp_set_session_context @key = N'organization_id', @value = @lcOrg;
+
+    UPDATE p
+    SET last_counted_at = x.closed_at
+    FROM dbo.products p
+    JOIN (
+        SELECT sci.product_id, MAX(sc.closed_at) AS closed_at
+        FROM dbo.stock_count_items sci
+        JOIN dbo.stock_counts sc ON sc.id = sci.stock_count_id
+        WHERE sc.status = 'reconciled' AND sc.closed_at IS NOT NULL
+        GROUP BY sci.product_id
+    ) x ON x.product_id = p.id
+    WHERE p.last_counted_at IS NULL;
+    SET @lcFilled = @lcFilled + @@ROWCOUNT;
+
+    FETCH NEXT FROM lc_cursor INTO @lcOrg;
+END
+CLOSE lc_cursor;
+DEALLOCATE lc_cursor;
+EXEC sp_set_session_context @key = N'organization_id', @value = NULL;
+PRINT N'آخر عدّ: عُبِّئ ' + CAST(@lcFilled AS NVARCHAR) + N' صنفاً';
+GO
+
+PRINT N'الجرد الموزَّع والابتدائي والكمية المتوقَّعة جاهزة';
+GO
+
+-- ============================================================================
+--  المرحلة الثانية: دفتر حركة المخزون والمستودعات
+--
+--  الرصيد كان يُعدَّل في مكانه فلا تاريخ له ولا تكلفة. الدفتر يصبح مصدر
+--  الحقيقة، وstock_levels ذاكرة مشتقّة تُكتب معه في المعاملة نفسها عبر
+--  StockLedger وحده (Data/StockLedger.cs).
+-- ============================================================================
+IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'warehouses')
+BEGIN
+    CREATE TABLE dbo.warehouses (
+        id UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
+        organization_id UNIQUEIDENTIFIER NOT NULL REFERENCES dbo.organizations(id) ON DELETE CASCADE,
+        branch_id UNIQUEIDENTIFIER NOT NULL REFERENCES dbo.branches(id) ON DELETE NO ACTION,
+        parent_warehouse_id UNIQUEIDENTIFIER NULL REFERENCES dbo.warehouses(id),
+        name NVARCHAR(120) NOT NULL,
+        code NVARCHAR(40) NOT NULL DEFAULT '',
+        kind NVARCHAR(20) NOT NULL DEFAULT 'main',
+        CONSTRAINT CK_warehouses_kind
+            CHECK (kind IN ('main','transit','damaged','returns','quarantine')),
+        is_group BIT NOT NULL DEFAULT 0,
+        is_active BIT NOT NULL DEFAULT 1,
+        created_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
+    );
+    PRINT N'أُنشئ جدول warehouses';
+END
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'stock_ledger_entries')
+BEGIN
+    CREATE TABLE dbo.stock_ledger_entries (
+        id UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
+        organization_id UNIQUEIDENTIFIER NOT NULL REFERENCES dbo.organizations(id) ON DELETE CASCADE,
+        branch_id UNIQUEIDENTIFIER NOT NULL REFERENCES dbo.branches(id) ON DELETE NO ACTION,
+        warehouse_id UNIQUEIDENTIFIER NULL REFERENCES dbo.warehouses(id),
+        product_id UNIQUEIDENTIFIER NOT NULL REFERENCES dbo.products(id),
+        batch_number NVARCHAR(60) NOT NULL DEFAULT '',
+        expiry_date DATETIME2 NULL,
+        posted_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+        quantity_change DECIMAL(14,3) NOT NULL,
+        balance_after DECIMAL(14,3) NOT NULL,
+        unit_cost DECIMAL(14,2) NOT NULL DEFAULT 0,
+        value_after DECIMAL(18,2) NOT NULL DEFAULT 0,
+        value_change DECIMAL(18,2) NOT NULL DEFAULT 0,
+        source_type NVARCHAR(30) NOT NULL,
+        source_id UNIQUEIDENTIFIER NULL,
+        source_entry_id UNIQUEIDENTIFIER NULL REFERENCES dbo.stock_ledger_entries(id),
+        remaining_quantity DECIMAL(14,3) NOT NULL DEFAULT 0,
+        created_by UNIQUEIDENTIFIER NULL REFERENCES dbo.app_users(id),
+        created_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+        is_cancelled BIT NOT NULL DEFAULT 0,
+        cancel_reason NVARCHAR(300) NULL
+    );
+    PRINT N'أُنشئ جدول stock_ledger_entries';
+END
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.columns
+               WHERE object_id = OBJECT_ID('dbo.stock_levels') AND name = 'warehouse_id')
+BEGIN
+    ALTER TABLE dbo.stock_levels ADD warehouse_id UNIQUEIDENTIFIER NULL
+        CONSTRAINT fk_stock_levels_warehouse REFERENCES dbo.warehouses(id);
+    PRINT N'أُضيف عمود stock_levels.warehouse_id';
+END
+GO
+
+IF EXISTS (SELECT 1 FROM sys.tables WHERE name = 'warehouses')
+   AND NOT EXISTS (SELECT 1 FROM sys.security_policies WHERE name = 'WarehousesPolicy')
+EXEC('
+CREATE SECURITY POLICY Security.WarehousesPolicy
+  ADD FILTER PREDICATE Security.fn_TenantPredicate(organization_id, branch_id) ON dbo.warehouses,
+  ADD BLOCK PREDICATE Security.fn_TenantPredicate(organization_id, branch_id) ON dbo.warehouses AFTER INSERT
+  WITH (STATE = ON);');
+GO
+
+IF EXISTS (SELECT 1 FROM sys.tables WHERE name = 'stock_ledger_entries')
+   AND NOT EXISTS (SELECT 1 FROM sys.security_policies WHERE name = 'StockLedgerEntriesPolicy')
+EXEC('
+CREATE SECURITY POLICY Security.StockLedgerEntriesPolicy
+  ADD FILTER PREDICATE Security.fn_TenantPredicate(organization_id, branch_id) ON dbo.stock_ledger_entries,
+  ADD BLOCK PREDICATE Security.fn_TenantPredicate(organization_id, branch_id) ON dbo.stock_ledger_entries AFTER INSERT
+  WITH (STATE = ON);');
+GO
+
+-- ----------------------------------------------------------------------------
+--  الحركة الافتتاحية — الخطوة التي بدونها يتوقّف البيع
+--
+--  الدفتر يصرف من **سطور الإدخال**، فقاعدة قائمة بلا سطر افتتاحي واحد تعني
+--  أن كل بيع يفشل بـ«الكمية المتاحة صفر» بينما الرفّ ممتلئ.
+--
+--  ولذلك سطرٌ واحد لكل رصيد قائم بنوع opening: يقول إن هذه البضاعة كانت
+--  موجودة قبل الدفتر، لا أنها ظهرت من العدم. تكلفتها من سعر تكلفة الصنف —
+--  وهو أدقّ ما هو متاح، فلا تاريخ شراء لها يُقرأ منه أفضل.
+--
+--  ⚠ يدور على المنظمات: stock_levels محميّ بسياسة عزل، والإدراج بلا سياق
+--  يرفضه مسند BLOCK صراحةً بخلاف التحديث الذي يمرّ صامتاً على صفر صفوف.
+-- ----------------------------------------------------------------------------
+-- ⚠ حارس التكرار **داخل** الحلقة لا قبلها: فحصٌ قبل ضبط السياق يقرأ عبر
+-- سياسة العزل فيرى صفر صفوف دائماً — فيُعيد الإدراج في كل تنفيذ ويضاعف
+-- الدفتر. وهو أيضاً الأصحّ منطقياً: منظمة تُضاف لاحقاً تستحقّ حركتها
+-- الافتتاحية ولو كانت لغيرها حركات.
+DECLARE @opOrg UNIQUEIDENTIFIER;
+DECLARE @opRows INT = 0;
+
+DECLARE op_cursor CURSOR LOCAL FAST_FORWARD FOR
+    SELECT DISTINCT organization_id FROM dbo.app_users;
+
+OPEN op_cursor;
+FETCH NEXT FROM op_cursor INTO @opOrg;
+
+WHILE @@FETCH_STATUS = 0
+BEGIN
+    EXEC sp_set_session_context @key = N'organization_id', @value = @opOrg;
+
+    IF NOT EXISTS (SELECT 1 FROM dbo.stock_ledger_entries WHERE source_type = 'opening')
+    BEGIN
+        INSERT INTO dbo.stock_ledger_entries (
+            organization_id, branch_id, warehouse_id, product_id,
+            batch_number, expiry_date, posted_at,
+            quantity_change, balance_after, unit_cost, value_after, value_change,
+            source_type, source_id, remaining_quantity)
+        SELECT
+            sl.organization_id, sl.branch_id, sl.warehouse_id, sl.product_id,
+            sl.batch_number, CAST(sl.expiry_date AS DATETIME2),
+            -- updated_at لا strategy_date: الأخير للصنف المتتبَّع هو تاريخ
+            -- **الانتهاء**، ووضعه هنا يجعل الدفتر يقول إن البضاعة أُدخلت في
+            -- 2027 — فينهار سؤال «كم كان الرصيد يوم كذا»، وهو غاية الدفتر.
+            -- وترتيب الصرف لا يتأثّر: يقرأ expiry_date أوّلاً (المنسوخ أدناه)
+            -- ثم posted_at.
+            COALESCE(sl.updated_at, SYSUTCDATETIME()),
+            sl.quantity, sl.quantity,
+            p.cost_price, sl.quantity * p.cost_price, sl.quantity * p.cost_price,
+            'opening', NULL, sl.quantity
+        FROM dbo.stock_levels sl
+        JOIN dbo.products p ON p.id = sl.product_id
+        WHERE sl.quantity > 0;
+
+        SET @opRows = @opRows + @@ROWCOUNT;
+    END
+
+    FETCH NEXT FROM op_cursor INTO @opOrg;
+END
+
+CLOSE op_cursor;
+DEALLOCATE op_cursor;
+EXEC sp_set_session_context @key = N'organization_id', @value = NULL;
+
+PRINT N'الحركة الافتتاحية: أُنشئ ' + CAST(@opRows AS NVARCHAR) + N' سطر دفتر';
+GO
+
+PRINT N'دفتر حركة المخزون والمستودعات جاهزان';
+GO
+
+-- ----------------------------------------------------------------------------
+--  مزامنة وحدات الترخيص مع الإصدار — شرط تفعيل فرض الوحدات
+--
+--  enabled_modules كان يُكتب عند إنشاء المنظمة ولا يقرأه أحد: التقييد كان
+--  على الإصدار وحده. وقد صار يُفرَض الآن (LicenseLimits.EffectiveModules)،
+--  فقائمة متخلّفة عن الإصدار تعني حجب وحدة يستعملها العميل اليوم — عقوبةً
+--  على ترقية لا ذنب له فيها.
+--
+--  فتُزامَن مرّة: كل ترخيص يأخذ وحدات إصدار منظمته. وبعدها يُحدِّثها
+--  PlatformController عند كل تغيير إصدار.
+-- ----------------------------------------------------------------------------
+DECLARE @lmOrg UNIQUEIDENTIFIER;
+DECLARE @lmEdition NVARCHAR(20);
+DECLARE @lmModules NVARCHAR(MAX);
+DECLARE @lmCount INT = 0;
+
+DECLARE lm_cursor CURSOR LOCAL FAST_FORWARD FOR
+    SELECT DISTINCT organization_id FROM dbo.app_users;
+
+OPEN lm_cursor;
+FETCH NEXT FROM lm_cursor INTO @lmOrg;
+
+WHILE @@FETCH_STATUS = 0
+BEGIN
+    EXEC sp_set_session_context @key = N'organization_id', @value = @lmOrg;
+
+    SELECT @lmEdition = edition FROM dbo.organizations;
+
+    -- القوائم مطابقة لـEditions.ModulesOf في Entities.cs. تكرارها هنا مقصود
+    -- ومحدود بترحيل يُنفَّذ مرّة: البديل — قراءتها من التطبيق — يجعل الترحيل
+    -- يعتمد على تشغيل الخادم، وهو ما لا يحدث أثناء الترقية.
+    SET @lmModules =
+        CASE @lmEdition
+            WHEN 'wallet'     THEN N'["pos","customers","reports"]'
+            WHEN 'pharmacy'   THEN N'["inventory","pos","customers","reports","pharmacy"]'
+            WHEN 'enterprise' THEN N'["inventory","pos","customers","reports","warehouses","valuation","procurement"]'
+            ELSE                   N'["inventory","pos","customers","reports"]'
+        END;
+
+    UPDATE dbo.licenses
+    SET enabled_modules = @lmModules
+    WHERE organization_id = @lmOrg AND enabled_modules <> @lmModules;
+    SET @lmCount = @lmCount + @@ROWCOUNT;
+
+    FETCH NEXT FROM lm_cursor INTO @lmOrg;
+END
+
+CLOSE lm_cursor;
+DEALLOCATE lm_cursor;
+EXEC sp_set_session_context @key = N'organization_id', @value = NULL;
+
+PRINT N'وحدات الترخيص: زُومنت ' + CAST(@lmCount AS NVARCHAR) + N' رخصة';
+GO
+
+PRINT N'فرض حدود الترخيص جاهز';
+GO
+
+-- ----------------------------------------------------------------------------
+--  حالة الاشتراك ووضع القراءة فقط
+--
+--  حالات الترخيص الأربع كانت معرَّفة في المخطّط منذ اليوم الأول ولا يقرأها
+--  سطر واحد: ترخيصٌ انتهى أو أُلغي كان يعمل كالجديد تماماً.
+--
+--  is_read_only عمود واحد يخدم ثلاث حاجات: نسخة عرض تُرى ولا تُعدَّل، وعميل
+--  متأخّر يُجمَّد بلا فقد بياناته، ومهلة ما بعد الانتهاء التي يذكرها
+--  ARCHITECTURE.md §2.2 — «قراءة فقط بدل توقّف مفاجئ يفقد ثقة الزبون».
+-- ----------------------------------------------------------------------------
+IF NOT EXISTS (SELECT 1 FROM sys.columns
+               WHERE object_id = OBJECT_ID('dbo.licenses') AND name = 'is_read_only')
+BEGIN
+    ALTER TABLE dbo.licenses ADD
+        is_read_only BIT NOT NULL CONSTRAINT df_licenses_is_read_only DEFAULT 0,
+        status_reason NVARCHAR(300) NULL,
+        status_changed_at DATETIME2 NULL;
+    PRINT N'أُضيفت أعمدة حالة الاشتراك';
+END
+GO
+
+PRINT N'حالة الاشتراك ووضع القراءة فقط جاهزان';
+GO
+
+-- ----------------------------------------------------------------------------
+--  لوح خلفية الفرع
+--
+--  يميّز المكان لا الشخص: تفضيل السطوع شخصيّ يُحفَظ على الجهاز، واللوح يقول
+--  لموظفٍ ينتقل بين فرعين أين هو الآن — فيمنع إدخال بيانات في الفرع الخطأ.
+-- ----------------------------------------------------------------------------
+IF NOT EXISTS (SELECT 1 FROM sys.columns
+               WHERE object_id = OBJECT_ID('dbo.branches') AND name = 'theme_palette')
+BEGIN
+    ALTER TABLE dbo.branches ADD theme_palette NVARCHAR(20) NOT NULL
+        CONSTRAINT df_branches_theme_palette DEFAULT 'default';
+    PRINT N'أُضيف عمود branches.theme_palette';
+END
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.check_constraints WHERE name = 'CK_branches_theme_palette')
+   AND EXISTS (SELECT 1 FROM sys.columns
+               WHERE object_id = OBJECT_ID('dbo.branches') AND name = 'theme_palette')
+BEGIN
+    ALTER TABLE dbo.branches ADD CONSTRAINT CK_branches_theme_palette
+        CHECK (theme_palette IN ('default','warm','cool','green','slate'));
+    PRINT N'أُضيف قيد CK_branches_theme_palette';
+END
+GO
+
+PRINT N'لوح خلفية الفرع جاهز';
 GO
 
 -- ----------------------------------------------------------------------------

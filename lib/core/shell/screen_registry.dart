@@ -17,6 +17,9 @@ import '../../features/stock_transfer/presentation/stock_transfer_screen.dart';
 import '../../features/stock_count/presentation/stock_count_screen.dart';
 import '../../features/barcode_designer/presentation/barcode_designer_screen.dart';
 import '../../features/support/presentation/support_screen.dart';
+import '../../features/pharmacy/presentation/medicine_reference_screen.dart';
+import '../../features/reorder/presentation/reorder_screen.dart';
+import '../../features/pharmacy/presentation/prescriptions_screen.dart';
 import '../../features/platform/presentation/create_organization_screen.dart';
 import '../../features/pos/presentation/wallet_pos_screen.dart';
 import '../../features/platform/presentation/platform_organizations_screen.dart';
@@ -67,6 +70,12 @@ Widget buildScreenForRoute(String route) {
       return const BarcodeDesignerScreen();
     case '/support':
       return const SupportScreen();
+    case '/reorder':
+      return const ReorderScreen();
+    case '/medicine-reference':
+      return const MedicineReferenceScreen();
+    case '/prescriptions':
+      return const PrescriptionsScreen();
     case '/platform/organizations':
       return const PlatformOrganizationsScreen();
     case '/platform/organizations/new':

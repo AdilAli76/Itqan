@@ -1,0 +1,40 @@
+{
+  "totalValue": 4180.0,
+  "legacyValue": 3900.0,
+  "productCount": 3,
+  "items": [
+    {
+      "productId": "3f1c9a10-0000-4000-8000-000000000001",
+      "sku": "PRC-100",
+      "productName": "باراسيتامول 500 مجم",
+      "unitBase": "علبة",
+      "quantity": 260.0,
+      "totalValue": 2340.0,
+      "averageCost": 9.0,
+      "productCostPrice": 8.0,
+      "lotCount": 4
+    },
+    {
+      "productId": "3f1c9a10-0000-4000-8000-000000000002",
+      "sku": "AMX-250",
+      "productName": "أموكسيسيلين 250 مجم",
+      "unitBase": "علبة",
+      "quantity": 120.0,
+      "totalValue": 1440.0,
+      "averageCost": 12.0,
+      "productCostPrice": 12.0,
+      "lotCount": 1
+    },
+    {
+      "productId": "3f1c9a10-0000-4000-8000-000000000003",
+      "sku": "VIT-C",
+      "productName": "فيتامين سي فوّار",
+      "unitBase": "أنبوب",
+      "quantity": 80.0,
+      "totalValue": 400.0,
+      "averageCost": 5.0,
+      "productCostPrice": 5.5,
+      "lotCount": 2
+    }
+  ]
+}

@@ -1,4 +1,4 @@
-using System.IdentityModel.Tokens.Jwt;
+﻿using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -9,6 +9,8 @@ using KineticEnterprise.Api.Data;
 using KineticEnterprise.Api.Models;
 
 namespace KineticEnterprise.Api.Controllers;
+
+public record RecordDebtReminderRequest(string? Note = null);
 
 public record WalletAdjustmentRequest(decimal AmountDelta, string? Note);
 public record IssueCardRequest(string Pin);
@@ -22,7 +24,10 @@ public record CustomerPageDto(List<CustomerDto> Items, int TotalCount, int Page,
 public record CustomerDto(
     Guid Id, Guid OrganizationId, Guid? BranchId, string FullName, string? Phone,
     string? Email, string? Notes, string? CardBarcode,
-    decimal WalletBalance, decimal CreditLimit, int LoyaltyPoints, DateTime CreatedAt,
+    decimal WalletBalance, decimal CreditLimit,
+    /// مهلة السداد بالأيام — راجع Customer.CreditDays.
+    int CreditDays,
+    int LoyaltyPoints, DateTime CreatedAt,
     string AccountModel, Guid? SponsorId, string? SponsorName,
     decimal EntitlementCeiling, DateOnly? EntitlementExpiresOn);
 
@@ -186,6 +191,9 @@ public class CustomersController : ControllerBase
         customer.CardBarcode = update.CardBarcode;
         customer.BranchId = update.BranchId;
         customer.CreditLimit = update.CreditLimit;
+        // السالب مرفوض هنا لا في الواجهة وحدها: مهلة سالبة تجعل كل بيع
+        // متأخّراً لحظة إنشائه، فتُغرق سلّم التذكير بضجيج يُبطله.
+        customer.CreditDays = Math.Max(0, update.CreditDays);
 
         if (!AccountModels.IsValid(update.AccountModel))
         {
@@ -365,6 +373,55 @@ public class CustomersController : ControllerBase
     /// عادي على card_barcode كان يمنع وجود عميلَين بلا بطاقة (SQL Server
     /// يعتبر كل NULL متساوية)، وظهر الخطأ كأنه تكرار باركود.
     /// </summary>
+    /// <summary>
+    /// تسجيل تذكير أُرسل للعميل بدَينه.
+    ///
+    /// <para>يُسجَّل بعد الاتصال أو الرسالة لا قبلها — راجع [DebtReminder]:
+    /// صفٌّ يقول «أُرسل» عن شيء لم يُرسَل يجعل سجلّ المطالبة عديم القيمة،
+    /// ويوقف المطالبة الحقيقية لأن النظام يظنّها تمّت.</para>
+    /// </summary>
+    [HttpPost("{id:guid}/debt-reminders")]
+    [RequirePermission("customers.manage")]
+    public async Task<ActionResult<DebtReminder>> RecordDebtReminder(Guid id, RecordDebtReminderRequest request)
+    {
+        var customer = await _db.Customers.FirstOrDefaultAsync(c => c.Id == id && !c.IsDeleted);
+        if (customer is null) return NotFound();
+
+        var aging = (await Data.DebtAging.ComputeAsync(_db, DateTime.UtcNow))
+            .FirstOrDefault(a => a.CustomerId == id);
+        if (aging is null)
+        {
+            return BadRequest(new { message = "لا دَين على هذا العميل" });
+        }
+
+        // المرحلة من الحساب لا من الطلب: تركُها للعميل يسمح بتسجيل «المرحلة
+        // الثالثة» على دَين حلّ أمس، فينهار معنى السلّم كلّه.
+        var reminder = new DebtReminder
+        {
+            OrganizationId = customer.OrganizationId,
+            CustomerId = customer.Id,
+            Stage = Math.Max(1, aging.Stage),
+            DueOn = aging.OldestDueDate ?? DateTime.UtcNow.Date,
+            AmountAtReminder = aging.TotalOutstanding,
+            SentBy = CurrentUserId(),
+            Note = string.IsNullOrWhiteSpace(request.Note) ? null : request.Note.Trim(),
+        };
+
+        _db.DebtReminders.Add(reminder);
+        _db.LogAudit(customer.OrganizationId, CurrentUserId(), "customer.debt_reminded", "customers", customer.Id,
+            newValues: new { reminder.Stage, reminder.AmountAtReminder, aging.DaysOverdue });
+        await _db.SaveChangesAsync();
+        return reminder;
+    }
+
+    /// <summary>سجلّ تذكيرات هذا العميل — الأحدث أولاً.</summary>
+    [HttpGet("{id:guid}/debt-reminders")]
+    public async Task<ActionResult<List<DebtReminder>>> DebtReminders(Guid id) =>
+        await _db.DebtReminders
+            .Where(r => r.CustomerId == id)
+            .OrderByDescending(r => r.SentAt)
+            .ToListAsync();
+
     private static bool IsDuplicateKey(DbUpdateException ex) =>
         ex.InnerException is SqlException sql && (sql.Number == 2601 || sql.Number == 2627);
 
@@ -385,7 +442,7 @@ public class CustomersController : ControllerBase
 
     private static CustomerDto ToDto(Customer c, decimal balance, string? sponsorName = null) =>
         new(c.Id, c.OrganizationId, c.BranchId, c.FullName, c.Phone, c.Email, c.Notes,
-            c.CardBarcode, balance, c.CreditLimit, c.LoyaltyPoints, c.CreatedAt,
+            c.CardBarcode, balance, c.CreditLimit, c.CreditDays, c.LoyaltyPoints, c.CreatedAt,
             c.AccountModel, c.SponsorId, sponsorName, c.EntitlementCeiling, c.EntitlementExpiresOn);
 
     private Guid? CurrentUserId()

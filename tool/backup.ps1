@@ -49,6 +49,9 @@ param(
     [string]$SqlInstance = '.\SQLEXPRESS',
     [string]$Database = 'KineticEnterprise',
     [string]$Path,
+    # مجلد المرفقات المرفوعة (Storage:Path في appsettings.Production.json).
+    # يُشتقّ من ملف الأسرار إن تُرك فارغاً.
+    [string]$UploadsPath,
     [int]$RetentionDays = 30,
     [switch]$Install,
     [string]$Time = '02:00'
@@ -199,6 +202,48 @@ WITH FORMAT, INIT, CHECKSUM, STATS = 25, NAME = N'$Database كامل';
     exit 1
 }
 
+# ═══════════════════ المرفقات ════════════════════════════════════════════
+#
+# نسخة القاعدة وحدها **لا تكفي**: صفوف attachments تشير إلى ملفات على القرص،
+# فاسترجاع القاعدة بلا الملفات يُنتج نظاماً يعرض مرفقات لا تُفتح — وهو أسوأ
+# من فقدانها، لأن المستخدم يظنّها موجودة.
+#
+# والملفات مقسَّمة بمجلد لكل منظمة (راجع FilesController.OrgFolder)، فنسخة
+# المرفقات قابلة للتجزئة: يمكن استرجاع عميل واحد بلا لمس بقيّة العملاء.
+
+if (-not $UploadsPath) {
+    # من ملف أسرار النشر: هو المصدر الوحيد الذي لا يكذب عن المجلد المستعمل.
+    $secretsCandidates = @(
+        'C:\kinetic\backend\appsettings.Production.json',
+        'C:\inetpub\kinetic-api\appsettings.Production.json'
+    ) | Where-Object { Test-Path $_ }
+
+    if ($secretsCandidates) {
+        try {
+            $cfg = Get-Content $secretsCandidates[0] -Raw | ConvertFrom-Json
+            if ($cfg.Storage -and $cfg.Storage.Path) { $UploadsPath = $cfg.Storage.Path }
+        } catch { }
+    }
+}
+
+if ($UploadsPath -and (Test-Path $UploadsPath)) {
+    $uploadsZip = Join-Path $Path ("uploads_{0}.zip" -f (Get-Date -Format 'yyyyMMdd_HHmmss'))
+    try {
+        Compress-Archive -Path (Join-Path $UploadsPath '*') -DestinationPath $uploadsZip -Force -ErrorAction Stop
+        $sizeMb = [math]::Round((Get-Item $uploadsZip).Length / 1MB, 1)
+        Write-Log "نُسخت المرفقات: $uploadsZip ($sizeMb ميغابايت)"
+    } catch {
+        # فشل المرفقات لا يُبطل نسخة القاعدة الناجحة — يُسجَّل بوضوح ويُكمَل.
+        Write-Log "تعذّر نسخ المرفقات من $UploadsPath : $($_.Exception.Message)" 'WARN'
+    }
+}
+elseif ($UploadsPath) {
+    Write-Log "مجلد المرفقات غير موجود: $UploadsPath" 'WARN'
+}
+else {
+    Write-Log 'لم يُحدَّد مجلد المرفقات — نسخة القاعدة وحدها. مرّر -UploadsPath' 'WARN'
+}
+
 # ═══════════════════ الاستبقاء ═══════════════════════════════════════════
 # بعد نجاح الجديدة لا قبلها.
 $cutoff = (Get-Date).AddDays(-$RetentionDays)
@@ -219,6 +264,20 @@ if ($old) {
     }
 }
 
+# نفس الاستبقاء على أرشيفات المرفقات، وبنفس الحارس: لا تُحذف كلها.
+$oldUploads = Get-ChildItem -Path $Path -Filter 'uploads_*.zip' -ErrorAction SilentlyContinue |
+              Where-Object { $_.LastWriteTime -lt $cutoff }
+if ($oldUploads) {
+    $remainingUploads = (Get-ChildItem -Path $Path -Filter 'uploads_*.zip').Count - $oldUploads.Count
+    if ($remainingUploads -lt 1) {
+        Write-Log "تُرك $($oldUploads.Count) أرشيف مرفقات قديماً: حذفها يعني بقاء صفر" 'WARN'
+    } else {
+        foreach ($f in $oldUploads) { Remove-Item $f.FullName -Force }
+        Write-Log "حُذف $($oldUploads.Count) أرشيف مرفقات قديم"
+    }
+}
+
 $count = (Get-ChildItem -Path $Path -Filter "$Database`_*.bak").Count
-Write-Log "اكتمل. النسخ المتاحة: $count"
+$uploadCount = (Get-ChildItem -Path $Path -Filter 'uploads_*.zip' -ErrorAction SilentlyContinue).Count
+Write-Log "اكتمل. نسخ القاعدة: $count — أرشيفات المرفقات: $uploadCount"
 Write-Host ''

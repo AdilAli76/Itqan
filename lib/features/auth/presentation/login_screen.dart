@@ -36,6 +36,11 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       });
       final token = response.data['token'] as String;
       await ApiClient.instance.saveToken(token);
+
+      // لوح خلفية الفرع يُطبَّق قبل الانتقال: تطبيقه بعد بناء الشاشة يجعلها
+      // تومض بالمحايد ثم تتبدّل أمام المستخدم. راجع BranchPalettes.
+      AppColors.applyBranchPalette(response.data['branchPalette'] as String?);
+
       ref.invalidate(brandingProvider);
       if (mounted) context.go('/app');
     } catch (_) {
@@ -137,29 +142,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         child: isDesktop
             ? Row(
                 children: [
-                  // اللوحة اليسرى للهوية البصرية - جزء من العلامة التجارية
+                  // اللوحة اليسرى للهوية البصرية — جزء من العلامة التجارية
                   // القابلة للتخصيص، وليست تدرجاً بنفسجياً جاهزاً.
-                  Expanded(
-                    child: Container(
-                      color: Theme.of(context).colorScheme.primary,
-                      alignment: Alignment.center,
-                      child: Padding(
-                        padding: const EdgeInsets.all(48),
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            const Icon(Icons.hub_outlined, color: Colors.white, size: 48),
-                            const SizedBox(height: 20),
-                            Text(
-                              'إدارة موحّدة لكل فروعك\nمن لوحة تحكم واحدة',
-                              textAlign: TextAlign.center,
-                              style: AppTextStyles.headlineLg(color: Colors.white),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
+                  const Expanded(child: _BrandPanel()),
                   Expanded(child: _scrollableCenter(form, 32)),
                 ],
               )
@@ -256,6 +241,70 @@ class _Step extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// لوحة الهوية على شاشة الدخول.
+///
+/// **لماذا ليست لوناً مسطّحاً:** كانت مستطيلاً بلون واحد فتبدو الشاشة نموذجاً
+/// داخلياً لا منتجاً. والتدرّج بين لونَي المنظمة يعطي عمقاً **بلا شحن أي
+/// صورة**: صورة ثابتة في الحزمة تناقض التخصيص (لكل عميل لونان مختلفان)،
+/// وتزيد أول تحميل الذي خفّضناه للتوّ إلى الربع.
+///
+/// والعلامة المائية شفافة خلف النصّ — «صورة» مرسومة بالكود تتلوّن بهوية كل
+/// عميل تلقائياً، فلا تحتاج ملفاً لكل واحد.
+class _BrandPanel extends StatelessWidget {
+  const _BrandPanel();
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topRight,
+          end: Alignment.bottomLeft,
+          colors: [
+            scheme.primary,
+            Color.lerp(scheme.primary, scheme.secondary, 0.55) ?? scheme.primary,
+            scheme.primary,
+          ],
+          stops: const [0, 0.55, 1],
+        ),
+      ),
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          // تتجاوز حدود اللوحة عمداً فتُقصّ: الشكل المقصوص يوحي بامتداد خارج
+          // الإطار، والمتمركز الكامل يبدو ملصقاً.
+          Positioned(
+            right: -60,
+            bottom: -40,
+            child: Icon(
+              Icons.hub_outlined,
+              size: 320,
+              color: Colors.white.withValues(alpha: 0.07),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(48),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.hub_outlined, color: Colors.white.withValues(alpha: 0.92), size: 48),
+                const SizedBox(height: 20),
+                Text(
+                  'إدارة موحّدة لكل فروعك\nمن لوحة تحكم واحدة',
+                  textAlign: TextAlign.center,
+                  style: AppTextStyles.headlineLg(color: Colors.white),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

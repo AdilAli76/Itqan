@@ -1,14 +1,23 @@
-using System.Text;
+﻿using System.Text;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using KineticEnterprise.Api.Data;
 using KineticEnterprise.Api.Hubs;
 using KineticEnterprise.Api.Middleware;
+using Microsoft.AspNetCore.ResponseCompression;
+using Microsoft.AspNetCore.StaticFiles;
 
 // أوامر الصيانة تُنفَّذ وتخرج قبل بناء السيرفر — لا تفتح منفذاً ولا تشغّل
 // المهام الخلفية. راجع PlatformOwnerBootstrap لسبب كون إنشاء أول حساب أمراً
 // على السيرفر لا نقطة نهاية HTTP.
+// ضغط أصول الويب — أمر بناء لا تشغيل: يُستدعى من publish.ps1 ويخرج فوراً.
+// منفصل عن الكتلة التالية لأنه لا يحتاج إعدادات ولا قاعدة بيانات إطلاقاً.
+if (args.Length > 0 && args[0] == KineticEnterprise.Api.Data.WebAssetCompressor.CommandName)
+{
+    return KineticEnterprise.Api.Data.WebAssetCompressor.Run(args);
+}
+
 if (args.Length > 0 &&
     (args[0] == KineticEnterprise.Api.Data.PlatformOwnerBootstrap.CommandName ||
      args[0] == KineticEnterprise.Api.Data.PlatformOwnerBootstrap.ResetCommandName ||
@@ -80,12 +89,55 @@ builder.Services
     });
 
 builder.Services.AddAuthorization();
-builder.Services.AddControllers();
+builder.Services.AddControllers(options =>
+{
+    // بوّابة حالة الترخيص عامّة لا على كل وحدة تحكّم: بوّابة تُضاف يدوياً
+    // تُنسى في أول وحدة جديدة. راجع [LicenseGateAttribute].
+    options.Filters.Add<KineticEnterprise.Api.Authorization.LicenseGateAttribute>();
+});
 builder.Services.AddSignalR();
 
 // إسقاط الاستحقاقات المنتهية يومياً — راجع EntitlementSweeper لسبب كونه
 // مهمة خلفية لا حساباً وقت القراءة.
 builder.Services.AddHostedService<EntitlementSweepService>();
+
+// إنذار الصلاحية يومياً — نوع expiry كان معرَّفاً في المخطط ولا يكتبه أحد،
+// أي أن البضاعة كانت تتلف بلا إشعار. راجع ExpirySweeper.
+builder.Services.AddHostedService<ExpirySweepService>();
+
+// إنذار الديون المتأخّرة يومياً — الآجل كان دَيناً بلا موعد ولا تذكير ولا
+// تصنيف تأخّر. راجع DebtReminderSweeper.
+builder.Services.AddHostedService<DebtReminderSweepService>();
+// ضغط الاستجابات — أكبر مكسب سرعة في النظام كلّه.
+//
+// web.config يمرّر **كل** طلب إلى ASP.NET Core (‎path="*"‎)، فالملفات الساكنة
+// تُخدَم من Kestrel لا من IIS، وضغط IIS الساكن لا يمسّها. النتيجة أن كل
+// زائر كان ينزّل main.dart.js بحجمه الخام (~5.5 ميغابايت) وملفات canvaskit
+// معه — على اتصال ليبي متوسط هذه عشرات الثواني قبل ظهور أول شاشة.
+//
+// Brotli قبل Gzip: يضغط ملفات JavaScript أكثر بنحو 15٪، وكل المتصفّحات
+// الحديثة تدعمه. وGzip يبقى للقديمة.
+builder.Services.AddResponseCompression(options =>
+{
+    // على HTTPS أيضاً: هجوم BREACH النظري يخصّ استجابات تحمل أسراراً
+    // وتعكس مدخلات المستخدم، لا ملفات ساكنة يتشاركها كل الزوّار.
+    options.EnableForHttps = true;
+    options.Providers.Add<BrotliCompressionProvider>();
+    options.Providers.Add<GzipCompressionProvider>();
+    options.MimeTypes = ResponseCompressionDefaults.MimeTypes.Concat(new[]
+    {
+        "application/javascript",
+        "text/javascript",
+        // wasm أثقل ملف في الحزمة وليس في القائمة الافتراضية إطلاقاً.
+        "application/wasm",
+        "application/json",
+        "image/svg+xml",
+        "application/manifest+json",
+        "font/ttf",
+        "font/woff2",
+    });
+});
+
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
@@ -134,8 +186,103 @@ if (builder.Configuration.GetValue<bool>("UseHttpsRedirection"))
     app.UseHttpsRedirection();
 }
 
+// ── الأصول المضغوطة مسبقاً ───────────────────────────────────────────────
+//
+// publish.ps1 يضغط أصول الويب مرّة واحدة وقت البناء بأقصى جودة، وهذا الوسيط
+// يقدّمها لمن يقبلها. القياس هو ما فرض هذا الحلّ:
+//
+//   main.dart.js   خام 5476 KB
+//                  ضغط لحظي (Fastest)  1949 KB
+//                  ضغط بناء (أقصى)     ~1100 KB
+//
+// والضغط اللحظي بأقصى جودة غير وارد: يستغرق ثوانيَ على ملف بهذا الحجم **في
+// كل طلب**. فالخيار بين جودة رديئة الآن أو جودة عالية مرّة واحدة — والثاني
+// أرخص على الخادم أيضاً، إذ لا معالجة إطلاقاً وقت الطلب.
+//
+// ويبقى UseResponseCompression بعده للملفات التي لا نسخة مضغوطة لها
+// (ردود الـAPI مثلاً، وهي صغيرة فلا تُثقل).
+app.Use(async (context, next) =>
+{
+    var path = context.Request.Path.Value;
+    if (path is not null && !path.StartsWith("/api", StringComparison.OrdinalIgnoreCase))
+    {
+        var accept = context.Request.Headers.AcceptEncoding.ToString();
+        // br أولاً: نسخة البناء بأقصى جودة تتفوّق على gzip بفارق واضح،
+        // بخلاف الضغط اللحظي حيث كان العكس.
+        var encoding = accept.Contains("br", StringComparison.OrdinalIgnoreCase) ? "br"
+                     : accept.Contains("gzip", StringComparison.OrdinalIgnoreCase) ? "gzip"
+                     : null;
+
+        if (encoding is not null)
+        {
+            var suffix = encoding == "br" ? ".br" : ".gz";
+            var candidate = Path.Combine(app.Environment.WebRootPath ?? "", path.TrimStart('/') + suffix);
+            if (System.IO.File.Exists(candidate))
+            {
+                context.Response.Headers.ContentEncoding = encoding;
+                // Vary إلزامي: بدونه يخزّن أي وسيط بين المستخدم والخادم نسخة
+                // مضغوطة ويقدّمها لمتصفّح لا يقبلها، فتصل بايتات غير مفهومة.
+                context.Response.Headers.Vary = "Accept-Encoding";
+                context.Request.Path = path + suffix;
+            }
+        }
+    }
+
+    await next();
+});
+
+// بعد الأصول المضغوطة مسبقاً: يضغط ما لم تُغطِّه (ردود الـAPI أساساً).
+app.UseResponseCompression();
+
 app.UseDefaultFiles();
-app.UseStaticFiles();
+// ServeUnknownFileTypes ضروري لأن المسار أُعيدت كتابته إلى ‎.br/.gz‎ وهما
+// امتدادان غير معروفين — ونوع المحتوى الصحيح مضبوط سلفاً في الوسيط أعلاه.
+app.UseStaticFiles(new StaticFileOptions
+{
+    ServeUnknownFileTypes = true,
+    DefaultContentType = "application/octet-stream",
+    OnPrepareResponse = ctx =>
+    {
+        // أصول Flutter تحمل بصمة في اسمها أو تُنقَض بـflutter_service_worker،
+        // فالتخزين الطويل آمن ويُلغي إعادة التنزيل عند كل زيارة.
+        //
+        // index.html مستثنى: تخزينه يعني أن نشرة جديدة لا تصل للمستخدم حتى
+        // يمسح ذاكرة متصفّحه — وهو ما لا يفعله أحد.
+        // الاسم قد يحمل ‎.br/.gz‎ بعد إعادة الكتابة، فيُجرَّد قبل المقارنة.
+        var path = ctx.File.Name;
+        if (path.EndsWith(".br") || path.EndsWith(".gz"))
+        {
+            path = path[..^3];
+
+            // نوع المحتوى من الاسم الأصلي، **هنا** لا في وسيط إعادة الكتابة:
+            // ملفات الساكنة تكتب النوع بنفسها بعد الوسيط فتدهس ما ضبطه.
+            //
+            // وليست تفصيلاً تجميلياً: متصفّح يستقبل سكربتاً بنوع
+            // application/octet-stream يرفض تنفيذه (فحص MIME الصارم للوحدات)
+            // فلا يعمل التطبيق إطلاقاً.
+            if (new FileExtensionContentTypeProvider().TryGetContentType(path, out var mime))
+            {
+                ctx.Context.Response.Headers.ContentType = mime;
+            }
+        }
+
+        if (path.Equals("index.html", StringComparison.OrdinalIgnoreCase) ||
+            path.Equals("flutter_service_worker.js", StringComparison.OrdinalIgnoreCase) ||
+            path.Equals("version.json", StringComparison.OrdinalIgnoreCase))
+        {
+            ctx.Context.Response.Headers["Cache-Control"] = "no-cache, must-revalidate";
+        }
+        else
+        {
+            ctx.Context.Response.Headers["Cache-Control"] = "public, max-age=31536000";
+        }
+    },
+});
+
+// قبل كل ما يلمس قاعدة البيانات — بما فيه TenantContextMiddleware — حتى لا
+// يفلت انتهاك قيد من أي مسار. يترجم رسالة SQL Server إلى عربية مفهومة بدل
+// خطأ خادم 500 أو نصّ إنجليزي خام أمام الكاشير.
+app.UseMiddleware<DbConstraintMessageMiddleware>();
 
 app.UseCors();
 app.UseAuthentication();

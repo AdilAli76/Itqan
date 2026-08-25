@@ -116,25 +116,42 @@ public class StockTransfersController : ControllerBase
 
         await using var transaction = await _db.Database.BeginTransactionAsync();
 
+        // مستودع العبور: البضاعة تغادر الفرع المصدر وتدخل موضعاً وسيطاً
+        // **مرئياً**، بدل أن تختفي من كل تقرير طوال الترحيل. راجع [Warehouse].
+        var transit = await TransitWarehouseAsync(transfer.OrganizationId, transfer.FromBranchId);
+
         foreach (var item in transfer.Items)
         {
-            var sourceStocks = await _db.StockLevels
-                .Where(s => s.BranchId == transfer.FromBranchId && s.ProductId == item.ProductId)
-                .OrderBy(s => s.ExpiryDate ?? DateTime.MaxValue)
-                .ToListAsync();
-
-            if (sourceStocks.Sum(s => s.Quantity) < item.Quantity)
+            // الموقوف لا يُشحن: قفلُه قرارٌ بأنه لا يُصرَف، وشحنُه إلى فرع آخر
+            // تحايلٌ على القرار — البضاعة تصل هناك بلا قفل ولا سبب، لأن
+            // stock_transfer_items لا يحمل رقم دفعة أصلاً فيضيع القفل معها.
+            // والاستبعاد يقع داخل StockLedger.IssueAsync لكل المسارات معاً.
+            List<IssuedLot> issued;
+            try
             {
-                return BadRequest(new { message = "الكمية غير متوفرة في مخزون الفرع المصدر" });
+                issued = await StockLedger.IssueAsync(
+                    _db, transfer.OrganizationId, transfer.FromBranchId, warehouseId: null,
+                    productId: item.ProductId, quantity: item.Quantity,
+                    sourceType: StockSourceTypes.TransferOut, sourceId: transfer.Id,
+                    userId: CurrentUserId());
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { message = $"{ex.Message} — والموقوف لا يُشحن" });
             }
 
-            var remaining = item.Quantity;
-            foreach (var stock in sourceStocks)
+            // كل دفعة تدخل العبور بتكلفتها ورقمها وصلاحيتها كما خرجت: العبور
+            // موضع لا نوع بضاعة، وتجريدها من دفعاتها هنا كان سيُفقدها هويتها
+            // قبل أن تصل — فتصل بلا صلاحية ولا تكلفة.
+            foreach (var lot in issued)
             {
-                if (remaining <= 0) break;
-                var deduct = Math.Min(stock.Quantity, remaining);
-                stock.Quantity -= deduct;
-                remaining -= deduct;
+                await StockLedger.ReceiveAsync(
+                    _db, transfer.OrganizationId, transfer.FromBranchId, warehouseId: transit?.Id,
+                    productId: item.ProductId, quantity: lot.Quantity, unitCost: lot.UnitCost,
+                    sourceType: StockSourceTypes.TransferOut, sourceId: transfer.Id,
+                    userId: CurrentUserId(),
+                    batchNumber: lot.BatchNumber, expiryDate: lot.ExpiryDate,
+                    trackExpiry: lot.ExpiryDate.HasValue);
             }
         }
 
@@ -163,24 +180,36 @@ public class StockTransfersController : ControllerBase
 
         await using var transaction = await _db.Database.BeginTransactionAsync();
 
+        // نفس مستودع عبور الفرع المصدر الذي دخلته البضاعة عند الشحن.
+        var transit = await TransitWarehouseAsync(transfer.OrganizationId, transfer.FromBranchId);
+
         foreach (var item in transfer.Items)
         {
-            var stock = await _db.StockLevels.FirstOrDefaultAsync(
-                s => s.BranchId == transfer.ToBranchId && s.ProductId == item.ProductId && s.BatchNumber == "");
-            if (stock is null)
+            // يخرج من العبور بدفعاته كما دخل، ثم يدخل الفرع الهدف بها —
+            // فتصل البضاعة بصلاحيتها وتكلفتها لا كدفعة عامة مجهولة كما كان.
+            List<IssuedLot> arriving;
+            try
             {
-                _db.StockLevels.Add(new StockLevel
-                {
-                    OrganizationId = transfer.OrganizationId,
-                    BranchId = transfer.ToBranchId,
-                    ProductId = item.ProductId,
-                    BatchNumber = "",
-                    Quantity = item.Quantity,
-                });
+                arriving = await StockLedger.IssueAsync(
+                    _db, transfer.OrganizationId, transfer.FromBranchId, warehouseId: transit?.Id,
+                    productId: item.ProductId, quantity: item.Quantity,
+                    sourceType: StockSourceTypes.TransferIn, sourceId: transfer.Id,
+                    userId: CurrentUserId());
             }
-            else
+            catch (InvalidOperationException ex)
             {
-                stock.Quantity += item.Quantity;
+                return BadRequest(new { message = $"تعذّر إخراج البضاعة من مستودع العبور: {ex.Message}" });
+            }
+
+            foreach (var lot in arriving)
+            {
+                await StockLedger.ReceiveAsync(
+                    _db, transfer.OrganizationId, transfer.ToBranchId, warehouseId: null,
+                    productId: item.ProductId, quantity: lot.Quantity, unitCost: lot.UnitCost,
+                    sourceType: StockSourceTypes.TransferIn, sourceId: transfer.Id,
+                    userId: CurrentUserId(),
+                    batchNumber: lot.BatchNumber, expiryDate: lot.ExpiryDate,
+                    trackExpiry: lot.ExpiryDate.HasValue);
             }
         }
 
@@ -228,6 +257,31 @@ public class StockTransfersController : ControllerBase
             transfer.ToBranchId, branchNames.GetValueOrDefault(transfer.ToBranchId, "-"),
             transfer.Status, transfer.CreatedAt,
             transfer.Items.Select(i => new TransferDetailItemDto(i.ProductId, productNames.GetValueOrDefault(i.ProductId, "-"), i.Quantity)).ToList());
+    }
+
+    /// <summary>
+    /// مستودع العبور للفرع، ويُنشأ عند أول حاجة إليه.
+    ///
+    /// <para>الإنشاء الكسول لا الإلزام المسبق: مطالبة كل زبون قائم بإنشاء
+    /// مستودع قبل أن يُحوّل كانت ستكسر التحويل لكل من رقّى نظامه، ومستودعٌ
+    /// يُنشأ ولا يُستعمل ضوضاء في شجرة فارغة.</para>
+    /// </summary>
+    private async Task<Warehouse?> TransitWarehouseAsync(Guid organizationId, Guid branchId)
+    {
+        var transit = await _db.Warehouses.FirstOrDefaultAsync(
+            w => w.BranchId == branchId && w.Kind == WarehouseKinds.Transit && w.IsActive);
+        if (transit is not null) return transit;
+
+        transit = new Warehouse
+        {
+            OrganizationId = organizationId,
+            BranchId = branchId,
+            Name = "بضاعة في الطريق",
+            Code = "TRANSIT",
+            Kind = WarehouseKinds.Transit,
+        };
+        _db.Warehouses.Add(transit);
+        return transit;
     }
 
     private Guid? CurrentUserId()

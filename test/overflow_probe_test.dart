@@ -8,6 +8,8 @@ import 'package:kinetic_enterprise/core/shell/screen_registry.dart';
 import 'package:kinetic_enterprise/core/theme/app_colors.dart';
 import 'package:kinetic_enterprise/core/theme/app_theme.dart';
 
+import 'support/tour_data.dart';
+
 /// مسبار تشخيصي للفيض — يترك Flutter يطبع تقريره كاملاً.
 ///
 /// ui_audit_test يستهلك الاستثناء بـ takeException، فيضيع معه وصف الودجت
@@ -24,6 +26,17 @@ import 'package:kinetic_enterprise/core/theme/app_theme.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   GoogleFonts.config.allowRuntimeFetching = false;
+
+  // نفس مُعترِض جولة اللقطات. سببان لا سبب واحد:
+  //
+  // 1) **الصحّة:** بلا اعتراض، كل مزوّد يطلق طلباً شبكياً حقيقياً بمؤقّت
+  //    مهلة. مؤقّت واحد لم ينتهِ عند اكتمال الاختبار يُفشله بـ«Pending
+  //    timers» — وهذا ما كان يُفشل مسبار /pos تحديداً (posQuickPicksProvider).
+  //
+  // 2) **الغرض:** الفيض يقع بسبب *المحتوى* لا الهيكل الفارغ. شاشة تعرض
+  //    صندوق خطأ لأن الشبكة فشلت لا تُظهر انهيار جدول بأسماء أصناف طويلة —
+  //    أي أن المسبار بلا بيانات كان يُعلن «نظيف» عن شاشات لم تُختبَر أصلاً.
+  setUpAll(installFixtureAdapter);
 
   const routes = ['/inventory', '/pos', '/invoices', '/customers'];
 
@@ -62,7 +75,17 @@ void main() {
           ),
         ),
       );
-      await tester.pump(const Duration(milliseconds: 400));
+      // إطارات متتابعة لا إطار واحد: مزوّد الاختيارات السريعة في نقطة البيع
+      // يسلسل ثلاثة طلبات (تقرير ← جرد ← جرد)، وكلٌّ منها يجدول مؤقّتاً في
+      // Dio ينتظر إطاراً ليُنجَز. إطار واحد بـ400 مللي كان يترك آخر مؤقّت
+      // معلّقاً عند تفكيك الشجرة فيُفشل المسبار بـ«A Timer is still pending»
+      // — وهو فشل أداة لا فشل شاشة.
+      //
+      // ونُبقي على pump الصريح بدل pumpAndSettle: شاشات فيها لمعان هياكل
+      // تحميل دائم لا تستقرّ أبداً، وpumpAndSettle عليها يرمي مهلة.
+      for (var i = 0; i < 12; i++) {
+        await tester.pump(const Duration(milliseconds: 100));
+      }
 
       FlutterError.onError = previous;
 

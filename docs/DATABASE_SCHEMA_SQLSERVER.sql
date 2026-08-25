@@ -1,4 +1,4 @@
--- ============================================================================
+﻿-- ============================================================================
 -- Kinetic Enterprise ERP — SQL Server Schema (نسخة .NET Backend)
 -- تحويل كامل من DATABASE_SCHEMA.sql (Postgres) — نفس التغطية بدون نقصان
 --
@@ -29,6 +29,12 @@ CREATE TABLE organizations (
   id UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
   legal_name NVARCHAR(200) NOT NULL,
   display_name NVARCHAR(200) NOT NULL,
+  -- شكل النظام لا حجمه: standard | wallet | pharmacy | trial | enterprise.
+  -- منه تُشتقّ الوحدات المتاحة — راجع Editions في Entities.cs.
+  --
+  -- كان يُضاف بالترحيل وحده وغائباً عن هذا الملف، فقاعدة تُبنى منه مباشرةً
+  -- تفتقد عموداً يقرأه النظام في كل طلب محميّ بـRequireModule.
+  edition NVARCHAR(20) NOT NULL DEFAULT 'standard',
   logo_url NVARCHAR(400) NULL,
   primary_color CHAR(7) NOT NULL DEFAULT '#0B2540',
   secondary_color CHAR(7) NOT NULL DEFAULT '#C8952B',
@@ -68,6 +74,13 @@ CREATE TABLE licenses (
   status NVARCHAR(20) NOT NULL DEFAULT 'active'
     CHECK (status IN ('active','grace_period','expired','revoked')),
   created_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+  -- قراءة فقط: كل ما ليس GET يُرفض. عمود واحد يخدم ثلاث حاجات — نسخة
+  -- العرض التي تُرى ولا تُعدَّل، والعميل المتأخّر يُجمَّد بلا فقد بياناته،
+  -- ومهلة ما بعد الانتهاء (ARCHITECTURE.md §2.2). راجع LicenseGateAttribute.
+  is_read_only BIT NOT NULL DEFAULT 0,
+  -- سبب التجميد أو الإنهاء — يُعرض للعميل نفسه لا لنا وحدنا.
+  status_reason NVARCHAR(300) NULL,
+  status_changed_at DATETIME2 NULL,
   CONSTRAINT CK_licenses_modules_json CHECK (ISJSON(enabled_modules) = 1)
 );
 GO
@@ -100,6 +113,12 @@ CREATE TABLE branches (
   is_active BIT NOT NULL DEFAULT 1,
   created_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
   updated_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+  -- لوح خلفية الفرع: يميّز **المكان** لا الشخص. موظف ينتقل بين فرعين يعرف
+  -- من اللون أين هو، وهو ما يمنع إدخال بيانات في الفرع الخطأ — أشيع أخطاء
+  -- الأنظمة متعدّدة الفروع. ولا يمسّ ألوان العلامة التجارية.
+  theme_palette NVARCHAR(20) NOT NULL DEFAULT 'default',
+  CONSTRAINT CK_branches_theme_palette
+    CHECK (theme_palette IN ('default','warm','cool','green','slate')),
   CONSTRAINT UQ_branches_org_code UNIQUE (organization_id, code)
 );
 GO
@@ -178,6 +197,7 @@ INSERT INTO permissions (code, label_ar, module) VALUES
   ('customers.delete',        N'حذف العملاء',                               N'customers'),
   ('customers.wallet_adjust', N'تعديل رصيد محفظة العميل',                   N'customers'),
   ('cards.issue',             N'إصدار بطاقات العملاء وضبط أرقامها السرية',  N'customers'),
+  ('prescriptions.dispense',  N'صرف الأدوية المقيَّدة بوصفة وتسجيلها',       N'pharmacy'),
   ('invoices.refund',         N'استرجاع الفواتير',                          N'invoices'),
   ('pos.price_override',      N'البيع بسعر مخالف لسعر الكتالوج',            N'pos'),
   ('reports.view',            N'عرض التقارير',                              N'reports'),
@@ -226,6 +246,37 @@ CREATE TABLE product_categories (
 );
 GO
 
+-- ----------------------------------------------------------------------------
+--  نشرة الدواء — معرفة دوائية عامة على مستوى المنصّة
+--
+--  بلا organization_id وبلا Security Policy، كجدول platform_settings:
+--  «باراسيتامول 500 مجم» له نفس موانع الاستعمال في كل صيدلية. ربطه بالمنظمة
+--  كان يعني أن كل عميل جديد يبدأ بنشرات فارغة يُدخلها من الصفر — فتُهمَل
+--  الميزة عملياً. والسعر والمخزون يبقيان على products وstock_levels حيث
+--  ينتميان، فلا تسرّب بيانات بين المنظمات عبر هذا الجدول.
+--
+--  يُقرأ فقط لمن يملك وحدة pharmacy (إصدار الصيدليات) — النظام يُباع لبقالة
+--  ومحل قطع غيار أيضاً، وحقول «موانع الاستعمال» في شاشة أصنافهم ضوضاء لا
+--  ميزة. راجع Editions في Entities.cs.
+-- ----------------------------------------------------------------------------
+CREATE TABLE medicine_reference (
+  id UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
+  name NVARCHAR(200) NOT NULL,
+  active_ingredient NVARCHAR(200) NOT NULL,
+  -- نصّ لا رقم: الوحدة جزء من التركيز (500 مجم، 250 مجم/5 مل).
+  strength NVARCHAR(60) NULL,
+  form NVARCHAR(60) NULL,
+  indications NVARCHAR(1000) NULL,
+  contraindications NVARCHAR(1000) NULL,
+  cautions NVARCHAR(1000) NULL,
+  side_effects NVARCHAR(1000) NULL,
+  requires_prescription BIT NOT NULL DEFAULT 0,
+  is_deleted BIT NOT NULL DEFAULT 0,
+  created_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+  updated_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
+);
+GO
+
 CREATE TABLE products (
   id UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
   organization_id UNIQUEIDENTIFIER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
@@ -236,16 +287,118 @@ CREATE TABLE products (
   name NVARCHAR(200) NOT NULL,
   unit_base NVARCHAR(30) NOT NULL DEFAULT 'piece',
   unit_conversion_factor DECIMAL(10,3) NOT NULL DEFAULT 1,
+  -- ---- البيع بالوحدة الجزئية ----
+  -- الصيدلية تشتري شريطاً وتبيع حبّة. المخزون يُعدّ بالوحدة الأساسية دائماً
+  -- (شريط)، والبيع الجزئي يخصم كسراً منها — وquantity في stock_levels
+  -- من نوع DECIMAL(14,3) فيتّسع للكسر أصلاً.
+  --
+  -- أعمدة صريحة لا إعادة استعمال unit_conversion_factor: اسمه لا يقول
+  -- الاتجاه (من الأساس إلى الجزء أم العكس)، والالتباس في حساب مال ومخزون
+  -- لا يُحتمَل. وهو غير مستعمل في أي منطق حتى الآن.
+  sub_unit_name NVARCHAR(30) NULL,               -- حبّة، قرص، مل
+  -- كم وحدة جزئية في الوحدة الأساسية. صفر أو واحد = لا بيع جزئي.
+  sub_units_per_base DECIMAL(10,3) NOT NULL DEFAULT 0,
+  -- سعر الوحدة الجزئية مستقلٌّ لا يُشتقّ بالقسمة: الصيدلية تربح على التجزئة،
+  -- فحبّة من شريط بثمانية دنانير تُباع بدينار لا بـ0.80.
+  sub_unit_price DECIMAL(14,2) NOT NULL DEFAULT 0,
   cost_price DECIMAL(14,2) NOT NULL DEFAULT 0,
   sale_price DECIMAL(14,2) NOT NULL DEFAULT 0,
+  -- اختياري دائماً: الصيدلية نفسها تبيع مستحضرات تجميل وحفاضات وأدوات.
+  medicine_ref_id UNIQUEIDENTIFIER NULL REFERENCES medicine_reference(id),
   track_expiry BIT NOT NULL DEFAULT 0,
   -- صنف غير متتبَّع مخزنياً (خدمة أو قيمة مفتوحة) — يُباع بلا رصيد ولا خصم
   tracks_stock BIT NOT NULL DEFAULT 1,
+  -- حدّ إعادة الطلب اليدوي. يبقى المرجع الفعلي للتنبيه، والنظام يقترح
+  -- بديلاً مشتقّاً من الاستهلاك دون أن يكتبه فوقه — راجع تقرير إعادة الطلب.
   reorder_level DECIMAL(14,2) NOT NULL DEFAULT 0,
+  -- مهلة التوريد بالأيام: كم يوماً بين إرسال أمر الشراء ووصول البضاعة.
+  -- هي نصف معادلة إعادة الطلب (الاستهلاك اليومي × المهلة)، وبدونها يصبح
+  -- الحدّ رقماً يُخمَّن. سبعة أيام افتراض معقول لمورّد محلي ويُعدَّل لكل صنف.
+  lead_time_days INT NOT NULL DEFAULT 7,
+  -- آخر مرّة عُدّ فيها هذا الصنف فعلياً (اعتُمد جرد يشمله). هو ما يجعل
+  -- الجرد الدوري الموزَّع ممكناً: يُعدّ ما لم يُعدّ منذ مدّة بدل إغلاق
+  -- المحل يوماً كاملاً لعدّ كل شيء.
+  last_counted_at DATETIME2 NULL,
   is_deleted BIT NOT NULL DEFAULT 0,
   created_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
   updated_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
   CONSTRAINT UQ_products_org_sku UNIQUE (organization_id, sku)
+);
+GO
+
+-- ----------------------------------------------------------------------------
+--  المستودعات — تحت الفرع لا بدلاً منه
+--
+--  warehouse_id قابل للـ NULL في كل مكان يشير إليه، وNULL يعني «مستودع
+--  الفرع الافتراضي». هذه القابلية هي ما يجعل الشجرة تُضاف بلا ترحيل بيانات
+--  ولا كسر لبقالة أو صيدلية قائمة.
+--
+--  ومستودع العبور يصلح عطباً قائماً: تحويل في حالة in_transit كان يُخصم من
+--  المصدر ولا يُضاف للهدف، فتختفي البضاعة من كل تقرير طوال الترحيل.
+-- ----------------------------------------------------------------------------
+CREATE TABLE warehouses (
+  id UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
+  organization_id UNIQUEIDENTIFIER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  branch_id UNIQUEIDENTIFIER NOT NULL REFERENCES branches(id) ON DELETE NO ACTION,
+  parent_warehouse_id UNIQUEIDENTIFIER NULL REFERENCES warehouses(id),
+  name NVARCHAR(120) NOT NULL,
+  code NVARCHAR(40) NOT NULL DEFAULT '',
+  kind NVARCHAR(20) NOT NULL DEFAULT 'main',
+  CONSTRAINT CK_warehouses_kind
+    CHECK (kind IN ('main','transit','damaged','returns','quarantine')),
+  -- عقدة تجميعية لا تُخزَّن فيها بضاعة: السماح بالتخزين فيها يجعل المجموع
+  -- يعدّ الأب والابن معاً.
+  is_group BIT NOT NULL DEFAULT 0,
+  is_active BIT NOT NULL DEFAULT 1,
+  created_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
+);
+GO
+
+-- ----------------------------------------------------------------------------
+--  دفتر حركة المخزون — مصدر الحقيقة، وstock_levels ذاكرة مشتقّة منه
+--
+--  كان الرصيد يُعدَّل في مكانه: فلا جواب عن «كم كان الرصيد يوم كذا»، ولا
+--  تكلفة حقيقية (سعر واحد ثابت للصنف مهما اختلفت أسعار الشراء)، ولا أثر
+--  يُجمَع حسابياً لمن غيّر ماذا.
+--
+--  يُلحَق به ولا يُعدَّل: التصحيح بسطر عكسي لا بمحو الماضي — نفس حرمة القيد
+--  في دفتر المحفظة. وis_cancelled إلغاء منطقي لا حذف.
+--
+--  **كل** حركة مخزون في النظام تمرّ من StockLedger وحده (Data/StockLedger.cs)
+--  داخل المعاملة التي تُعدّل الرصيد. لا مسار يستثنيه.
+-- ----------------------------------------------------------------------------
+CREATE TABLE stock_ledger_entries (
+  id UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
+  organization_id UNIQUEIDENTIFIER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  branch_id UNIQUEIDENTIFIER NOT NULL REFERENCES branches(id) ON DELETE NO ACTION,
+  warehouse_id UNIQUEIDENTIFIER NULL REFERENCES warehouses(id),
+  product_id UNIQUEIDENTIFIER NOT NULL REFERENCES products(id),
+  batch_number NVARCHAR(60) NOT NULL DEFAULT '',
+  expiry_date DATETIME2 NULL,
+  -- datetime لا date: ترتيب حركات اليوم الواحد يحدّد الرصيد بعد كلٍّ منها،
+  -- وتاريخ بلا وقت يجعل ترتيب البيع والاستلام في اليوم نفسه اعتباطياً.
+  posted_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+  -- الفرق موجباً أو سالباً — لا رصيداً.
+  quantity_change DECIMAL(14,3) NOT NULL,
+  balance_after DECIMAL(14,3) NOT NULL,
+  unit_cost DECIMAL(14,2) NOT NULL DEFAULT 0,
+  value_after DECIMAL(18,2) NOT NULL DEFAULT 0,
+  value_change DECIMAL(18,2) NOT NULL DEFAULT 0,
+  source_type NVARCHAR(30) NOT NULL,
+  source_id UNIQUEIDENTIFIER NULL,
+  -- سطر الإدخال الذي استُهلك منه — في سطور الصرف وحدها.
+  --
+  -- هذا ما يميّز الدفتر عن دفتر عادي: الأخير يقول «خرجت خمس قطع»، وهذا يقول
+  -- «خرجت خمس قطع من الشحنة التي وصلت يوم كذا بتكلفة كذا». منه تُقرأ التكلفة
+  -- الدقيقة بلا طابور FIFO يُخزَّن ويُصان، ومنه يُجاب سؤال التتبّع العكسي —
+  -- وهو مطلب تنظيمي في الأدوية والغذاء لا رفاهية.
+  source_entry_id UNIQUEIDENTIFIER NULL REFERENCES stock_ledger_entries(id),
+  -- المتبقّي من هذا الإدخال لم يُستهلَك بعد — في سطور الإدخال وحدها.
+  remaining_quantity DECIMAL(14,3) NOT NULL DEFAULT 0,
+  created_by UNIQUEIDENTIFIER NULL REFERENCES app_users(id),
+  created_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+  is_cancelled BIT NOT NULL DEFAULT 0,
+  cancel_reason NVARCHAR(300) NULL
 );
 GO
 
@@ -262,6 +415,38 @@ CREATE TABLE stock_levels (
   quantity DECIMAL(14,3) NOT NULL DEFAULT 0,
   batch_number NVARCHAR(60) NOT NULL DEFAULT '',
   expiry_date DATE NULL,
+  -- موضع التخزين داخل الفرع. NULL = مستودع الفرع الافتراضي — راجع warehouses.
+  warehouse_id UNIQUEIDENTIFIER NULL REFERENCES warehouses(id),
+  -- تاريخ الاستراتيجية: أساس ترتيب الصرف بحقل واحد.
+  --
+  --   صنف بصلاحية   → تاريخ الانتهاء  ⇒ FEFO (الأقرب انتهاءً أولاً)
+  --   صنف بلا صلاحية → تاريخ الإدخال   ⇒ FIFO (الأقدم دخولاً أولاً)
+  --
+  -- فقاعدة ترتيب واحدة تخدم الحالتين بدل منطقين منفصلين. والعطب الذي
+  -- يصلحه: الصنف بلا صلاحية كان يُرتَّب برقم دفعته أبجدياً — أي عشوائياً —
+  -- فتبقى دفعته القديمة على الرفّ لأن رقمها يبدأ بحرف متأخّر.
+  --
+  -- NULL = صنف يتتبّع الصلاحية ووصلت دفعته بلا تاريخ. يُؤخَّر في الترتيب
+  -- عمداً: المعلوم أولى بالتصريف من المجهول.
+  strategy_date DATETIME2 NULL,
+  -- القفل: إيقاف الدفعة عن الصرف مع بقائها في مكانها وبكمّيتها.
+  --
+  -- تصل دفعة بشبهة عيب أو تُرتجع بضاعة تنتظر المعاينة، والحلول الثلاثة
+  -- الأخرى كلها معطوبة: حذف الصفّ يفقد الكمية ويكسر التدقيق، وتركه يعني
+  -- بيعها، ونقلها إلى فرع وهمي يشوّه تقارير الفروع.
+  --
+  -- الموقوف يخرج من: البيع، وحساب إعادة الطلب، والتحويل بين الفروع.
+  -- ويبقى في: الجرد، وقيمة المخزون، وتقرير الصلاحية.
+  --
+  -- على الدفعة لا الصنف: ثلاث شحنات من نفس الدواء تُشتبَه واحدة منها،
+  -- وقفل الصنف كلّه كان يوقف بضاعة سليمة.
+  is_locked BIT NOT NULL DEFAULT 0,
+  -- إلزامي منطقياً عند القفل (يفرضه StockLocksController لا القيد، لأن
+  -- الصفوف غير الموقوفة تحمله NULL): قفلٌ بلا سبب يصبح بعد أسبوعين كميةً
+  -- مجمَّدة لا يعرف أحد لماذا جُمِّدت ولا متى يُفرَج عنها.
+  lock_reason NVARCHAR(300) NULL,
+  locked_by UNIQUEIDENTIFIER NULL REFERENCES app_users(id),
+  locked_at DATETIME2 NULL,
   updated_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
   CONSTRAINT UQ_stock_levels UNIQUE (branch_id, product_id, batch_number)
 );
@@ -294,6 +479,10 @@ CREATE TABLE purchase_orders (
   supplier_id UNIQUEIDENTIFIER NULL REFERENCES suppliers(id),
   status NVARCHAR(20) NOT NULL DEFAULT 'draft'
     CHECK (status IN ('draft','ordered','received','cancelled')),
+  -- أمرٌ ولّده اقتراح إعادة الطلب لا يدُ مستخدم. يجعل الأتمتة قابلة
+  -- للمراجعة: مدير يرى عشرين أمراً لا يعرف أيّها قراره وأيّها قرار معادلة،
+  -- فلا يستطيع الحكم على المعادلة أصلاً — وصندوقٌ أسود يُوقَف بعد أول خطأ.
+  is_auto BIT NOT NULL DEFAULT 0,
   total_amount DECIMAL(14,2) NOT NULL DEFAULT 0,
   created_by UNIQUEIDENTIFIER NULL REFERENCES app_users(id),
   created_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
@@ -312,15 +501,87 @@ CREATE TABLE purchase_order_items (
 );
 GO
 
+-- ----------------------------------------------------------------------------
+--  مستند الاستلام — شحنة واحدة وصلت فعلياً من أمر شراء
+--
+--  كان الاستلام يزيد purchase_order_items.received_quantity فقط. فثلاث
+--  شحنات جزئية تُبتلع في رقم واحد، ويضيع معها ما لا يُستعاد: متى وصلت كل
+--  شحنة (فلا تُقاس مهلة التوريد الحقيقية)، ورقم إشعار المورّد وهو المرجع
+--  الوحيد عند الخلاف، وأي شحنة تخصّ أي فاتورة مورّد حين تُبنى المطابقة.
+--
+--  وهو شرط مسبق لدفتر حركة المخزون (ARCHITECTURE.md §2.15): سطر الإدخال
+--  يجب أن يشير إلى مستند وصول حقيقي لا إلى أمر شراء يصل على دفعات.
+-- ----------------------------------------------------------------------------
+CREATE TABLE purchase_receipts (
+  id UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
+  organization_id UNIQUEIDENTIFIER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  branch_id UNIQUEIDENTIFIER NOT NULL REFERENCES branches(id) ON DELETE NO ACTION,
+  purchase_order_id UNIQUEIDENTIFIER NOT NULL REFERENCES purchase_orders(id) ON DELETE NO ACTION,
+  -- رقم إشعار المورّد كما كتبه على ورقته. اختياري: مورّد محلي كثيراً ما
+  -- يسلّم بلا إشعار مرقَّم، وإلزامه يدفع المستخدم إلى كتابة أي شيء ليمرّ —
+  -- وحقلٌ مملوء بالقمامة أسوأ من حقل فارغ لأن الأول يُصدَّق.
+  supplier_note_number NVARCHAR(60) NULL,
+  -- تاريخ الوصول الفعلي، منفصل عن created_at عمداً: الشحنة تصل الخميس
+  -- ويُدخلها أمين المخزن الأحد، فقياس المهلة بتاريخ الإدخال يضيف يومين
+  -- وهميين في كل مرّة.
+  received_on DATETIME2 NOT NULL,
+  received_by UNIQUEIDENTIFIER NULL REFERENCES app_users(id),
+  notes NVARCHAR(300) NULL,
+  created_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
+);
+GO
+
+CREATE TABLE purchase_receipt_items (
+  id UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
+  purchase_receipt_id UNIQUEIDENTIFIER NOT NULL REFERENCES purchase_receipts(id) ON DELETE CASCADE,
+  -- سطر الأمر إلى جانب الصنف لا بدلاً منه: الأمر قد يحمل سطرين لنفس الصنف
+  -- بتكلفتين، والربط بالصنف وحده يجعل نسبة الشحنة إلى سطرها تخميناً.
+  purchase_order_item_id UNIQUEIDENTIFIER NOT NULL REFERENCES purchase_order_items(id) ON DELETE NO ACTION,
+  product_id UNIQUEIDENTIFIER NOT NULL REFERENCES products(id),
+  quantity DECIMAL(14,3) NOT NULL,
+  batch_number NVARCHAR(60) NOT NULL DEFAULT '',
+  expiry_date DATE NULL,
+  -- لقطة التكلفة وقت الوصول: تكلفة سطر الأمر قد تُعدَّل لاحقاً، والمستند
+  -- يبقى شاهداً على ما وصل بأي سعر — أساس التقييم وتوزيع تكلفة الشحنة.
+  unit_cost DECIMAL(14,2) NOT NULL DEFAULT 0
+);
+GO
+
 CREATE TABLE stock_counts (
   id UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
   organization_id UNIQUEIDENTIFIER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
   branch_id UNIQUEIDENTIFIER NOT NULL REFERENCES branches(id),
-  status NVARCHAR(20) NOT NULL DEFAULT 'open'
-    CHECK (status IN ('open','reconciled','cancelled')),
+  -- open (قيد العد) ← pending_review (انتهى العدّ وفيه فروقات تنتظر قراراً)
+  -- ← reconciled أو عودة إلى open (طُلبت إعادة عدّ). cancelled يُلغي بلا أثر.
+  --
+  -- الحالة الوسيطة تمنع تطبيق فرق عدّ خاطئ على المخزون بلا أن يراه أحد.
+  -- والفرق ليس رقماً محايداً: زيادة تُخفي سرقة، ونقصٌ يشطب بضاعة موجودة.
+  -- وجردٌ بلا فرق واحد لا يمرّ بها — لا قرار حيث لا شيء يُقرَّر فيه.
+  --
+  -- القيد مسمّى صراحةً (لا مكتوب داخل تعريف العمود): الاسم المولَّد يحمل
+  -- لاحقة هاش تختلف بين القواعد، فيستحيل ربط رسالة عربية به في
+  -- DbConstraintMessageMiddleware.
+  status NVARCHAR(20) NOT NULL DEFAULT 'open',
+  CONSTRAINT CK_stock_counts_status
+    CHECK (status IN ('open','pending_review','reconciled','cancelled')),
+  -- periodic: جرد دوري على مخزون قائم يبدأ بالكمية النظامية مملوءة.
+  -- initial:  جرد ابتدائي لإدخال مخزون موجود إلى نظام جديد، يبدأ بأصفار
+  --           لأنه لا كمية نظامية أصلاً — وملؤه بالنظامي كان يجعل «قبول
+  --           الافتراضي» يُثبّت صفراً لكل صنف على الرفّ.
+  kind NVARCHAR(20) NOT NULL DEFAULT 'periodic',
+  CONSTRAINT CK_stock_counts_kind CHECK (kind IN ('periodic','initial')),
   created_by UNIQUEIDENTIFIER NULL REFERENCES app_users(id),
   created_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
-  closed_at DATETIME2 NULL
+  closed_at DATETIME2 NULL,
+  -- من أنهى العدّ ومن بتّ في الفروقات — منفصلان ليظهر تطابقهما لمن يدقّق.
+  -- ولا يمنع النظام تطابقهما: محلٌّ يديره صاحبه وحده لا يملك شخصاً ثانياً.
+  submitted_by UNIQUEIDENTIFIER NULL REFERENCES app_users(id),
+  submitted_at DATETIME2 NULL,
+  reviewed_by UNIQUEIDENTIFIER NULL REFERENCES app_users(id),
+  reviewed_at DATETIME2 NULL,
+  recount_reason NVARCHAR(300) NULL,
+  -- جردٌ أُعيد ثلاث مرّات ليس دقيقاً بل مؤشّر على خلل في العدّ أو المخزون.
+  recount_rounds INT NOT NULL DEFAULT 0
 );
 GO
 
@@ -368,6 +629,11 @@ CREATE TABLE customers (
   -- (نفس علّة اسم المستخدم في app_users) — راجع UX_customers_card_barcode أدناه.
   card_barcode NVARCHAR(60) NULL,
   credit_limit DECIMAL(14,2) NOT NULL DEFAULT 0,
+  -- مهلة سداد الآجل بالأيام. صفر = مستحقّ يوم البيع.
+  -- على العميل لا على المنظمة: تاجر الجملة يمنح مستشفى ثلاثين يوماً
+  -- وبقّالاً سبعة، ومهلة واحدة للجميع تعني مطاردة من له مهلة أو ترك من
+  -- لا مهلة له.
+  credit_days INT NOT NULL DEFAULT 0,
   -- ---- نموذج الحساب ----
   -- prepaid: رصيد دفعه العميل من ماله — لا يسقط ولا سقف له (إسقاط مال دفعه
   --          صاحبه مصادرة له).
@@ -467,6 +733,10 @@ CREATE TABLE invoices (
   -- 'refunded' كان ناقصاً هنا بينما InvoicesController.Refund يكتبه فعلاً،
   -- فكانت كل عملية استرجاع تفشل بـ 500 منذ بنائها ولم يُكتشف الأمر حتى اختبار
   -- دفتر المحفظة.
+  -- تاريخ استحقاق الجزء الآجل. NULL في البيع المدفوع كاملاً. لقطةً من مهلة
+  -- العميل لحظة البيع لا مرجعاً إليها: تغيير المهلة لاحقاً يجب ألّا يحرّك
+  -- استحقاق فواتير مضت، وإلا أمكن إخفاء تأخّر بتعديل حقل في شاشة العملاء.
+  due_date DATETIME2 NULL,
   status NVARCHAR(15) NOT NULL DEFAULT 'completed' CHECK (status IN ('completed','pending','cancelled','refunded')),
   created_by UNIQUEIDENTIFIER NULL REFERENCES app_users(id),
   created_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
@@ -474,13 +744,72 @@ CREATE TABLE invoices (
 );
 GO
 
+
 CREATE TABLE invoice_items (
   id UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
   invoice_id UNIQUEIDENTIFIER NOT NULL REFERENCES invoices(id) ON DELETE CASCADE,
   product_id UNIQUEIDENTIFIER NOT NULL REFERENCES products(id),
   quantity DECIMAL(14,3) NOT NULL,
   unit_price DECIMAL(14,2) NOT NULL,
-  line_total DECIMAL(14,2) NOT NULL
+  line_total DECIMAL(14,2) NOT NULL,
+  -- الكمية والسعر يُحفَظان كما بيعا فعلاً (3 حبات × دينار)، لا محوَّلين إلى
+  -- الوحدة الأساسية — وإلا عرض الإيصال «0.3 شريط بسعر 10» وهو ما لم يحدث.
+  -- الخصم من المخزون وحده هو ما يُحوَّل.
+  sold_as_sub_unit BIT NOT NULL DEFAULT 0,
+  -- لقطة من sub_units_per_base وقت البيع: حجم العلبة قد يتغيّر لاحقاً،
+  -- والمرتجع يجب أن يعيد ما خرج فعلاً لا ما يقوله الكتالوج اليوم.
+  sub_units_per_base DECIMAL(10,3) NOT NULL DEFAULT 0
+);
+GO
+
+-- ----------------------------------------------------------------------------
+--  تخصيص كمية سطر الفاتورة على الدفعات (FEFO)
+--
+--  جدول منفصل لا عمود batch_number على invoice_items: سطر واحد قد يمتدّ على
+--  أكثر من دفعة (طُلب 15 حبة، منها 10 من دفعة و5 من أخرى)، فعمود واحد لا
+--  يسعه. والسطر التجاري يبقى واحداً — الإيصال يعرض «15 حبة» لا سطرين.
+--
+--  وهو شرط صحّة المرتجع: بدونه تعود الكمية إلى دفعة عامة بلا تاريخ صلاحية،
+--  فينحرف رصيد كل دفعة عن الواقع ويسقط ترتيب FEFO معه لأنه يقرأ من هذه
+--  الأرصدة. راجع InvoiceItemBatch في Entities.cs.
+-- ----------------------------------------------------------------------------
+CREATE TABLE invoice_item_batches (
+  id UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
+  invoice_item_id UNIQUEIDENTIFIER NOT NULL REFERENCES invoice_items(id) ON DELETE CASCADE,
+  batch_number NVARCHAR(60) NOT NULL DEFAULT '',
+  quantity DECIMAL(14,3) NOT NULL
+);
+GO
+
+-- ----------------------------------------------------------------------------
+--  دفتر الوصفات — إصدار الصيدليات
+--
+--  سجلٌّ لكل صرف دواء مقيَّد بوصفة (medicine_reference.requires_prescription).
+--  بخلاف نشرة الدواء، هذا الجدول **بيانات منظمة** لا معرفة عامة: وصفة مريض
+--  بعينه صرفتها صيدلية بعينها. ولهذا يحمل organization_id وbranch_id وتُطبَّق
+--  عليه سياسة العزل كبقية الجداول التشغيلية.
+--
+--  مرتبط بالفاتورة: الوصفة تُقدَّم لحظة الصرف لا قبله ولا بعده، فربطها بما
+--  صُرِف فعلاً هو ما يجعل الدفتر قابلاً للمراجعة — من صرف، ماذا، لمن، بأمر
+--  أي طبيب. ودونه يصبح سجلاً موازياً لا أحد يوثّق أنه يطابق المبيعات.
+-- ----------------------------------------------------------------------------
+CREATE TABLE prescriptions (
+  id UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
+  organization_id UNIQUEIDENTIFIER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  branch_id UNIQUEIDENTIFIER NOT NULL REFERENCES branches(id) ON DELETE NO ACTION,
+  -- الفاتورة التي صُرفت بها. NO ACTION لا CASCADE: الفاتورة لا تُحذف أصلاً
+  -- (مبدأ «لا حذف فعلي»)، وحذف دفتر الوصفات تبعاً لأي عملية آلية مرفوض —
+  -- هو المستند النظامي الذي يُسأل عنه الصيدلي.
+  invoice_id UNIQUEIDENTIFIER NULL REFERENCES invoices(id) ON DELETE NO ACTION,
+  prescription_number NVARCHAR(60) NULL,
+  doctor_name NVARCHAR(150) NOT NULL,
+  doctor_license NVARCHAR(60) NULL,
+  patient_name NVARCHAR(150) NOT NULL,
+  patient_phone NVARCHAR(30) NULL,
+  issued_on DATE NULL,
+  notes NVARCHAR(500) NULL,
+  created_by UNIQUEIDENTIFIER NULL REFERENCES app_users(id),
+  created_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
 );
 GO
 
@@ -541,6 +870,33 @@ GO
 -- ----------------------------------------------------------------------------
 -- 8. الإشعارات وسجل التدقيق
 -- ----------------------------------------------------------------------------
+-- ----------------------------------------------------------------------------
+--  تذكير أُرسل فعلاً بدَين متأخّر
+--
+--  يُكتب عند الإرسال لا عند حلول الموعد: صفٌّ يُنشأ آلياً يجعل «أُرسل
+--  التذكير» كذبةً يقولها النظام عن نفسه، ويوقف المطالبة الحقيقية لأنه
+--  يظنّها تمّت. وموعد الاستحقاق يُحفَظ لقطةً هنا فيبقى الفرق بين المخطَّط
+--  والفعلي ظاهراً للتدقيق حتى لو تغيّرت السياسة لاحقاً.
+--
+--  وعلى العميل لا على الفاتورة: الدَّين رصيدٌ واحد عليه (مجموع دفتر
+--  المحفظة)، والمطالبة تقع عليه لا على ورقة بعينها.
+-- ----------------------------------------------------------------------------
+CREATE TABLE debt_reminders (
+  id UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
+  organization_id UNIQUEIDENTIFIER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  customer_id UNIQUEIDENTIFIER NOT NULL REFERENCES customers(id) ON DELETE NO ACTION,
+  -- 1 أو 2 أو 3 — راجع DebtReminderPolicy في Entities.cs.
+  stage INT NOT NULL,
+  CONSTRAINT CK_debt_reminders_stage CHECK (stage BETWEEN 1 AND 3),
+  due_on DATETIME2 NOT NULL,
+  sent_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+  sent_by UNIQUEIDENTIFIER NULL REFERENCES app_users(id),
+  -- مبلغ الدَّين وقت التذكير — يُظهر إن كان يتناقص أم يتراكم.
+  amount_at_reminder DECIMAL(14,2) NOT NULL DEFAULT 0,
+  note NVARCHAR(300) NULL
+);
+GO
+
 CREATE TABLE notifications (
   id UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
   organization_id UNIQUEIDENTIFIER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
@@ -596,6 +952,14 @@ GO
 CREATE SECURITY POLICY Security.InvoicesPolicy
   ADD FILTER PREDICATE Security.fn_TenantPredicate(organization_id, branch_id) ON dbo.invoices,
   ADD BLOCK PREDICATE Security.fn_TenantPredicate(organization_id, branch_id) ON dbo.invoices AFTER INSERT
+  WITH (STATE = ON);
+GO
+
+-- دفتر الوصفات بيانات منظمة لا معرفة عامة (بخلاف medicine_reference) —
+-- وصفة مريض بعينه صرفتها صيدلية بعينها، فتُعزَل كبقية الجداول التشغيلية.
+CREATE SECURITY POLICY Security.PrescriptionsPolicy
+  ADD FILTER PREDICATE Security.fn_TenantPredicate(organization_id, branch_id) ON dbo.prescriptions,
+  ADD BLOCK PREDICATE Security.fn_TenantPredicate(organization_id, branch_id) ON dbo.prescriptions AFTER INSERT
   WITH (STATE = ON);
 GO
 
@@ -722,6 +1086,30 @@ GO
 CREATE SECURITY POLICY Security.PurchaseOrdersPolicy
   ADD FILTER PREDICATE Security.fn_TenantPredicate(organization_id, branch_id) ON dbo.purchase_orders,
   ADD BLOCK PREDICATE Security.fn_TenantPredicate(organization_id, branch_id) ON dbo.purchase_orders AFTER INSERT
+  WITH (STATE = ON);
+GO
+
+CREATE SECURITY POLICY Security.WarehousesPolicy
+  ADD FILTER PREDICATE Security.fn_TenantPredicate(organization_id, branch_id) ON dbo.warehouses,
+  ADD BLOCK PREDICATE Security.fn_TenantPredicate(organization_id, branch_id) ON dbo.warehouses AFTER INSERT
+  WITH (STATE = ON);
+GO
+
+CREATE SECURITY POLICY Security.StockLedgerEntriesPolicy
+  ADD FILTER PREDICATE Security.fn_TenantPredicate(organization_id, branch_id) ON dbo.stock_ledger_entries,
+  ADD BLOCK PREDICATE Security.fn_TenantPredicate(organization_id, branch_id) ON dbo.stock_ledger_entries AFTER INSERT
+  WITH (STATE = ON);
+GO
+
+CREATE SECURITY POLICY Security.DebtRemindersPolicy
+  ADD FILTER PREDICATE Security.fn_OrgOnlyPredicate(organization_id) ON dbo.debt_reminders,
+  ADD BLOCK PREDICATE Security.fn_OrgOnlyPredicate(organization_id) ON dbo.debt_reminders AFTER INSERT
+  WITH (STATE = ON);
+GO
+
+CREATE SECURITY POLICY Security.PurchaseReceiptsPolicy
+  ADD FILTER PREDICATE Security.fn_TenantPredicate(organization_id, branch_id) ON dbo.purchase_receipts,
+  ADD BLOCK PREDICATE Security.fn_TenantPredicate(organization_id, branch_id) ON dbo.purchase_receipts AFTER INSERT
   WITH (STATE = ON);
 GO
 

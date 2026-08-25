@@ -11,7 +11,11 @@ using KineticEnterprise.Api.Models;
 
 namespace KineticEnterprise.Api.Controllers;
 
-public record InvoiceLineRequest(Guid ProductId, decimal Quantity, decimal UnitPrice);
+public record InvoiceLineRequest(
+    Guid ProductId, decimal Quantity, decimal UnitPrice,
+    /// بيع بالوحدة الجزئية (حبّة من شريط). الكمية والسعر حينها بالوحدة
+    /// الجزئية، والخصم من المخزون وحده هو ما يُحوَّل إلى الوحدة الأساسية.
+    bool SoldAsSubUnit = false);
 public record CreateInvoiceRequest(
     Guid BranchId, Guid? CustomerId, string PaymentMethod, List<InvoiceLineRequest> Lines,
     // يُطلَب فقط عند الدفع من محفظة العميل — البطاقة وحدها لا تكفي للصرف،
@@ -28,7 +32,21 @@ public record CreateInvoiceRequest(
     /// — فيلزم عميل محدَّد وحدّ ائتمان يتّسع للفرق.
     decimal? PaidAmount = null,
     /// النقد الذي سلّمه الزبون، والباقي يُشتقّ منه. للتدقيق وتسوية الدرج.
-    decimal? TenderedAmount = null);
+    decimal? TenderedAmount = null,
+    /// بيانات الوصفة — إلزامية إن كان في الفاتورة دواء مقيَّد بوصفة.
+    /// راجع [PrescriptionRequest] وقاعدة الرفض في Create.
+    PrescriptionRequest? Prescription = null);
+
+/// <summary>
+/// بيانات الوصفة كما يُدخلها الكاشير لحظة الصرف.
+///
+/// الطبيب والمريض مطلوبان لأنهما ما يجعل القيد مستنداً: دفتر فيه «صُرف دواء
+/// مقيَّد» بلا اسم طبيب ولا مريض لا يجيب عن أي سؤال تفتيش.
+/// </summary>
+public record PrescriptionRequest(
+    string DoctorName, string PatientName,
+    string? PrescriptionNumber = null, string? DoctorLicense = null,
+    string? PatientPhone = null, DateOnly? IssuedOn = null, string? Notes = null);
 
 /// صفحة فواتير — نفس شكل CustomerPageDto وAuditLogPageDto.
 public record InvoicePageDto(List<InvoiceListItemDto> Items, int TotalCount, int Page, int PageSize);
@@ -228,7 +246,7 @@ public class InvoicesController : ControllerBase
         if (org is null) return BadRequest(new { message = "تعذّر تحديد المنظمة" });
 
         var canOverridePrice = await HasPriceOverrideAsync();
-        var resolvedLines = new List<(Product Product, decimal Quantity, decimal UnitPrice, bool Overridden)>();
+        var resolvedLines = new List<(Product Product, decimal Quantity, decimal UnitPrice, bool Overridden, bool SoldAsSubUnit)>();
 
         foreach (var line in request.Lines)
         {
@@ -262,6 +280,39 @@ public class InvoicesController : ControllerBase
                 }
                 unitPrice = line.UnitPrice;
             }
+            else if (line.SoldAsSubUnit)
+            {
+                // سعر الوحدة الجزئية يُقارَن بـ SubUnitPrice لا بـ SalePrice:
+                // مقارنته بسعر الشريط كانت ترفض كل بيع جزئي مشروع، أو تمرّره
+                // كتجاوز سعر فيُسجَّل تجاوزاً في التدقيق بلا سبب.
+                if (!product.AllowsSubUnitSale)
+                {
+                    return BadRequest(new
+                    {
+                        message = $"«{product.Name}» غير مهيَّأ للبيع بالوحدة الجزئية"
+                    });
+                }
+                if (line.UnitPrice == product.SubUnitPrice)
+                {
+                    unitPrice = product.SubUnitPrice;
+                }
+                else if (canOverridePrice)
+                {
+                    if (line.UnitPrice < 0)
+                    {
+                        return BadRequest(new { message = "السعر لا يمكن أن يكون سالباً" });
+                    }
+                    unitPrice = line.UnitPrice;
+                    overridden = true;
+                }
+                else
+                {
+                    return BadRequest(new
+                    {
+                        message = $"سعر الوحدة الجزئية لـ«{product.Name}» لا يطابق الكتالوج، وتعديل السعر غير مسموح لك"
+                    });
+                }
+            }
             else if (line.UnitPrice == product.SalePrice)
             {
                 unitPrice = product.SalePrice;
@@ -280,7 +331,66 @@ public class InvoicesController : ControllerBase
                 return BadRequest(new { message = $"سعر «{product.Name}» لا يطابق سعر الكتالوج، وتعديل السعر غير مسموح لك" });
             }
 
-            resolvedLines.Add((product, line.Quantity, unitPrice, overridden));
+            resolvedLines.Add((product, line.Quantity, unitPrice, overridden, line.SoldAsSubUnit));
+        }
+
+        // ── الأدوية المقيَّدة بوصفة ──────────────────────────────────────
+        //
+        // القيد خاصية الدواء نفسه (medicine_reference.requires_prescription)
+        // لا خاصية الصنف في متجر بعينه، فيُقرأ من النشرة المرتبطة.
+        //
+        // الفحص هنا لا في الواجهة: إخفاء الحقل في شاشة البيع لا يمنع إرسال
+        // الطلب مباشرةً، وصرف دواء مقيَّد بلا قيد في الدفتر مخالفة نظامية لا
+        // مجرّد خطأ إدخال.
+        var referencedIds = resolvedLines
+            .Select(l => l.Product.MedicineRefId)
+            .Where(id => id.HasValue)
+            .Select(id => id!.Value)
+            .Distinct()
+            .ToList();
+
+        var restrictedNames = new List<string>();
+        if (referencedIds.Count > 0)
+        {
+            var restricted = await _db.MedicineReferences
+                .Where(m => referencedIds.Contains(m.Id) && !m.IsDeleted && m.RequiresPrescription)
+                .Select(m => m.Id)
+                .ToListAsync();
+
+            if (restricted.Count > 0)
+            {
+                restrictedNames = resolvedLines
+                    .Where(l => l.Product.MedicineRefId.HasValue
+                             && restricted.Contains(l.Product.MedicineRefId!.Value))
+                    .Select(l => l.Product.Name)
+                    .Distinct()
+                    .ToList();
+            }
+        }
+
+        if (restrictedNames.Count > 0)
+        {
+            // الصلاحية منفصلة عن البيع العادي: صرف المقيَّد قرار يُسنَد إلى
+            // صيدلي لا إلى كل من يقف على الصندوق.
+            if (!await HasPermissionAsync("prescriptions.dispense"))
+            {
+                return StatusCode(StatusCodes.Status403Forbidden, new
+                {
+                    message = $"صرف «{string.Join("، ", restrictedNames)}» يتطلّب صلاحية صرف الأدوية المقيَّدة"
+                });
+            }
+
+            var p = request.Prescription;
+            if (p is null
+                || string.IsNullOrWhiteSpace(p.DoctorName)
+                || string.IsNullOrWhiteSpace(p.PatientName))
+            {
+                return BadRequest(new
+                {
+                    message = $"«{string.Join("، ", restrictedNames)}» يُصرَف بوصفة — أدخل اسم الطبيب والمريض",
+                    requiresPrescription = restrictedNames,
+                });
+            }
         }
 
         await using var transaction = await _db.Database.BeginTransactionAsync();
@@ -310,15 +420,20 @@ public class InvoicesController : ControllerBase
         };
         invoice.TotalAmount = invoice.Subtotal - invoice.DiscountAmount + invoice.TaxAmount;
 
-        foreach (var (product, quantity, unitPrice, overridden) in resolvedLines)
+        foreach (var (product, quantity, unitPrice, overridden, soldAsSubUnit) in resolvedLines)
         {
-            invoice.Items.Add(new InvoiceItem
+            var invoiceItem = new InvoiceItem
             {
                 ProductId = product.Id,
                 Quantity = quantity,
                 UnitPrice = unitPrice,
                 LineTotal = quantity * unitPrice,
-            });
+                SoldAsSubUnit = soldAsSubUnit,
+                // لقطة وقت البيع لا قراءة لاحقة من الكتالوج — راجع
+                // InvoiceItem.SubUnitsPerBase.
+                SubUnitsPerBase = soldAsSubUnit ? product.SubUnitsPerBase : 0,
+            };
+            invoice.Items.Add(invoiceItem);
 
             if (overridden)
             {
@@ -334,33 +449,134 @@ public class InvoicesController : ControllerBase
             // كاملين، والمتخطَّى هو حركة المخزون وحدها.
             if (!product.TracksStock) continue;
 
-            // WITH (UPDLOCK) — قفل تحديث على صف الرصيد حتى نهاية المعاملة.
+            // WITH (UPDLOCK) — قفل تحديث على صفوف الرصيد حتى نهاية المعاملة.
             //
             // بدونه: قراءة ثم فحص ثم كتابة بلا قفل. كاشيران يبيعان آخر قطعة
             // في نفس اللحظة يقرآن كلاهما 1، ويمرّان الفحص كلاهما، فتُباع
             // قطعتان موجودة منهما واحدة ويصبح الرصيد سالباً. لا يظهر هذا في
             // اختبار بمستخدم واحد إطلاقاً — يظهر بعد التسليم عند فرعين
             // نشطين وثلاثة كاشيرات.
-            var stock = await _db.StockLevels
+            //
+            // وكل الصفوف لا صفّ واحد: UQ_stock_levels يسمح بصفٍّ لكل دفعة
+            // (branch_id, product_id, batch_number)، واستلام أمر شراء لصنف
+            // track_expiry=1 يكتب رقم دفعة حقيقياً (PurchaseOrdersController)
+            // — فالدواء الذي وصل على ثلاث شحنات له ثلاثة صفوف. الاكتفاء بـ
+            // FirstOrDefault هنا كان يلتقط دفعة عشوائية (لا ORDER BY أصلاً)
+            // فيقع خطآن: رفض بيع 15 والمتاح 30 موزّعة على ثلاث دفعات، وخصمٌ
+            // من دفعة بعيدة الانتهاء بينما القريبة تتلف على الرفّ.
+            // الكمية المخصومة بالوحدة الأساسية: المخزون يُعدّ شرائط، والبيع
+            // قد يكون بالحبّة. ثلاث حبات من شريط بعشر = 0.3 شريط، وعمود
+            // quantity من نوع DECIMAL(14,3) يتّسع للكسر.
+            //
+            // القسمة على المعامل من الكتالوج لا من الطلب: لو أخذناه من العميل
+            // لأمكن إرسال معامل ضخم فيُخصَم كسرٌ لا يُذكر مقابل بضاعة حقيقية.
+            var stockQuantity = soldAsSubUnit && product.SubUnitsPerBase > 0
+                ? quantity / product.SubUnitsPerBase
+                : quantity;
+
+            var batches = await _db.StockLevels
                 .FromSqlInterpolated($@"
                     SELECT * FROM stock_levels WITH (UPDLOCK, ROWLOCK)
                     WHERE branch_id = {request.BranchId} AND product_id = {product.Id}")
-                .FirstOrDefaultAsync();
+                .ToListAsync();
 
-            if (stock is null || stock.Quantity < quantity)
+            var today = DateTime.UtcNow.Date;
+
+            // الترتيب على **تاريخ الاستراتيجية** لا على الصلاحية وحدها — راجع
+            // StockLevel.StrategyDate:
+            //   1) الأقدم استراتيجيةً أولاً. وهو تاريخ الانتهاء للصنف المتتبَّع
+            //      (فيصير FEFO)، وتاريخ الإدخال لغيره (فيصير FIFO). قبل هذا
+            //      الحقل كان الصنف بلا صلاحية يُرتَّب برقم دفعته أبجدياً — أي
+            //      عشوائياً — فتبقى دفعته القديمة على الرفّ بلا سبب.
+            //   2) ثم ما بلا تاريخ استراتيجية (دفعة أُدخلت قبل تفعيل التتبّع،
+            //      أو مرتجع مجهول التاريخ) — يُؤخَّر لأن المعلوم أولى بالتصريف
+            //      من المجهول.
+            //   3) ثم رقم الدفعة لجعل الترتيب حتمياً لا يعتمد على مخطّط SQL.
+            //
+            // والموقوف يخرج من الترتيب كلّه (`!b.IsLocked`): القفل قرار إداري
+            // بأن هذه الدفعة لا تُصرَف — فلو بقيت في الترتيب لصرفها FEFO أولاً
+            // كلما كانت الأقرب انتهاءً، وهي غالباً كذلك (تُقفَل لأنها مشبوهة
+            // أو مرتجعة). راجع StockLevel.IsLocked.
+            var usable = batches
+                .Where(b => b.Quantity > 0 && !b.IsLocked
+                         && (b.ExpiryDate is null || b.ExpiryDate.Value.Date >= today))
+                .OrderBy(b => b.StrategyDate is null ? 1 : 0)
+                .ThenBy(b => b.StrategyDate)
+                .ThenBy(b => b.BatchNumber, StringComparer.Ordinal)
+                .ToList();
+
+            var usableQuantity = usable.Sum(b => b.Quantity);
+            if (usableQuantity < stockQuantity)
             {
-                return BadRequest(new { message = $"الكمية غير متوفرة في المخزون: {product.Name}" });
+                // المنتهي الصلاحية يُذكر صراحةً: بدونه يرى الكاشير «غير متوفر»
+                // بينما الرفّ ممتلئ، فيظنّه خللاً في النظام. والرسالة تقول له
+                // ما العمل — إتلاف الدفعة أو تسويتها من شاشة المخزون.
+                //
+                // والموقوف كذلك: الرفّ ممتلئ والنظام يرفض، فبلا ذكر السبب
+                // يبدو عطلاً. ويُذكر قبل المنتهي لأنه قرار بشري قابل للرجوع
+                // بضغطة — بخلاف انتهاء الصلاحية.
+                var expiredQuantity = batches
+                    .Where(b => b.Quantity > 0 && !b.IsLocked
+                             && b.ExpiryDate is not null && b.ExpiryDate.Value.Date < today)
+                    .Sum(b => b.Quantity);
+
+                var lockedQuantity = batches.Where(b => b.Quantity > 0 && b.IsLocked).Sum(b => b.Quantity);
+
+                var message = lockedQuantity > 0
+                    ? $"الكمية المتاحة غير كافية: {product.Name} — متاح {usableQuantity}, وموقوف {lockedQuantity} حتى يُفرَج عنه من شاشة المخزون"
+                    : expiredQuantity > 0
+                        ? $"الكمية الصالحة غير كافية: {product.Name} — متاح {usableQuantity}, ومنتهي الصلاحية {expiredQuantity} لا يُباع"
+                        : $"الكمية غير متوفرة في المخزون: {product.Name}";
+                return BadRequest(new { message });
             }
-            stock.Quantity -= quantity;
+
+            // الخصم عبر الدفتر لا على stock_levels مباشرةً: هو الطريق الوحيد
+            // في النظام، ومنه يأتي سطر صرف **لكل إدخال استُهلك منه** يحمل
+            // تكلفته الحقيقية ومصدره. راجع [StockLedger].
+            //
+            // تخصيص الدفعات على الفاتورة يبقى كما هو: هو ما يجعل المرتجع
+            // يُعيد الكمية إلى دفعتها الأصلية لا إلى دفعة عامة بلا صلاحية
+            // (راجع InvoiceItemBatch) — والدفتر يجيب سؤالاً آخر: بأي تكلفة
+            // ومن أي شحنة.
+            List<IssuedLot> issuedLots;
+            try
+            {
+                issuedLots = await StockLedger.IssueAsync(
+                    _db, invoice.OrganizationId, request.BranchId, warehouseId: null,
+                    productId: product.Id, quantity: stockQuantity,
+                    sourceType: StockSourceTypes.Invoice, sourceId: invoice.Id,
+                    userId: CurrentUserId());
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { message = $"{ex.Message} — {product.Name}" });
+            }
+
+            foreach (var group in issuedLots.GroupBy(l => l.BatchNumber))
+            {
+                invoiceItem.Batches.Add(new InvoiceItemBatch
+                {
+                    BatchNumber = group.Key,
+                    Quantity = group.Sum(l => l.Quantity),
+                });
+            }
 
             // موديول التنبيهات: دفعة SignalR اللحظية للمتصلين الآن، بالإضافة
             // إلى صف دائم في notifications حتى تظهر لاحقاً في "غرفة
             // الإشعارات" لمن لم يكن متصلاً وقت الحدث (الدفعة وحدها كانت
             // تُفقَد فوراً بلا أي أثر دائم قبل هذا الإصلاح).
-            if (stock.Quantity <= product.ReorderLevel)
+            //
+            // على مجموع الدفعات لا على دفعة واحدة: حدّ إعادة الطلب خاصية
+            // للصنف، فقياسه برصيد دفعة بعينها كان يُطلق إنذاراً كاذباً كلما
+            // نفدت دفعة والمخزون الكلي وافر.
+            //
+            // والموقوف مستثنى: هو مالٌ في المخزن لكنه ليس بضاعة قابلة للبيع،
+            // فعدّه ضمن الرصيد يُسكت إنذار النقص عن صنف لا يوجد منه شيء صالح.
+            var remainingTotal = batches.Where(b => !b.IsLocked).Sum(b => b.Quantity);
+            if (remainingTotal <= product.ReorderLevel)
             {
                 await _hub.Clients.Group(invoice.OrganizationId.ToString())
-                    .SendAsync("LowStockAlert", new { product.Name, stock.Quantity });
+                    .SendAsync("LowStockAlert", new { product.Name, Quantity = remainingTotal });
 
                 _db.Notifications.Add(new NotificationItem
                 {
@@ -368,7 +584,7 @@ public class InvoicesController : ControllerBase
                     BranchId = request.BranchId,
                     Type = "low_stock",
                     Title = $"نقص مخزون: {product.Name}",
-                    Body = $"الكمية المتبقية: {stock.Quantity}",
+                    Body = $"الكمية المتبقية: {remainingTotal}",
                 });
             }
         }
@@ -444,6 +660,14 @@ public class InvoicesController : ControllerBase
         // في دفع جزئي يجعل الدفتر يقول إن المال قُبض وهو لم يُقبض.
         invoice.Payments.Add(new InvoicePayment { Method = request.PaymentMethod, Amount = paidAmount });
         invoice.PaidAmount = paidAmount;
+
+        // تاريخ الاستحقاق لقطةً من مهلة العميل لحظة البيع، لا مرجعاً إليها:
+        // تغيير المهلة لاحقاً يجب ألّا يحرّك استحقاق فواتير مضت — وإلا صار
+        // بالإمكان إخفاء تأخّر بتعديل حقل في شاشة العملاء.
+        if (debtAmount > 0 && debtCustomer is not null)
+        {
+            invoice.DueDate = invoice.CreatedAt.Date.AddDays(Math.Max(0, debtCustomer.CreditDays));
+        }
         invoice.TenderedAmount = request.TenderedAmount;
         if (request.TenderedAmount.HasValue)
         {
@@ -453,6 +677,40 @@ public class InvoicesController : ControllerBase
 
         _db.Invoices.Add(invoice);
         await _db.SaveChangesAsync();
+
+        // قيد دفتر الوصفات بعد الفاتورة عمداً: prescriptions يحمل مفتاحاً
+        // خارجياً على invoices، وEF لا يعرف هذا الاعتماد (لا Navigation
+        // property بينهما) فيُدرج القيد قبل الفاتورة لو حُفظا معاً فيرفضه
+        // القيد. كلاهما داخل نفس المعاملة الصريحة — إما يمرّان معاً أو
+        // يُلغيان معاً، فلا يبقى صرفٌ بلا قيد ولا قيد بلا صرف.
+        //
+        // ويُسجَّل كلّما أُرسلت وصفة، لا فقط عند وجود دواء مقيَّد: الصيدلي قد
+        // يوثّق وصفة لدواء غير مقيَّد، ورفض توثيقه لا مبرّر له.
+        if (request.Prescription is { } rx
+            && !string.IsNullOrWhiteSpace(rx.DoctorName)
+            && !string.IsNullOrWhiteSpace(rx.PatientName))
+        {
+            _db.Prescriptions.Add(new Prescription
+            {
+                OrganizationId = invoice.OrganizationId,
+                BranchId = request.BranchId,
+                InvoiceId = invoice.Id,
+                PrescriptionNumber = rx.PrescriptionNumber?.Trim(),
+                DoctorName = rx.DoctorName.Trim(),
+                DoctorLicense = rx.DoctorLicense?.Trim(),
+                PatientName = rx.PatientName.Trim(),
+                PatientPhone = rx.PatientPhone?.Trim(),
+                IssuedOn = rx.IssuedOn,
+                Notes = rx.Notes?.Trim(),
+                CreatedBy = CurrentUserId(),
+            });
+
+            _db.LogAudit(invoice.OrganizationId, CurrentUserId(), "prescription.dispensed",
+                "prescriptions", invoice.Id,
+                newValues: new { rx.DoctorName, rx.PatientName, Medicines = restrictedNames });
+
+            await _db.SaveChangesAsync();
+        }
 
         // حركة المحفظة تُحفَظ *بعد* الفاتورة عمداً: customer_wallet_transactions
         // يحمل مفتاحاً خارجياً على invoices، وEF لا يعرف هذا الاعتماد (لا
@@ -507,7 +765,11 @@ public class InvoicesController : ControllerBase
     [RequirePermission("invoices.refund")]
     public async Task<ActionResult<Invoice>> Refund(Guid id)
     {
-        var original = await _db.Invoices.Include(i => i.Items).Include(i => i.Payments)
+        // ThenInclude(Batches) — تخصيص الدفعات لازم لإعادة كل كمية إلى دفعتها
+        // الأصلية بدل «دفعة عامة» بلا تاريخ صلاحية (راجع InvoiceItemBatch).
+        var original = await _db.Invoices
+            .Include(i => i.Items).ThenInclude(it => it.Batches)
+            .Include(i => i.Payments)
             .FirstOrDefaultAsync(i => i.Id == id);
         if (original is null) return NotFound();
         if (original.InvoiceType != "sale")
@@ -555,6 +817,9 @@ public class InvoicesController : ControllerBase
                 Quantity = item.Quantity,
                 UnitPrice = item.UnitPrice,
                 LineTotal = item.LineTotal,
+                // المرتجع يعكس البيع بوحدته: «أُرجعت 3 حبات» لا «0.3 شريط».
+                SoldAsSubUnit = item.SoldAsSubUnit,
+                SubUnitsPerBase = item.SubUnitsPerBase,
             });
 
             // الصنف غير المتتبَّع مخزنياً لم يُخصَم عند البيع، فإرجاعه للمخزون
@@ -562,24 +827,54 @@ public class InvoicesController : ControllerBase
             var refundedProduct = await _db.Products.FindAsync(item.ProductId);
             if (refundedProduct is not null && !refundedProduct.TracksStock) continue;
 
-            // إعادة الكمية إلى دفعة عامة بلا رقم دفعة محدَّد — invoice_items
-            // لا تخزّن batch_number أصلاً، فلا سبيل لمعرفة الدفعة الأصلية بدقة.
-            var stock = await _db.StockLevels.FirstOrDefaultAsync(
-                s => s.BranchId == original.BranchId && s.ProductId == item.ProductId && s.BatchNumber == "");
-            if (stock is null)
+            // كل كمية تعود إلى دفعتها التي خرجت منها فعلاً.
+            //
+            // الفواتير التي بيعت قبل وجود invoice_item_batches لا تخصيص لها،
+            // فتعود كما كانت إلى دفعة عامة ("") — سلوك النسخة السابقة، محفوظ
+            // عمداً حتى تبقى الفواتير القديمة قابلة للاسترجاع.
+            // تخصيص الدفعات محفوظ بالوحدة الأساسية أصلاً (خُصم كذلك)، فيعود
+            // كما هو. أما المسار الاحتياطي فيقرأ Quantity وهي بوحدة البيع،
+            // فتُحوَّل بلقطة المعامل وقت البيع — وإلا أعاد بيعُ 3 حبات ثلاثة
+            // شرائط كاملة إلى الرفّ.
+            var fallbackQuantity = item.SoldAsSubUnit && item.SubUnitsPerBase > 0
+                ? item.Quantity / item.SubUnitsPerBase
+                : item.Quantity;
+
+            var allocations = item.Batches.Count > 0
+                ? item.Batches.Select(b => (b.BatchNumber, b.Quantity)).ToList()
+                : new List<(string, decimal)> { ("", fallbackQuantity) };
+
+            foreach (var (batchNumber, batchQuantity) in allocations)
             {
-                _db.StockLevels.Add(new StockLevel
-                {
-                    OrganizationId = original.OrganizationId,
-                    BranchId = original.BranchId,
-                    ProductId = item.ProductId,
-                    BatchNumber = "",
-                    Quantity = item.Quantity,
-                });
-            }
-            else
-            {
-                stock.Quantity += item.Quantity;
+                // المرتجع إدخالٌ في الدفتر كأي إدخال: بضاعة عادت إلى الرفّ
+                // فيجب أن تُقيَّد، وإلا صار الرصيد يزيد بلا سطر يفسّره —
+                // وهو بالضبط ما جاء الدفتر ليمنعه.
+                //
+                // بتكلفة سطر الصرف الأصلي لا بتكلفة الصنف اليوم: المرتجع
+                // يُعيد ما خرج بثمنه، وإعادته بتكلفة اليوم تُنتج ربحاً أو
+                // خسارة وهميين من عملية لم يقع فيها بيع ولا شراء.
+                var originalCost = await _db.StockLedgerEntries
+                    .Where(e => e.SourceType == StockSourceTypes.Invoice
+                             && e.SourceId == original.Id
+                             && e.ProductId == item.ProductId
+                             && e.BatchNumber == batchNumber)
+                    .Select(e => (decimal?)e.UnitCost)
+                    .FirstOrDefaultAsync();
+
+                var product = await _db.Products.FirstOrDefaultAsync(p => p.Id == item.ProductId);
+
+                await StockLedger.ReceiveAsync(
+                    _db, original.OrganizationId, original.BranchId, warehouseId: null,
+                    productId: item.ProductId,
+                    quantity: batchQuantity,
+                    unitCost: originalCost ?? product?.CostPrice ?? 0,
+                    sourceType: StockSourceTypes.InvoiceReturn, sourceId: original.Id,
+                    userId: CurrentUserId(),
+                    batchNumber: batchNumber,
+                    // تاريخ الصلاحية غير محفوظ على سطر الفاتورة، فيبقى فارغاً
+                    // ويُؤخَّر في الصرف: المرتجع مجهول التاريخ لا يُصرَّف قبل
+                    // دفعة معلومة الانتهاء.
+                    trackExpiry: true);
             }
         }
 
@@ -620,6 +915,25 @@ public class InvoicesController : ControllerBase
         await transaction.CommitAsync();
 
         return CreatedAtAction(nameof(GetById), new { id = refund.Id }, refund);
+    }
+
+    /// <summary>
+    /// فحص صلاحية داخل منطق الإجراء لا كسمة عليه.
+    ///
+    /// [RequirePermission] يحرس الإجراء كلّه، بينما «صرف المقيَّد» شرطٌ لا
+    /// يقع إلا حين تحوي الفاتورة دواءً مقيَّداً — وضعه سمةً كان يمنع الكاشير
+    /// من بيع علبة مناديل. نفس منطق السمة: super_admin يتجاوز، والباقي
+    /// يُقرأ من role_permissions.
+    /// </summary>
+    private async Task<bool> HasPermissionAsync(string code)
+    {
+        var role = User.FindFirstValue(ClaimTypes.Role);
+        var orgIdRaw = User.FindFirstValue("organization_id");
+        if (role is null || orgIdRaw is null || !Guid.TryParse(orgIdRaw, out var orgId)) return false;
+        if (role == "super_admin") return true;
+
+        return await _db.RolePermissions.AnyAsync(rp =>
+            rp.OrganizationId == orgId && rp.Role == role && rp.PermissionCode == code);
     }
 
     private Guid? CurrentUserId()

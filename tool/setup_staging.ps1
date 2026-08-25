@@ -11,9 +11,10 @@
 #   تشغيل لهذا السكربت هو اختبار فعلي لصلاحية نسختك الاحتياطية — وهو
 #   الاختبار الذي يُؤجَّل دائماً حتى تأتي الحاجة.
 #
-#   التشغيل:
-#       .\setup_staging.ps1 -Domain staging.example.ly
-#       .\setup_staging.ps1 -Domain staging.example.ly -RefreshData
+#   التشغيل (النطاق الافتراضي هو نطاق التجربة الحقيقي، فيكفي):
+#       .\setup_staging.ps1
+#       .\setup_staging.ps1 -RefreshData
+#       .\setup_staging.ps1 -Domain other-staging.example.ly
 #
 #   -RefreshData وحدها تُعيد تحميل بيانات الإنتاج إلى قاعدة التجربة، بلا
 #   لمس الموقع ولا المجمّع.
@@ -21,8 +22,11 @@
 
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory = $true)]
-    [string]$Domain,
+    # نطاق التجربة الحقيقي افتراضاً — يُمرَّر صراحةً فقط لبيئة تجربة أخرى.
+    # والإنتاج erp.droob-albayan.ly لا يُمرَّر هنا أبداً: هذا السكربت يُنشئ
+    # موقعاً ومجمّعاً وقاعدةً باسم Staging، وتوجيهه إلى نطاق الإنتاج يعني
+    # موقعين يتنازعان الارتباط نفسه.
+    [string]$Domain = 'staging-erp.droob-albayan.ly',
     [string]$SqlInstance = '.\SQLEXPRESS',
     [string]$ProdDatabase = 'KineticEnterprise',
     [string]$StagingDatabase = 'KineticStaging',

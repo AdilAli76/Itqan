@@ -32,3 +32,13 @@ final purchaseOrderProductResultsProvider =
   });
   return PagedResult.fromJson(response.data as Map<String, dynamic>).items;
 });
+
+/// شحنات أمر شراء — سجلّ الاستلامات كما وصلت.
+///
+/// عائلة لا مزوّد واحد: الشاشة تُفتح لأمر بعينه، وحالة عامة كانت تعرض
+/// شحنات الأمر السابق حتى يصل الردّ.
+final purchaseOrderReceiptsProvider =
+    FutureProvider.autoDispose.family<List<Map<String, dynamic>>, String>((ref, orderId) async {
+  final response = await ApiClient.instance.dio.get('/purchase-orders/$orderId/receipts');
+  return List<Map<String, dynamic>>.from(response.data as List);
+});

@@ -96,3 +96,48 @@ final posQuickPicksProvider =
 
   return picks.values.toList();
 });
+
+/// ملخّص صلاحية المخزون لشريط الإنذار على شاشة البيع.
+///
+/// مفتاحه رقم الفرع لأن الصلاحية خاصية دفعة في فرع بعينه: مدير يتنقّل بين
+/// الفروع يجب أن يرى إنذار الفرع المعروض لا آخر فرع فتحه.
+///
+/// يبتلع الخطأ ويُرجع null عمداً: هذا شريط تحذيري ثانوي، وإسقاط شاشة البيع
+/// كلها لأن استدعاءه فشل (شبكة، أو وحدة inventory غير مفعَّلة في إصدار
+/// المنظمة فيردّ 403) يمنع البيع بسبب تحذير — وهو أسوأ من غياب التحذير.
+final posExpiryAlertProvider =
+    FutureProvider.autoDispose.family<Map<String, dynamic>?, String?>((ref, branchId) async {
+  try {
+    final response = await ApiClient.instance.dio.get(
+      '/products/expiry-alerts',
+      queryParameters: {
+        if (branchId != null) 'branchId': branchId,
+        'withinDays': 30,
+        'limit': 10,
+      },
+    );
+    return response.data as Map<String, dynamic>;
+  } catch (_) {
+    return null;
+  }
+});
+
+/// نشرة الدواء لصنف بعينه — لإصدار الصيدليات وحده.
+///
+/// تُجلَب عند الطلب لا مع قائمة الأصناف: النشرة نصوص طويلة تخصّ صنفاً واحداً
+/// يسأل عنه الكاشير، وحملها مع كل صنف يُثقل شاشة تُفتح عشرات المرّات يومياً.
+///
+/// null يعني «لا نشرة» لا «فشل»: الصنف قد يكون غير دوائي (مستحضر تجميل،
+/// حفاضات) فيردّ الخادم 204، أو تكون الوحدة غير مفعَّلة فيردّ 403. وفي
+/// الحالتين الصمت هو السلوك الصحيح — لا رسالة خطأ في حالة عادية.
+final medicineInfoProvider =
+    FutureProvider.autoDispose.family<Map<String, dynamic>?, String>((ref, productId) async {
+  try {
+    final response = await ApiClient.instance.dio.get('/products/$productId/medicine');
+    final data = response.data;
+    if (data is Map<String, dynamic>) return data;
+    return null;
+  } catch (_) {
+    return null;
+  }
+});

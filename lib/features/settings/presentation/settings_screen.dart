@@ -113,11 +113,62 @@ class _SettingsFormState extends ConsumerState<_SettingsForm> {
   Widget build(BuildContext context) {
     return Form(
       key: _formKey,
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 560),
-        child: Column(
+      // تكديس متجاوب بدل عمود ثابت بعرض 560.
+      //
+      // كان العمود شريطاً ضيّقاً وسط شاشة مكتب واسعة — ثلثا المساحة فارغان
+      // والمستخدم يمرّر لأربعة أقسام كان يمكن أن تُرى معاً. و«الحفظ» في
+      // أسفل التمرير يجعل تعديل حقل في الأعلى رحلةً ذهاباً وإياباً.
+      //
+      // الحدّ عند 980 لا 600: القسم الواحد يحتاج نحو 460 بكسل ليبقى مقروءاً،
+      // فعمودان تحته يضيّقان الحقول بدل أن يريحا العين.
+      child: LayoutBuilder(builder: (context, constraints) {
+        final twoColumns = constraints.maxWidth >= 980;
+        final sections = _sections(context);
+
+        if (!twoColumns) {
+          return ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 560),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [...sections, _footer()],
+            ),
+          );
+        }
+
+        // توزيع بالتناوب لا بالنصف: الأقسام تختلف ارتفاعاً، والقسمة على
+        // المنتصف تترك عموداً أطول من الآخر بفارق ظاهر.
+        final left = <Widget>[];
+        final right = <Widget>[];
+        for (var i = 0; i < sections.length; i++) {
+          (i.isEven ? left : right).add(sections[i]);
+        }
+
+        return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: left)),
+                const SizedBox(width: 16),
+                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: right)),
+              ],
+            ),
+            _footer(),
+          ],
+        );
+      }),
+    );
+  }
+
+  /// أقسام الإعدادات — مُرشَّحة بحسب إصدار المنظمة.
+  ///
+  /// **لماذا الترشيح لا الإخفاء بالتعطيل:** إعدادٌ لا معنى له في هذا
+  /// الإصدار (عرض لفة الطابعة الحرارية لمنظمة بلا بضاعة) ليس «غير متاح» بل
+  /// **غير موجود**. وعرضه معطّلاً يدفع المستخدم إلى سؤال الدعم عن سبب
+  /// تعطيله.
+  List<Widget> _sections(BuildContext context) {
+    return [
             SectionCard(
               title: 'العملة واللغة',
               icon: Icons.language_outlined,
@@ -229,35 +280,41 @@ class _SettingsFormState extends ConsumerState<_SettingsForm> {
                 ),
               ],
             ),
-            if (!widget.canEdit) ...[
-              const SizedBox(height: 16),
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(color: AppColors.warningBg, borderRadius: BorderRadius.circular(8)),
-                child: Text('عرض فقط — تعديل الإعدادات متاح للمدير العام فقط', style: AppTextStyles.bodyMd(color: AppColors.warning)),
-              ),
-            ],
-            if (_error != null) ...[
-              const SizedBox(height: 8),
-              Text(_error!, style: AppTextStyles.bodyMd(color: AppColors.danger)),
-            ],
-            if (widget.canEdit) ...[
-              const SizedBox(height: 20),
-              Align(
-                alignment: AlignmentDirectional.centerEnd,
-                child: FilledButton(
-                  onPressed: _saving ? null : _submit,
-                  child: _saving
-                      ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-                      : const Text('حفظ الإعدادات'),
-                ),
-              ),
-            ],
-          ],
-        ),
-      ),
-    );
+    ];
   }
+
+  /// الشريط والزرّ خارج الأعمدة: توزيعهما مع الأقسام كان يضع «حفظ» في منتصف
+  /// الشاشة تحت عمود واحد، ويكرّر تنبيه «عرض فقط» أو يُخفيه بحسب العدد.
+  Widget _footer() => Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (!widget.canEdit) ...[
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(color: AppColors.warningBg, borderRadius: BorderRadius.circular(8)),
+              child: Text('عرض فقط — تعديل الإعدادات متاح للمدير العام فقط',
+                  style: AppTextStyles.bodyMd(color: AppColors.warning)),
+            ),
+          ],
+          if (_error != null) ...[
+            const SizedBox(height: 8),
+            Text(_error!, style: AppTextStyles.bodyMd(color: AppColors.danger)),
+          ],
+          if (widget.canEdit) ...[
+            const SizedBox(height: 20),
+            Align(
+              alignment: AlignmentDirectional.centerEnd,
+              child: FilledButton(
+                onPressed: _saving ? null : _submit,
+                child: _saving
+                    ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                    : const Text('حفظ الإعدادات'),
+              ),
+            ),
+          ],
+        ],
+      );
 
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;

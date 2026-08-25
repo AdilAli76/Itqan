@@ -49,6 +49,10 @@ const kTourScreens = [
   TourScreen('/settings', 'الإعدادات'),
   TourScreen('/license', 'الترخيص'),
   TourScreen('/support', 'الدعم الفني'),
+  // شاشة مالك المنصّة لإدارة نشرات الأدوية (إصدار الصيدليات).
+  TourScreen('/medicine-reference', 'نشرات الأدوية'),
+  TourScreen('/prescriptions', 'دفتر الوصفات'),
+  TourScreen('/reorder', 'إعادة الطلب'),
 ];
 
 /// استثناءات رُصدت أثناء الجولة — تُجمَع ولا تُفشل، فتُصوَّر الشاشة بعطبها.

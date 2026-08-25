@@ -144,24 +144,34 @@ Future<void> printPurchaseOrder({
         ),
         pw.SizedBox(height: 16),
 
+        // ── الجدول معكوس الأعمدة عمداً ──────────────────────────────────
+        //
+        // `textDirection: rtl` على الصفحة يضبط اتجاه **النصّ** لا ترتيب
+        // أعمدة pw.Table: الجدول في حزمة pdf يرصّ أعمدته من اليسار دائماً،
+        // فكان «#» يقع أقصى اليسار و«الإجمالي» أقصى اليمين — أي جدول
+        // إنجليزي بنصّ عربي.
+        //
+        // فتُكتب الأعمدة بترتيب مقلوب هنا لتظهر صحيحة على الورق: الرقم
+        // واسم الصنف يميناً، والإجمالي يساراً — كما يقرأ المورّد العربي.
+        // وأعرض عمود (اسم الصنف) يصير 3 بدل 1 بعد القلب.
         pw.Table(
           border: pw.TableBorder.all(width: 0.6, color: PdfColors.grey600),
           columnWidths: {
-            0: const pw.FlexColumnWidth(0.6),
-            1: const pw.FlexColumnWidth(4),
+            0: const pw.FlexColumnWidth(1.8),
+            1: const pw.FlexColumnWidth(1.6),
             2: const pw.FlexColumnWidth(1.2),
-            3: const pw.FlexColumnWidth(1.6),
-            4: const pw.FlexColumnWidth(1.8),
+            3: const pw.FlexColumnWidth(4),
+            4: const pw.FlexColumnWidth(0.6),
           },
           children: [
             pw.TableRow(
               decoration: const pw.BoxDecoration(color: PdfColors.grey300),
               children: [
-                cell('#', bold: true, align: pw.TextAlign.center),
-                cell('الصنف', bold: true),
-                cell('الكمية', bold: true, align: pw.TextAlign.center),
-                cell('التكلفة', bold: true, align: pw.TextAlign.center),
                 cell('الإجمالي', bold: true, align: pw.TextAlign.center),
+                cell('التكلفة', bold: true, align: pw.TextAlign.center),
+                cell('الكمية', bold: true, align: pw.TextAlign.center),
+                cell('الصنف', bold: true),
+                cell('#', bold: true, align: pw.TextAlign.center),
               ],
             ),
             ...items.asMap().entries.map((e) {
@@ -170,11 +180,11 @@ Future<void> printPurchaseOrder({
               final unitCost = (it['unitCost'] as num?)?.toDouble() ?? 0;
               final lineTotal = (it['lineTotal'] as num?)?.toDouble() ?? (qty * unitCost);
               return pw.TableRow(children: [
-                cell('${e.key + 1}', align: pw.TextAlign.center),
-                cell(it['productName'] as String? ?? ''),
-                cell(_currencyFormat.format(qty), align: pw.TextAlign.center),
-                cell(_currencyFormat.format(unitCost), align: pw.TextAlign.center),
                 cell(_currencyFormat.format(lineTotal), align: pw.TextAlign.center),
+                cell(_currencyFormat.format(unitCost), align: pw.TextAlign.center),
+                cell(_currencyFormat.format(qty), align: pw.TextAlign.center),
+                cell(it['productName'] as String? ?? ''),
+                cell('${e.key + 1}', align: pw.TextAlign.center),
               ]);
             }),
           ],

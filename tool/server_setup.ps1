@@ -21,7 +21,7 @@
     verify  : فحص شامل بعد اكتمال كل شيء
 
 .PARAMETER Domain
-    النطاق الحقيقي، مثل erp.example.ly
+    النطاق الحقيقي. الإنتاج: erp.droob-albayan.ly — التجربة: staging-erp.droob-albayan.ly
 
 .PARAMETER PackagePath
     مسار مجلد الحزمة المفكوكة (publish). الافتراضي C:\kinetic
@@ -32,8 +32,8 @@
 .EXAMPLE
     .\server_setup.ps1 -Stage check
     .\server_setup.ps1 -Stage db
-    .\server_setup.ps1 -Stage iis -Domain erp.example.ly
-    .\server_setup.ps1 -Stage verify -Domain erp.example.ly
+    .\server_setup.ps1 -Stage iis -Domain erp.droob-albayan.ly
+    .\server_setup.ps1 -Stage verify -Domain erp.droob-albayan.ly
 #>
 [CmdletBinding()]
 param(
@@ -281,13 +281,13 @@ if ($Stage -eq 'db') {
 
     Write-Host ''
     Write-Host '  التالي: املأ appsettings.Production.json ثم:' -ForegroundColor Green
-    $shown = if ($Domain) { $Domain } else { 'erp.example.ly' }
-    Write-Host "         .\server_setup.ps1 -Stage iis -Domain $shown" -ForegroundColor Green
+    $shown = if ($Domain) { $Domain } else { 'erp.droob-albayan.ly' }
+    Write-Host "         .\tool\server_setup.ps1 -Stage iis -Domain $shown" -ForegroundColor Green
 }
 
 # ══════════════════════════════ iis ═════════════════════════════════════
 if ($Stage -eq 'iis') {
-    if (-not $Domain) { throw 'مرّر -Domain (مثل erp.example.ly)' }
+    if (-not $Domain) { throw 'مرّر -Domain (مثل erp.droob-albayan.ly)' }
     if (-not (Test-Admin)) { throw 'شغّل PowerShell كمسؤول' }
     Import-Module WebAdministration
 
@@ -468,14 +468,26 @@ if ($Stage -eq 'https') {
     }
     if ($cert) {
         Ok "شهادة موجودة في مخزن $certStore تنتهي $($cert[0].NotAfter.ToString('yyyy-MM-dd'))"
-        $https = $site.Bindings.Collection | Where-Object { $_.protocol -eq 'https' }
+        # الشرط على ارتباط https **لهذا النطاق** لا على وجود أي https.
+        #
+        # الموقع الواحد قد يخدم أكثر من نطاق (نطاق قديم مؤقّت إلى جانب النطاق
+        # الجديد). والفحص العامّ كان يجد ارتباط النطاق القديم فيقول «موجود»
+        # ويمضي — فلا يُربط النطاق الجديد بـ443 أبداً، ويبقى يعمل على http
+        # وحده بينما يبدو كل شيء ناجحاً.
+        #
+        # وSNI (SslFlags 1) هو ما يسمح بشهادتين مختلفتين على المنفذ نفسه —
+        # بدونه تُستبدل شهادة النطاق القديم لا تُضاف بجوارها.
+        $https = $site.Bindings.Collection |
+                 Where-Object { $_.protocol -eq 'https' -and $_.bindingInformation -like "*:443:$Domain" }
         if (-not $https) {
             New-WebBinding -Name 'Kinetic' -Protocol https -Port 443 -HostHeader $Domain -SslFlags 1
-            $binding = Get-WebBinding -Name 'Kinetic' -Protocol https
+            # الارتباط يُلتقط بترويسة مضيفه: Get-WebBinding بلا -HostHeader
+            # يُرجع أوّل ارتباط https في الموقع، فتُربط الشهادة بالنطاق الخطأ.
+            $binding = Get-WebBinding -Name 'Kinetic' -Protocol https -Port 443 -HostHeader $Domain
             $binding.AddSslCertificate($cert[0].GetCertHashString(), $certStore)
-            Ok 'أُضيف ارتباط https على 443'
+            Ok "أُضيف ارتباط https على 443 لـ$Domain"
         } else {
-            Ok 'ارتباط https موجود'
+            Ok "ارتباط https لـ$Domain موجود"
         }
     } else {
         Miss "لا شهادة لـ$Domain في المخزن"
@@ -509,9 +521,15 @@ if ($Stage -eq 'https') {
     }
 
     Write-Host ''
-    Write-Host "  التالي: أعد بناء الحزمة بعنوان https ثم انشرها:" -ForegroundColor Green
-    Write-Host "    .\publish.ps1 -ApiUrl https://$Domain/api" -ForegroundColor White
-    Write-Host '  العنوان مخبوز في نسخة الويب وقت البناء، فلا يكفي تغيير الإعدادات.' -ForegroundColor Gray
+    # لا إعادة بناء بعد الشهادة: تطبيق الويب يشتقّ عنوان الـAPI من **أصل
+    # الصفحة** وقت التشغيل (راجع ApiClient.baseUrl)، فالحزمة نفسها تعمل على
+    # http وhttps وعلى أي نطاق. كانت هذه الرسالة تطلب إعادة بناء بعنوان
+    # مخبوز — وهو سلوك سابق، واتّباعه اليوم يُنتج حزمة مربوطة بنطاق واحد
+    # ويُبطل اختبارها على التجربة.
+    Write-Host "  الشهادة والتحويل جاهزان. لا حاجة لإعادة بناء الحزمة:" -ForegroundColor Green
+    Write-Host "  تطبيق الويب يشتقّ عنوان الـAPI من أصل الصفحة، فيتحوّل إلى https تلقائياً." -ForegroundColor Gray
+    Write-Host ''
+    Write-Host "  تحقّق:  .\tool\server_setup.ps1 -Stage verify -Domain $Domain" -ForegroundColor White
 }
 
 # ══════════════════════════════ verify ══════════════════════════════════
