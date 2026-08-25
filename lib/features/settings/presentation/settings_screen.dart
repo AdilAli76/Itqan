@@ -95,6 +95,18 @@ class _SettingsFormState extends ConsumerState<_SettingsForm> {
       TextEditingController(text: (widget.settings['receiptWidthMm'] as num?)?.toString() ?? '80');
   late bool _posAllowOpenProduct = widget.settings['posAllowOpenProduct'] as bool? ?? false;
 
+  // ── أنماط بطاقة المحفظة ────────────────────────────────────────────────
+  // المدير يضع المظروف هنا (المسموح والافتراضي والسقف)، واختيار كل زبون
+  // داخله من شاشة «بطاقات المحفظة». والكاشير لا يغيّر شيئاً.
+  late final Set<String> _cardModes = ((widget.settings['cardModesAllowed'] as String?) ?? 'card,pin')
+      .split(',')
+      .map((e) => e.trim())
+      .where((e) => e.isNotEmpty)
+      .toSet();
+  late String _cardModeDefault = widget.settings['cardModeDefault'] as String? ?? 'pin';
+  late final _cardCapController = TextEditingController(
+      text: (widget.settings['cardOpenModeDailyCap'] as num?)?.toString() ?? '50');
+
   late String _locale = widget.settings['locale'] as String? ?? 'ar';
   bool _saving = false;
   String? _error;
@@ -106,6 +118,7 @@ class _SettingsFormState extends ConsumerState<_SettingsForm> {
     _taxRateController.dispose();
     _passwordMinLengthController.dispose();
     _receiptWidthController.dispose();
+    _cardCapController.dispose();
     super.dispose();
   }
 
@@ -262,6 +275,83 @@ class _SettingsFormState extends ConsumerState<_SettingsForm> {
             ),
             const SizedBox(height: 16),
             SectionCard(
+              title: 'بطاقة المحفظة',
+              icon: Icons.credit_card_outlined,
+              children: [
+                Text(
+                  'كيف يُتحقَّق من صاحب البطاقة عند الصرف. أنت تضع المظروف هنا، '
+                  'ويُختار لكل زبون داخله من شاشة «بطاقات المحفظة». '
+                  'الكاشير لا يغيّر النمط لحظة البيع.',
+                  style: AppTextStyles.labelMd(),
+                ),
+                const SizedBox(height: 12),
+                CheckboxListTile(
+                  value: _cardModes.contains('pin'),
+                  onChanged: widget.canEdit ? (v) => _toggleCardMode('pin', v == true) : null,
+                  contentPadding: EdgeInsets.zero,
+                  controlAffinity: ListTileControlAffinity.leading,
+                  title: Text('بطاقة + رقم سرّي',
+                      style: AppTextStyles.bodyMd(color: AppColors.textPrimary)),
+                  subtitle: Text(
+                    'الأشدّ. ولا تنسَ أن الزبون يُدخل رقمه على جهاز الكاشير، '
+                    'فمن يقف خلفه قد يراه أو يحفظه.',
+                    style: AppTextStyles.labelMd(),
+                  ),
+                ),
+                CheckboxListTile(
+                  value: _cardModes.contains('card'),
+                  onChanged: widget.canEdit ? (v) => _toggleCardMode('card', v == true) : null,
+                  contentPadding: EdgeInsets.zero,
+                  controlAffinity: ListTileControlAffinity.leading,
+                  title: Text('البطاقة وحدها بسقف يومي',
+                      style: AppTextStyles.bodyMd(color: AppColors.textPrimary)),
+                  subtitle: Text(
+                    'لمن لا يحفظ رقماً. لا رقم سرّي يُحفَظ أصلاً فلا شيء يُسرَّب، '
+                    'والخطر محصور بالسقف اليومي أدناه لا بكامل الرصيد.',
+                    style: AppTextStyles.labelMd(),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                DropdownButtonFormField<String>(
+                  // بلا isExpanded تُرسَم عناصر القائمة في Row لا يلتفّ،
+                  // فعنوانٌ طويل مثل «البطاقة وحدها بسقف يومي» يفيض على
+                  // شاشة هاتف — وهو ما أمسكه ui_audit_test فعلاً (112 بكسل).
+                  isExpanded: true,
+                  initialValue: _cardModes.contains(_cardModeDefault) ? _cardModeDefault : null,
+                  decoration: const InputDecoration(
+                    labelText: 'النمط الافتراضي للبطاقة الجديدة',
+                    helperText: 'ما يبدأ به كل حساب جديد ما لم يُختَر غيره عند الإصدار',
+                  ),
+                  items: [
+                    if (_cardModes.contains('pin'))
+                      const DropdownMenuItem(value: 'pin', child: Text('بطاقة + رقم سرّي')),
+                    if (_cardModes.contains('card'))
+                      const DropdownMenuItem(value: 'card', child: Text('البطاقة وحدها بسقف يومي')),
+                  ],
+                  onChanged: widget.canEdit ? (v) => setState(() => _cardModeDefault = v ?? _cardModeDefault) : null,
+                  validator: (v) => v == null ? 'اختر نمطاً من الأنماط المسموحة' : null,
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: _cardCapController,
+                  enabled: widget.canEdit && _cardModes.contains('card'),
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  decoration: const InputDecoration(
+                    labelText: 'السقف اليومي لنمط «البطاقة وحدها»',
+                    helperText: 'أقصى ما يُصرف من البطاقة في اليوم بلا رقم سرّي. '
+                        'صفر يعني تعطيل النمط فعلياً. وللزبون أن يختار لنفسه سقفاً أقلّ.',
+                  ),
+                  validator: (v) {
+                    if (!_cardModes.contains('card')) return null;
+                    final n = double.tryParse(v ?? '');
+                    if (n == null || n < 0) return 'رقم غير سالب';
+                    return null;
+                  },
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            SectionCard(
               title: 'نقطة البيع',
               icon: Icons.point_of_sale_outlined,
               children: [
@@ -316,6 +406,25 @@ class _SettingsFormState extends ConsumerState<_SettingsForm> {
         ],
       );
 
+  /// إلغاء آخر نمط مسموح يعني حساباً لا يُصرَف منه أبداً — يُرفض هنا لا عند
+  /// الحفظ، فالمستخدم يرى السبب في لحظته.
+  void _toggleCardMode(String mode, bool on) {
+    setState(() {
+      if (on) {
+        _cardModes.add(mode);
+      } else if (_cardModes.length > 1) {
+        _cardModes.remove(mode);
+        // الافتراضي يتبع المسموح تلقائياً: تركُه على نمط أُلغي يُسقط كل حساب
+        // جديد إلى مسار لم يقصده أحد.
+        if (!_cardModes.contains(_cardModeDefault)) _cardModeDefault = _cardModes.first;
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('يجب السماح بنمط تحقّق واحد على الأقل')),
+        );
+      }
+    });
+  }
+
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
     setState(() {
@@ -332,6 +441,9 @@ class _SettingsFormState extends ConsumerState<_SettingsForm> {
         'passwordMinLength': int.parse(_passwordMinLengthController.text),
         'receiptWidthMm': double.parse(_receiptWidthController.text),
         'posAllowOpenProduct': _posAllowOpenProduct,
+        'cardModesAllowed': _cardModes.join(','),
+        'cardModeDefault': _cardModeDefault,
+        'cardOpenModeDailyCap': double.parse(_cardCapController.text),
       });
       ref.invalidate(settingsProvider);
       if (mounted) {

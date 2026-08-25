@@ -53,6 +53,12 @@ CREATE TABLE organizations (
   -- السماح ببيع الأصناف مفتوحة القيمة في نقطة البيع. مطفأ افتراضياً: قيمة
   -- يكتبها الكاشير بنفسه لا تقابلها بضاعة في المخزون. يضبطه مدير المنظمة.
   pos_allow_open_product BIT NOT NULL DEFAULT 0,
+  -- مظروف أنماط بطاقة المحفظة: المنظمة تحدّد المسموح والسقف والافتراضي،
+  -- والزبون يختار داخله. راجع CardModeGate.
+  card_modes_allowed NVARCHAR(100) NOT NULL DEFAULT 'card,pin',
+  card_mode_default NVARCHAR(20) NOT NULL DEFAULT 'pin',
+  -- سقف نمط «بطاقة فقط». صفر = النمط معطَّل فعلياً.
+  card_open_mode_daily_cap DECIMAL(18,2) NOT NULL DEFAULT 50,
   is_active BIT NOT NULL DEFAULT 1,
   created_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
   updated_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
@@ -651,6 +657,19 @@ CREATE TABLE customers (
   -- customer_card_index وحده (لا نسخة منه هنا حتى لا يوجد مصدرا حقيقة).
   pin_hash NVARCHAR(400) NULL,
   pin_locked_until DATETIME2 NULL,
+  -- نمط التحقّق عند الصرف: 'card' (مسح فقط بسقف يومي) أو 'pin'. NULL =
+  -- افتراضي المنظمة. يختاره صاحب الحساب لا الكاشير — ماله هو.
+  -- القيد مُسمّى صراحةً ليطابق ما يُنشئه MIGRATIONS.sql: القيود السطرية
+  -- تأخذ اسماً مُجزَّأً يختلف بين كل قاعدة وأخرى، فلا يجدها فحص المخطّط ولا
+  -- تُترجَم رسالتها إلى العربية في DbConstraintMessageMiddleware.
+  --
+  -- و'phone' مقبول هنا ولو لم يُعرَض في الواجهة بعد: القيد يحرس ما يُكتَب،
+  -- والنمط يُفعَّل يوم تُبنى قناة الإرسال بلا تغيير مخطّط.
+  card_mode NVARCHAR(20) NULL
+    CONSTRAINT CK_customers_card_mode CHECK (card_mode IS NULL OR card_mode IN ('card','pin','phone')),
+  -- سقف يومي أشدّ يختاره الزبون لنفسه. صفر = سقف المنظمة. ويُقبل الأقلّ فقط:
+  -- التشديد على النفس حقٌّ بلا إذن، والتخفيف تجاوزٌ لحدّ صاحب المحل.
+  daily_cap DECIMAL(18,2) NOT NULL DEFAULT 0,
   created_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
 );
 GO

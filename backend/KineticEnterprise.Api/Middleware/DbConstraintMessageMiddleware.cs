@@ -76,6 +76,7 @@ public class DbConstraintMessageMiddleware
         ["CK_licenses_modules_json"] = "قائمة الوحدات المفعّلة بصيغة غير صحيحة.",
         ["CK_invoices_status"] = "حالة الفاتورة غير مقبولة.",
         ["CK_customers_account_model"] = "نوع حساب العميل غير مقبول.",
+        ["CK_customers_card_mode"] = "نمط التحقّق من البطاقة غير مقبول.",
         ["CK_customer_card_index_state"] = "حالة البطاقة غير مقبولة.",
         ["CK_wallet_tx_kind"] = "نوع حركة المحفظة غير مقبول.",
         ["CK_organizations_nav_layout"] = "شكل التنقّل غير مقبول — اختر شريطاً جانبياً أو علوياً.",

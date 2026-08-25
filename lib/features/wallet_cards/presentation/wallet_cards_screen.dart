@@ -16,6 +16,7 @@ import '../../../shared/widgets/currency_badge.dart';
 import '../../../shared/widgets/data_table_widget.dart';
 import '../../../shared/widgets/pin_pad.dart';
 import '../data/wallet_cards_providers.dart';
+import '../../settings/data/settings_providers.dart';
 import '../../../shared/widgets/filter_chip_button.dart';
 import '../../../shared/widgets/skeleton.dart';
 import '../../../shared/widgets/pagination_bar.dart';
@@ -239,6 +240,7 @@ class _CardDetailDialogState extends ConsumerState<_CardDetailDialog> {
 
   String get _code => widget.card['cardCode'] as String? ?? '';
   String get _state => widget.card['state'] as String? ?? '';
+  String get _mode => widget.card['cardMode'] as String? ?? 'pin';
 
   @override
   Widget build(BuildContext context) {
@@ -277,6 +279,12 @@ class _CardDetailDialogState extends ConsumerState<_CardDetailDialog> {
               _DetailRow(
                   label: 'الرصيد الحالي',
                   value: NumberFormat('#,##0.000', 'en').format((widget.card['balance'] as num?) ?? 0)),
+              _DetailRow(
+                label: 'نمط التحقّق',
+                value: _mode == 'card'
+                    ? 'البطاقة وحدها — سقف يومي ${(( widget.card['dailyCap'] as num?)?.toDouble() ?? 0).toStringAsFixed(2)}'
+                    : 'بطاقة + رقم سرّي',
+              ),
               if (issuedBy != null) _DetailRow(label: 'أصدرها', value: issuedBy),
               if (blockedReason != null) _DetailRow(label: 'سبب الحظر', value: blockedReason),
               if (_error != null) ...[
@@ -303,7 +311,15 @@ class _CardDetailDialogState extends ConsumerState<_CardDetailDialog> {
                   OutlinedButton.icon(
                     onPressed: _working ? null : _resetPin,
                     icon: const Icon(Icons.password_outlined, size: 18),
-                    label: const Text('رقم سري جديد'),
+                    // في نمط «بطاقة فقط» ضبطُ رقم يعني تحويل الحساب إلى النمط
+                    // الأشدّ — وهذا ما يفعله الخادم فعلاً، فالنصّ يقوله صراحةً
+                    // بدل أن يُفاجَأ المدير بتغيّر النمط.
+                    label: Text(_mode == 'card' ? 'تفعيل رقم سرّي' : 'رقم سري جديد'),
+                  ),
+                  OutlinedButton.icon(
+                    onPressed: _working ? null : _changeMode,
+                    icon: const Icon(Icons.tune_outlined, size: 18),
+                    label: const Text('نمط التحقّق'),
                   ),
                   OutlinedButton.icon(
                     onPressed: _working ? null : _reissue,
@@ -422,6 +438,48 @@ class _CardDetailDialogState extends ConsumerState<_CardDetailDialog> {
     await _run(
       () => ApiClient.instance.dio.post('/wallet-cards/$_code/reset-pin', data: {'pin': pin}),
       'تم تغيير الرقم السري',
+    );
+  }
+
+  /// تغيير نمط التحقّق لهذا الحساب.
+  ///
+  /// يمرّ بنقطة نهاية تشترط صلاحية `cards.issue` — **وهي ليست صلاحية
+  /// كاشير**: من يستطيع خفض الحماية على محفظة يستطيع إنفاقها.
+  ///
+  /// والتحوّل إلى «بطاقة فقط» يمحو الرقم السرّي: النمط قائم على أن لا سرّ
+  /// يُحفَظ أصلاً، وإبقاؤه يترك ما يُسرَّب بلا أن يستعمله أحد.
+  Future<void> _changeMode() async {
+    final settings = ref.read(settingsProvider).valueOrNull ?? const <String, dynamic>{};
+    final allowed = ((settings['cardModesAllowed'] as String?) ?? 'pin')
+        .split(',')
+        .map((e) => e.trim())
+        .where((e) => e.isNotEmpty)
+        .toList();
+    final orgCap = (settings['cardOpenModeDailyCap'] as num?)?.toDouble() ?? 0;
+
+    if (allowed.length < 2) {
+      setState(() => _error = 'إعدادات المنظمة تسمح بنمط واحد فقط — غيّرها من شاشة الإعدادات أولاً.');
+      return;
+    }
+
+    final result = await showDialog<Map<String, dynamic>>(
+      context: context,
+      builder: (_) => _CardModeDialog(
+        current: _mode,
+        allowed: allowed,
+        orgCap: orgCap,
+        currentCap: (widget.card['dailyCap'] as num?)?.toDouble() ?? 0,
+        hasPin: _mode == 'pin',
+      ),
+    );
+    if (result == null) return;
+
+    final customerId = widget.card['customerId'] as String?;
+    if (customerId == null) return;
+
+    await _run(
+      () => ApiClient.instance.dio.put('/customers/$customerId/card-mode', data: result),
+      'تم تغيير نمط التحقّق',
     );
   }
 
@@ -600,7 +658,10 @@ class _IssueCardDialog extends ConsumerStatefulWidget {
 class _IssueCardDialogState extends ConsumerState<_IssueCardDialog> {
   late String? _customerId = widget.fixedCustomerId;
   final _holderNameController = TextEditingController();
+  final _capController = TextEditingController();
   String _pin = '';
+  /// النمط المختار — null حتى تصل إعدادات المنظمة، فيصير افتراضها.
+  String? _mode;
   DateTime? _expiryDate;
   bool _saving = false;
   String? _error;
@@ -609,6 +670,7 @@ class _IssueCardDialogState extends ConsumerState<_IssueCardDialog> {
   @override
   void dispose() {
     _holderNameController.dispose();
+    _capController.dispose();
     super.dispose();
   }
 
@@ -638,6 +700,7 @@ class _IssueCardDialogState extends ConsumerState<_IssueCardDialog> {
 
   Widget _buildForm() {
     final customersAsync = ref.watch(customersWithoutCardProvider);
+    final settingsAsync = ref.watch(settingsProvider);
 
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -706,14 +769,75 @@ class _IssueCardDialogState extends ConsumerState<_IssueCardDialog> {
           ),
         ),
         const SizedBox(height: 16),
-        Text('الرقم السري', style: AppTextStyles.labelMd()),
-        const SizedBox(height: 2),
-        Text(
-          'من 4 إلى 6 أرقام — لا يُقبَل مكرَّر (1111) ولا متسلسل (1234)',
-          style: AppTextStyles.caption(),
+        // نمط التحقّق — من مظروف المنظمة وحده. نمطٌ لم يسمح به المدير لا
+        // يُعرَض أصلاً: عرضه معطّلاً يدفع الكاشير لسؤال الدعم عن سببه.
+        settingsAsync.when(
+          loading: () => const LinearProgressIndicator(),
+          error: (_, __) => Text('تعذّر تحميل إعدادات البطاقة',
+              style: AppTextStyles.bodyMd(color: AppColors.danger)),
+          data: (settings) {
+            final allowed = ((settings['cardModesAllowed'] as String?) ?? 'pin')
+                .split(',')
+                .map((e) => e.trim())
+                .where((e) => e.isNotEmpty)
+                .toList();
+            final mode = _mode ?? (settings['cardModeDefault'] as String? ?? 'pin');
+            final orgCap = (settings['cardOpenModeDailyCap'] as num?)?.toDouble() ?? 0;
+
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text('نمط التحقّق عند الصرف', style: AppTextStyles.labelMd()),
+                const SizedBox(height: 8),
+                if (allowed.length == 1)
+                  Text(
+                    allowed.first == 'card'
+                        ? 'البطاقة وحدها بسقف يومي — النمط الوحيد المسموح في إعدادات المنظمة.'
+                        : 'بطاقة + رقم سرّي — النمط الوحيد المسموح في إعدادات المنظمة.',
+                    style: AppTextStyles.caption(),
+                  )
+                else
+                  SegmentedButton<String>(
+                    segments: [
+                      if (allowed.contains('pin'))
+                        const ButtonSegment(value: 'pin', label: Text('رقم سرّي')),
+                      if (allowed.contains('card'))
+                        const ButtonSegment(value: 'card', label: Text('بطاقة فقط')),
+                    ],
+                    selected: {allowed.contains(mode) ? mode : allowed.first},
+                    onSelectionChanged: (v) => setState(() => _mode = v.first),
+                  ),
+                const SizedBox(height: 12),
+                if ((allowed.contains(mode) ? mode : allowed.first) == 'card') ...[
+                  Text(
+                    'لا رقم سرّي لهذه البطاقة — لا شيء يُحفَظ فلا شيء يُسرَّب، '
+                    'والحدّ سقفٌ يوميّ. سقف المنظمة ${orgCap.toStringAsFixed(2)}.',
+                    style: AppTextStyles.caption(),
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: _capController,
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    decoration: InputDecoration(
+                      labelText: 'سقف يومي أقلّ لهذا الزبون (اختياري)',
+                      helperText: 'اتركه فارغاً لاتّباع سقف المنظمة. '
+                          'ولا يُقبَل أعلى من ${orgCap.toStringAsFixed(2)}.',
+                    ),
+                  ),
+                ] else ...[
+                  Text('الرقم السري', style: AppTextStyles.labelMd()),
+                  const SizedBox(height: 2),
+                  Text(
+                    'من 4 إلى 6 أرقام — لا يُقبَل مكرَّر (1111) ولا متسلسل (1234)',
+                    style: AppTextStyles.caption(),
+                  ),
+                  const SizedBox(height: 8),
+                  PinPad(value: _pin, onChanged: (v) => setState(() => _pin = v)),
+                ],
+              ],
+            );
+          },
         ),
-        const SizedBox(height: 8),
-        PinPad(value: _pin, onChanged: (v) => setState(() => _pin = v)),
         if (_error != null) ...[
           const SizedBox(height: 10),
           Text(_error!, style: AppTextStyles.bodyMd(color: AppColors.danger)),
@@ -781,9 +905,17 @@ class _IssueCardDialogState extends ConsumerState<_IssueCardDialog> {
       _error = null;
     });
     try {
+      final settings = ref.read(settingsProvider).valueOrNull ?? const <String, dynamic>{};
+      final mode = _mode ?? (settings['cardModeDefault'] as String? ?? 'pin');
+      final cap = double.tryParse(_capController.text.trim());
+
       final response = await ApiClient.instance.dio.post('/wallet-cards/issue', data: {
         'customerId': _customerId,
-        'pin': _pin,
+        // الرقم في نمطه وحده: إرساله في «بطاقة فقط» يرفضه الخادم صراحةً،
+        // لأن سرّاً لا يستعمله أحد يبقى قابلاً للتسريب بلا فائدة.
+        'pin': mode == 'pin' ? _pin : null,
+        'cardMode': mode,
+        'dailyCap': mode == 'card' ? cap : null,
         'expiryDate': _expiryDate == null ? null : DateFormat('yyyy-MM-dd').format(_expiryDate!),
         'holderName': _holderNameController.text.trim(),
       });
@@ -793,5 +925,128 @@ class _IssueCardDialogState extends ConsumerState<_IssueCardDialog> {
     } finally {
       if (mounted) setState(() => _saving = false);
     }
+  }
+}
+
+/// اختيار نمط التحقّق لحساب قائم.
+///
+/// **التحويل إلى «رقم سرّي» لا يتمّ من هنا**: النمط يحتاج رقماً مضبوطاً،
+/// وضبطه له حواره الخاص («تفعيل رقم سرّي»). خيارٌ يقود إلى حسابٍ لا يُصرَف
+/// منه أبداً أسوأ من غيابه.
+class _CardModeDialog extends StatefulWidget {
+  const _CardModeDialog({
+    required this.current,
+    required this.allowed,
+    required this.orgCap,
+    required this.currentCap,
+    required this.hasPin,
+  });
+
+  final String current;
+  final List<String> allowed;
+  final double orgCap;
+  final double currentCap;
+  final bool hasPin;
+
+  @override
+  State<_CardModeDialog> createState() => _CardModeDialogState();
+}
+
+class _CardModeDialogState extends State<_CardModeDialog> {
+  late String _mode = widget.current;
+  late final _capController = TextEditingController(
+      text: widget.currentCap > 0 ? widget.currentCap.toStringAsFixed(2) : '');
+  String? _error;
+
+  @override
+  void dispose() {
+    _capController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('نمط التحقّق'),
+      content: SizedBox(
+        width: 380,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              SegmentedButton<String>(
+                segments: [
+                  if (widget.allowed.contains('pin'))
+                    ButtonSegment(
+                      value: 'pin',
+                      label: const Text('رقم سرّي'),
+                      enabled: widget.hasPin,
+                    ),
+                  if (widget.allowed.contains('card'))
+                    const ButtonSegment(value: 'card', label: Text('بطاقة فقط')),
+                ],
+                selected: {_mode},
+                onSelectionChanged: (v) => setState(() => _mode = v.first),
+              ),
+              if (!widget.hasPin) ...[
+                const SizedBox(height: 8),
+                Text(
+                  'لا رقم سرّي لهذا الحساب. لتحويله إلى نمط الرقم السرّي '
+                  'استعمل «تفعيل رقم سرّي».',
+                  style: AppTextStyles.caption(),
+                ),
+              ],
+              if (_mode == 'card') ...[
+                const SizedBox(height: 16),
+                Text(
+                  'البطاقة وحدها: لا رقم يُدخَل ولا رقم يُحفَظ، والحدّ سقفٌ '
+                  'يوميّ. سقف المنظمة ${widget.orgCap.toStringAsFixed(2)}.',
+                  style: AppTextStyles.caption(),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: _capController,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  decoration: const InputDecoration(
+                    labelText: 'سقف يومي أقلّ لهذا الزبون (اختياري)',
+                    helperText: 'اتركه فارغاً لاتّباع سقف المنظمة. الأعلى منه لا يُقبَل.',
+                  ),
+                ),
+              ],
+              if (_error != null) ...[
+                const SizedBox(height: 10),
+                Text(_error!, style: AppTextStyles.bodyMd(color: AppColors.danger)),
+              ],
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('إلغاء')),
+        FilledButton(onPressed: _submit, child: const Text('حفظ')),
+      ],
+    );
+  }
+
+  void _submit() {
+    double? cap;
+    if (_mode == 'card') {
+      final raw = _capController.text.trim();
+      if (raw.isNotEmpty) {
+        cap = double.tryParse(raw);
+        if (cap == null || cap < 0) {
+          setState(() => _error = 'سقف غير صالح');
+          return;
+        }
+        // يُرفض هنا لا صامتاً في الخادم: مسؤولٌ ظنّ أنه رفع سقفاً وهو لم
+        // يرتفع سيكتشف ذلك يوم يُرفَض بيع.
+        if (cap > widget.orgCap) {
+          setState(() => _error = 'لا يتجاوز سقف المنظمة (${widget.orgCap.toStringAsFixed(2)})');
+          return;
+        }
+      }
+    }
+    Navigator.pop(context, {'cardMode': _mode, 'dailyCap': cap ?? 0});
   }
 }

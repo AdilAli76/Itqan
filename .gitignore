@@ -44,6 +44,11 @@ app.*.map.json
 /android/app/profile
 /android/app/release
 
+# مخرجات Gradle — تُبنى بـ flutter build apk ولا تُرفع (مئات الميغابايت
+# ومسارات مطلقة على جهاز المطوّر).
+/android/build/
+/android/.gradle/
+
 # إعدادات أدوات محلية — تحوي مسارات مطلقة على جهاز المطوّر (مسار Flutter SDK)
 # لا تصلح لجهاز آخر
 .claude/

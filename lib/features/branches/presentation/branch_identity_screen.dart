@@ -275,12 +275,15 @@ class _LogoUploadBoxState extends ConsumerState<_LogoUploadBox> {
     final picked = await FilePicker.pickFiles(
       type: FileType.custom,
       allowedExtensions: const ['png', 'jpg', 'jpeg', 'webp'],
-      // الويب لا يعطي مساراً على القرص، فالبايتات هي السبيل الوحيد —
-      // وطلبها صراحةً يجعل نفس الكود يعمل على المنصات الثلاث.
-      withData: true,
     );
-    final file = picked?.files.firstOrNull;
-    if (file == null || file.bytes == null) return;
+    // pickFiles في file_picker 12 تُرجع القائمة مباشرةً لا مغلَّفاً بـ.files.
+    final file = picked.firstOrNull;
+    if (file == null) return;
+
+    // الويب لا يعطي مساراً على القرص، فالبايتات هي السبيل الوحيد —
+    // وقراءتها صراحةً تجعل نفس الكود يعمل على المنصات الثلاث. وreadAsBytes
+    // هي بديل withData المهجورة: تقرأ عند الحاجة بدل تحميل كل ملف مختار.
+    final bytes = await file.readAsBytes();
 
     setState(() {
       _busy = true;
@@ -288,7 +291,7 @@ class _LogoUploadBoxState extends ConsumerState<_LogoUploadBox> {
     });
     try {
       final form = FormData.fromMap({
-        'file': MultipartFile.fromBytes(file.bytes!, filename: file.name),
+        'file': MultipartFile.fromBytes(bytes, filename: file.name),
       });
       final upload = await ApiClient.instance.dio.post(
         '/files',

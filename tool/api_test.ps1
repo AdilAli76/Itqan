@@ -624,6 +624,137 @@ if ($fefoProduct.Status -notin 200,201) {
 }
 
 # -----------------------------------------------------------------------------
+Section "٥.٣ أنماط بطاقة المحفظة"
+
+# العطب الذي يمسكه هذا القسم: الرقم السرّي كان إلزامياً دائماً بلا بديل،
+# والرقم وسيلةُ إثبات يعرفها طرفان — الزبون يُدخله على جهاز الكاشير فيراه أو
+# يحفظه، ثم يسحب بعد انصرافه بالبحث عن اسمه. البديل هو نمط «البطاقة وحدها
+# بسقف يومي»: لا رقم يُحفَظ أصلاً، والخطر محصور برقم يضعه صاحب المحل.
+#
+# والسؤال الذي يُجاب هنا: هل يفرض **السيرفر** السقف، أم أنه رقمٌ تعرضه
+# الواجهة ويُتجاوَز بطلب HTTP مباشر؟
+
+$origSettings = Api GET "/organizations/me/settings" -Token $token
+if ($origSettings.Status -ne 200) {
+    Skipped "أنماط بطاقة المحفظة" "تعذّر قراءة الإعدادات (حالة $($origSettings.Status))"
+} else {
+
+$cardCap = 20
+$baseSettings = @{
+    currencyCode        = $origSettings.Body.currencyCode
+    currencySymbol      = $origSettings.Body.currencySymbol
+    locale              = $origSettings.Body.locale
+    taxRate             = $origSettings.Body.taxRate
+    passwordMinLength   = $origSettings.Body.passwordMinLength
+    receiptWidthMm      = $origSettings.Body.receiptWidthMm
+    posAllowOpenProduct = $origSettings.Body.posAllowOpenProduct
+}
+
+$setModes = Api PUT "/organizations/me/settings" -Token $token -Body ($baseSettings + @{
+    cardModesAllowed     = "card,pin"
+    cardModeDefault      = "pin"
+    cardOpenModeDailyCap = $cardCap
+})
+Check "المدير يضبط مظروف الأنماط" ($setModes.Status -in 200,204) "حالة $($setModes.Status)"
+
+# قائمة أنماط فارغة تعني حساباً لا يُصرَف منه أبداً — تُرفض.
+$emptyModes = Api PUT "/organizations/me/settings" -Token $token -Body ($baseSettings + @{
+    cardModesAllowed = ""; cardModeDefault = "pin"
+})
+Check "قائمة أنماط فارغة تُرفض" ($emptyModes.Status -eq 400) "حالة $($emptyModes.Status) — قبولها يترك حسابات لا تُصرَف"
+
+# نمط افتراضي خارج المسموح يُسقِط كل حساب جديد إلى مسار لم يقصده أحد.
+$badDefault = Api PUT "/organizations/me/settings" -Token $token -Body ($baseSettings + @{
+    cardModesAllowed = "pin"; cardModeDefault = "card"
+})
+Check "افتراضي خارج المسموح يُرفض" ($badDefault.Status -eq 400) "حالة $($badDefault.Status)"
+
+$cardCustomer = Api POST "/customers" -Token $token -Body @{
+    fullName = "زبون بطاقة $stamp"; creditLimit = 0
+}
+
+if ($cardCustomer.Status -notin 200,201) {
+    Skipped "أنماط بطاقة المحفظة" "تعذّر إنشاء العميل (حالة $($cardCustomer.Status))"
+} else {
+    $custId = $cardCustomer.Body.id
+
+    # إصدار بطاقة بنمط «بطاقة فقط» بلا رقم سرّي إطلاقاً.
+    $issued = Api POST "/wallet-cards/issue" -Token $token -Body @{
+        customerId = $custId; cardMode = "card"; pin = $null
+    }
+    Check "إصدار بطاقة بلا رقم سرّي في نمط «بطاقة فقط»" ($issued.Status -in 200,201) "حالة $($issued.Status) — $($issued.Body.message)"
+
+    # الرقم مع النمط المكشوف يُرفض: سرٌّ لا يستعمله أحد يبقى قابلاً للتسريب.
+    $pinInCardMode = Api POST "/wallet-cards/issue" -Token $token -Body @{
+        customerId = $custId; cardMode = "card"; pin = "4739"
+    }
+    Check "رقم سرّي مع نمط «بطاقة فقط» يُرفض" ($pinInCardMode.Status -eq 400) "حالة $($pinInCardMode.Status)"
+
+    # سقف زبون أعلى من سقف المنظمة تجاوزٌ لحدٍّ وضعه صاحب المحل لمخاطرته هو.
+    $capTooHigh = Api PUT "/customers/$custId/card-mode" -Token $token -Body @{
+        cardMode = "card"; dailyCap = ($cardCap + 500)
+    }
+    Check "سقف زبون أعلى من سقف المنظمة يُرفض" ($capTooHigh.Status -eq 400) "حالة $($capTooHigh.Status) — قبوله يجعل سقف المنظمة زينة"
+
+    # والأقلّ يُقبل: التشديد على النفس حقٌّ لا يحتاج إذناً.
+    $capLower = Api PUT "/customers/$custId/card-mode" -Token $token -Body @{
+        cardMode = "card"; dailyCap = 5
+    }
+    Check "سقف زبون أقلّ يُقبل" ($capLower.Status -in 200,204) "حالة $($capLower.Status)"
+
+    # يُعاد إلى سقف المنظمة قبل اختبار الصرف.
+    Api PUT "/customers/$custId/card-mode" -Token $token -Body @{ cardMode = "card"; dailyCap = 0 } | Out-Null
+
+    # شحن المحفظة بما يفوق السقف بكثير — لنقيس السقف لا الرصيد.
+    $topUp = Api POST "/customers/$custId/wallet-adjustments" -Token $token -Body @{
+        amountDelta = 1000; note = "TEST-$stamp"
+    }
+
+    if ($topUp.Status -notin 200,201 -or -not $canManageInventory) {
+        Skipped "فرض السقف اليومي" "يتطلّب شحن محفظة وإنشاء صنف (حالة الشحن $($topUp.Status))"
+    } else {
+        $capProduct = Api POST "/products" -Token $token -Body @{
+            sku = "TEST-CAP-$stamp"; name = "صنف اختبار السقف $stamp"
+            salePrice = 15; costPrice = 5
+            unitBase = "piece"; tracksStock = $false; reorderLevel = 0
+        }
+
+        if ($capProduct.Status -notin 200,201) {
+            Skipped "فرض السقف اليومي" "تعذّر إنشاء الصنف (حالة $($capProduct.Status))"
+        } else {
+            $capProductId = $capProduct.Body.id
+
+            # فاتورة أولى بـ15 — تحت السقف (20) فتمرّ، **وبلا رقم سرّي**.
+            $sale1 = Api POST "/invoices" -Token $token -Body @{
+                branchId = $branchId; customerId = $custId
+                paymentMethod = "customer_wallet"
+                lines = @(@{ productId = $capProductId; quantity = 1 })
+            }
+            Check "صرف تحت السقف يمرّ بلا رقم سرّي" ($sale1.Status -in 200,201) "حالة $($sale1.Status) — $($sale1.Body.message)"
+
+            # ثانية بـ15 — المجموع 30 يتجاوز السقف 20، والرصيد وافر (1000).
+            # هذا هو الفحص الحقيقي: لولا فرضٍ في السيرفر لمرّت.
+            $sale2 = Api POST "/invoices" -Token $token -Body @{
+                branchId = $branchId; customerId = $custId
+                paymentMethod = "customer_wallet"
+                lines = @(@{ productId = $capProductId; quantity = 1 })
+            }
+            Check "تجاوز السقف اليومي يُرفَض رغم كفاية الرصيد" ($sale2.Status -eq 400) "حالة $($sale2.Status) — مروره يعني أن السقف رقمٌ في الواجهة لا حاجز"
+            Check "رسالة الرفض تذكر السقف" ("$($sale2.Body.message)" -like "*السقف*") "الرسالة: $($sale2.Body.message)"
+        }
+    }
+}
+
+# تُعاد الإعدادات كما كانت — الاختبار لا يترك المنظمة بمظروف غير مظروفها.
+Api PUT "/organizations/me/settings" -Token $token -Body ($baseSettings + @{
+    cardModesAllowed     = $origSettings.Body.cardModesAllowed
+    cardModeDefault      = $origSettings.Body.cardModeDefault
+    cardOpenModeDailyCap = $origSettings.Body.cardOpenModeDailyCap
+}) | Out-Null
+
+}
+
+# -----------------------------------------------------------------------------
 Section "٦. العزل بين المنظمات"
 
 $otherOrgProduct = Api GET "/products/00000000-0000-0000-0000-000000000042" -Token $token

@@ -100,6 +100,16 @@ public class LicenseGateAttribute : Attribute, IAsyncActionFilter
             _ => null,
         };
 
+        // التوقيع بعد الحالة: الحالة يضبطها مالك المنصّة عن قصد، والتوقيع
+        // يكشف عبثاً بالقاعدة. وترتيبهما هكذا يجعل رسالة التجميد المتعمّد
+        // تسبق رسالة «مفتاح غير صالح» — وهي أوضح للعميل.
+        if (message is null)
+        {
+            var config = http.RequestServices.GetRequiredService<IConfiguration>();
+            var check = await LicenseVerification.CheckAsync(db, config);
+            if (!check.Valid) message = check.Message;
+        }
+
         if (message is null)
         {
             await next();

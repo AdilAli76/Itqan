@@ -13,8 +13,14 @@ namespace KineticEnterprise.Api.Controllers;
 public record RecordDebtReminderRequest(string? Note = null);
 
 public record WalletAdjustmentRequest(decimal AmountDelta, string? Note);
-public record IssueCardRequest(string Pin);
+/// <param name="Pin">
+/// الرقم السرّي. اختياريّ: في نمط «بطاقة فقط» لا رقم أصلاً — وإلزامه هناك
+/// يُنشئ سرّاً لا يستعمله أحد ويبقى قابلاً للتسريب.
+/// </param>
+public record IssueCardRequest(string? Pin, string? CardMode = null, decimal? DailyCap = null);
 public record IssuedCardDto(string CardCode);
+
+public record SetCardModeRequest(string? CardMode, decimal? DailyCap);
 
 /// صفحة عملاء: العناصر مع العدد الكلي المطابق للفلتر — الواجهة تحتاج
 /// العدد الكلي لا عدد الصفحة، وإلا تعذّر عليها رسم "عرض 1–50 من 1,240"
@@ -29,7 +35,17 @@ public record CustomerDto(
     int CreditDays,
     int LoyaltyPoints, DateTime CreatedAt,
     string AccountModel, Guid? SponsorId, string? SponsorName,
-    decimal EntitlementCeiling, DateOnly? EntitlementExpiresOn);
+    decimal EntitlementCeiling, DateOnly? EntitlementExpiresOn,
+    /// نمط التحقّق المختار لهذا الحساب — NULL يعني اتباع افتراضي المنظمة.
+    string? CardMode,
+    /// النمط الفعّال بعد تطبيق مسموح المنظمة وافتراضها — ما سيحدث فعلاً.
+    string EffectiveCardMode,
+    decimal DailyCap,
+    /// السقف الفعّال بعد الأخذ بالأشدّ بين سقف المنظمة وسقف الزبون.
+    decimal EffectiveDailyCap,
+    /// هل للحساب رقم سرّي مضبوط أصلاً — الواجهة تحتاجه لتمنع اختيار نمط
+    /// «رقم سرّي» لحسابٍ بلا رقم، فيصير الصرف مستحيلاً.
+    bool HasPin);
 
 public record WalletTransactionDto(
     Guid Id, string Kind, decimal Amount, decimal SignedAmount, string? Note, Guid? InvoiceId, DateTime CreatedAt);
@@ -51,6 +67,15 @@ public class CustomersController : ControllerBase
 {
     private readonly AppDbContext _db;
     public CustomersController(AppDbContext db) => _db = db;
+
+    /// <summary>
+    /// منظمة الطالب — تلزم لحساب النمط والسقف الفعّالين لكل عميل معروض.
+    /// تُقرأ مرّة لكل طلب لا مرّة لكل صف: صفحةٌ بمئتَي عميل كانت ستُصدر مئتَي
+    /// استعلام متطابق.
+    /// </summary>
+    private Organization? _org;
+    private async Task<Organization?> OrgAsync() =>
+        _org ??= await _db.Organizations.FirstOrDefaultAsync();
 
     /// <summary>
     /// قائمة العملاء مقسَّمة صفحات. كانت تُعيد كل العملاء دفعة واحدة، ومعهم
@@ -103,9 +128,10 @@ public class CustomersController : ControllerBase
                 .Select(s => new { s.Id, s.Name })
                 .ToDictionaryAsync(s => s.Id, s => s.Name);
 
+        var org = await OrgAsync();
         var items = customers
             .Select(c => ToDto(c, balances.GetValueOrDefault(c.Id),
-                c.SponsorId is null ? null : sponsorNames.GetValueOrDefault(c.SponsorId.Value)))
+                c.SponsorId is null ? null : sponsorNames.GetValueOrDefault(c.SponsorId.Value), org))
             .ToList();
 
         return new CustomerPageDto(items, totalCount, page, pageSize);
@@ -131,7 +157,7 @@ public class CustomersController : ControllerBase
             .FirstOrDefaultAsync(c => c.CardBarcode == normalized && !c.IsDeleted);
         if (customer is null) return NotFound();
 
-        return ToDto(customer, await BalanceOf(customer.Id), await SponsorNameOf(customer));
+        return ToDto(customer, await BalanceOf(customer.Id), await SponsorNameOf(customer), await OrgAsync());
     }
 
     [HttpGet("{id:guid}")]
@@ -139,7 +165,7 @@ public class CustomersController : ControllerBase
     {
         var customer = await _db.Customers.FindAsync(id);
         if (customer is null) return NotFound();
-        return ToDto(customer, await BalanceOf(id), await SponsorNameOf(customer));
+        return ToDto(customer, await BalanceOf(id), await SponsorNameOf(customer), await OrgAsync());
     }
 
     /// <summary>
@@ -174,7 +200,7 @@ public class CustomersController : ControllerBase
             // DATABASE_TABLES_GUIDE.md §6.1، لتفادي التباس عند مسح البطاقة في POS.
             return Conflict(new { message = "باركود البطاقة مستخدَم بالفعل" });
         }
-        return CreatedAtAction(nameof(GetById), new { id = customer.Id }, ToDto(customer, 0));
+        return CreatedAtAction(nameof(GetById), new { id = customer.Id }, ToDto(customer, 0, null, await OrgAsync()));
     }
 
     [HttpPut("{id:guid}")]
@@ -291,7 +317,7 @@ public class CustomersController : ControllerBase
             newValues: new { customer.FullName, request.AmountDelta, NewBalance = newBalance });
         await _db.SaveChangesAsync();
 
-        return ToDto(customer, newBalance);
+        return ToDto(customer, newBalance, null, await OrgAsync());
     }
 
     /// <summary>
@@ -309,8 +335,41 @@ public class CustomersController : ControllerBase
         var customer = await _db.Customers.FirstOrDefaultAsync(c => c.Id == id && !c.IsDeleted);
         if (customer is null) return NotFound();
 
-        var pinError = CustomerCards.ValidatePin(request.Pin);
-        if (pinError is not null) return BadRequest(new { message = pinError });
+        var org = await OrgAsync();
+        if (org is null) return BadRequest(new { message = "تعذّر تحديد المنظمة" });
+
+        // النمط المطلوب لهذه البطاقة — أو افتراضي المنظمة إن لم يُحدَّد.
+        var mode = request.CardMode ?? org.CardModeDefault;
+        if (!CardModeGate.AllowedModes(org).Contains(mode))
+        {
+            return BadRequest(new { message = "هذا النمط غير مسموح في إعدادات المنظمة" });
+        }
+
+        // الرقم يُطلَب ويُتحقَّق منه في نمطه وحده. وفي نمط «بطاقة فقط» يُمحى
+        // أي رقم قديم: تركُه محفوظاً يُبقي سرّاً قابلاً للتسريب لا يستعمله
+        // أحد، والنمط كلّه قائم على أن لا شيء يُحفَظ.
+        if (mode == CardModes.Pin)
+        {
+            var pinError = CustomerCards.ValidatePin(request.Pin ?? "");
+            if (pinError is not null) return BadRequest(new { message = pinError });
+        }
+        else if (!string.IsNullOrEmpty(request.Pin))
+        {
+            return BadRequest(new { message = "نمط «بطاقة فقط» لا يأخذ رقماً سرّياً" });
+        }
+
+        if (request.DailyCap is { } cap)
+        {
+            if (cap < 0) return BadRequest(new { message = "السقف لا يكون سالباً" });
+            if (cap > 0 && cap > org.CardOpenModeDailyCap)
+            {
+                return BadRequest(new
+                {
+                    message = $"سقف الزبون لا يتجاوز سقف المنظمة ({org.CardOpenModeDailyCap:0.##})"
+                });
+            }
+            customer.DailyCap = cap;
+        }
 
         // إعادة الإصدار تستبدل الرمز القديم فيبطل مفعوله فوراً.
         var existing = await _db.CustomerCardIndexes.FirstOrDefaultAsync(c => c.CustomerId == customer.Id);
@@ -330,14 +389,88 @@ public class CustomersController : ControllerBase
         // بقي باركود منفصل عن رمز الدخول لأصبح للبطاقة الواحدة رقمان
         // مختلفان يربكان الكاشير والعميل معاً.
         customer.CardBarcode = code;
-        customer.PinHash = BCrypt.Net.BCrypt.HashPassword(request.Pin);
+        customer.CardMode = mode;
+        customer.PinHash = mode == CardModes.Pin
+            ? BCrypt.Net.BCrypt.HashPassword(request.Pin!)
+            : null;
         customer.PinLockedUntil = null;
 
         _db.LogAudit(customer.OrganizationId, CurrentUserId(), "customer.card_issued", "customers", customer.Id,
-            newValues: new { customer.FullName, Reissued = existing is not null });
+            newValues: new { customer.FullName, Reissued = existing is not null, Mode = mode });
         await _db.SaveChangesAsync();
 
         return new IssuedCardDto(code);
+    }
+
+    /// <summary>
+    /// تغيير نمط التحقّق وسقف حساب عميل.
+    ///
+    /// <para><b>لماذا صلاحية <c>cards.issue</c> لا <c>customers.manage</c>:</b>
+    /// من يستطيع تخفيف الحماية على محفظة يستطيع إنفاقها. **والكاشير لا يملك
+    /// هذه الصلاحية** — من يغيّر النمط لحظة الصرف تسقط الحماية كلّها بين
+    /// يديه، وهي نفس الصلاحية التي يُشترَط وجودها لإصدار البطاقة أصلاً.</para>
+    ///
+    /// <para><b>وأين رضا صاحب المال:</b> النظام لا يملك قناة تُبلِّغ الزبون،
+    /// وبوابة العميل تُصادِق برمز + رقم سرّي — فحسابٌ في نمط «بطاقة فقط» لا
+    /// يستطيع الدخول إليها أصلاً ليختار. فالرضا هنا حضوره عند الكاشير مع
+    /// مسؤولٍ يملك الصلاحية، وهو ما يُسجَّل في التدقيق باسمه. وإتاحة نقطة
+    /// نهاية في البوابة تعمل لبعض الأنماط دون بعض كانت ستوهم بضمانٍ لا
+    /// يتحقّق.</para>
+    /// </summary>
+    [HttpPut("{id:guid}/card-mode")]
+    [RequirePermission("cards.issue")]
+    public async Task<ActionResult<CustomerDto>> SetCardMode(Guid id, SetCardModeRequest request)
+    {
+        var customer = await _db.Customers.FirstOrDefaultAsync(c => c.Id == id && !c.IsDeleted);
+        if (customer is null) return NotFound();
+
+        var org = await OrgAsync();
+        if (org is null) return BadRequest(new { message = "تعذّر تحديد المنظمة" });
+
+        var allowed = CardModeGate.AllowedModes(org);
+
+        // null = عُد إلى افتراضي المنظمة. يختلف عن إرسال نمطٍ صريح يساويه:
+        // الأول يتبع المدير إن غيّر افتراضه لاحقاً، والثاني يثبت.
+        if (request.CardMode is { } mode)
+        {
+            if (!allowed.Contains(mode))
+            {
+                return BadRequest(new { message = "هذا النمط غير مسموح في إعدادات المنظمة" });
+            }
+            if (mode == CardModes.Pin && customer.PinHash is null)
+            {
+                // نمطٌ يحتاج رقماً لحسابٍ بلا رقم يعني حساباً لا يُصرَف منه
+                // أبداً — رفضٌ صامت وقت البيع بدل خطأ واضح الآن.
+                return BadRequest(new { message = "لا يوجد رقم سرّي لهذا الحساب — أصدر البطاقة برقم سرّي أولاً" });
+            }
+            customer.CardMode = mode;
+        }
+        else
+        {
+            customer.CardMode = null;
+        }
+
+        if (request.DailyCap is { } cap)
+        {
+            if (cap < 0) return BadRequest(new { message = "السقف لا يكون سالباً" });
+
+            // الأعلى من سقف المنظمة يُرفض صراحةً لا يُقصّ صامتاً: مسؤولٌ ظنّ
+            // أنه رفع سقف زبون وهو لم يرتفع سيكتشف ذلك يوم يُرفَض بيع.
+            if (cap > 0 && cap > org.CardOpenModeDailyCap)
+            {
+                return BadRequest(new
+                {
+                    message = $"سقف الزبون لا يتجاوز سقف المنظمة ({org.CardOpenModeDailyCap:0.##})"
+                });
+            }
+            customer.DailyCap = cap;
+        }
+
+        _db.LogAudit(customer.OrganizationId, CurrentUserId(), "customer.card_mode_changed", "customers", customer.Id,
+            newValues: new { customer.FullName, customer.CardMode, customer.DailyCap });
+        await _db.SaveChangesAsync();
+
+        return ToDto(customer, await BalanceOf(customer.Id), await SponsorNameOf(customer), org);
     }
 
     // حذف فعلي غير مسموح به (راجع ARCHITECTURE.md §3.2) — فواتير قديمة قد
@@ -440,10 +573,19 @@ public class CustomersController : ControllerBase
             ? DateTime.UtcNow.AddMonths(-1)
             : c.EntitlementExpiresOn.Value.ToDateTime(TimeOnly.MinValue).AddMonths(-1);
 
-    private static CustomerDto ToDto(Customer c, decimal balance, string? sponsorName = null) =>
+    /// <param name="org">
+    /// منظمة العميل — تلزم لحساب النمط والسقف الفعّالين. حين تكون null
+    /// يُعرَض اختيار العميل الخام: لا نخترع نمطاً فعّالاً من فراغ.
+    /// </param>
+    private static CustomerDto ToDto(Customer c, decimal balance, string? sponsorName = null, Organization? org = null) =>
         new(c.Id, c.OrganizationId, c.BranchId, c.FullName, c.Phone, c.Email, c.Notes,
             c.CardBarcode, balance, c.CreditLimit, c.CreditDays, c.LoyaltyPoints, c.CreatedAt,
-            c.AccountModel, c.SponsorId, sponsorName, c.EntitlementCeiling, c.EntitlementExpiresOn);
+            c.AccountModel, c.SponsorId, sponsorName, c.EntitlementCeiling, c.EntitlementExpiresOn,
+            c.CardMode,
+            org is null ? (c.CardMode ?? CardModes.Pin) : CardModeGate.EffectiveMode(org, c),
+            c.DailyCap,
+            org is null ? c.DailyCap : CardModeGate.EffectiveCap(org, c),
+            c.PinHash is not null);
 
     private Guid? CurrentUserId()
     {

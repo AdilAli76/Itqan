@@ -1611,6 +1611,83 @@ PRINT N'لوح خلفية الفرع جاهز';
 GO
 
 -- ----------------------------------------------------------------------------
+--  أنماط بطاقة المحفظة
+--
+--  العطب: الرقم السرّي كان **إلزامياً دائماً بلا بديل**. والرقم وسيلةُ إثبات
+--  يعرفها طرفان: الزبون يُدخله على جهاز الكاشير، فيراه أو يلتقطه أو يحفظه، ثم
+--  يسحب بعد انصرافه بالبحث عن اسمه. الإلزام بلا بديل هو ما يخلق الثغرة — لا
+--  ضعف الرقم.
+--
+--  والقسمة: المنظمة تضع المظروف (المسموح والسقف والافتراضي)، والزبون يختار
+--  داخله، **والكاشير لا يغيّر شيئاً** — من يستطيع خفض الحماية لحظة الصرف لا
+--  تحميه حمايةٌ.
+--
+--  ولا حاجة لأي تعبئة رجعية هنا: كل الافتراضات تُبقي السلوك القائم كما هو
+--  (الرقم السرّي)، فترقيةٌ لا تُرخي حراسة أحدٍ بلا علمه.
+-- ----------------------------------------------------------------------------
+IF NOT EXISTS (SELECT 1 FROM sys.columns
+               WHERE object_id = OBJECT_ID('dbo.organizations') AND name = 'card_modes_allowed')
+BEGIN
+    ALTER TABLE dbo.organizations ADD card_modes_allowed NVARCHAR(100) NOT NULL
+        CONSTRAINT df_organizations_card_modes_allowed DEFAULT 'card,pin';
+    PRINT N'أُضيف عمود organizations.card_modes_allowed';
+END
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.columns
+               WHERE object_id = OBJECT_ID('dbo.organizations') AND name = 'card_mode_default')
+BEGIN
+    -- الافتراضي 'pin' لا 'card': الترقية لا تُنقص حماية حسابٍ قائم.
+    ALTER TABLE dbo.organizations ADD card_mode_default NVARCHAR(20) NOT NULL
+        CONSTRAINT df_organizations_card_mode_default DEFAULT 'pin';
+    PRINT N'أُضيف عمود organizations.card_mode_default';
+END
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.columns
+               WHERE object_id = OBJECT_ID('dbo.organizations') AND name = 'card_open_mode_daily_cap')
+BEGIN
+    ALTER TABLE dbo.organizations ADD card_open_mode_daily_cap DECIMAL(18,2) NOT NULL
+        CONSTRAINT df_organizations_card_open_cap DEFAULT 50;
+    PRINT N'أُضيف عمود organizations.card_open_mode_daily_cap';
+END
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.columns
+               WHERE object_id = OBJECT_ID('dbo.customers') AND name = 'card_mode')
+BEGIN
+    -- NULL = اتبع افتراضي المنظمة. عمودٌ بقيمة صريحة لكل زبون كان سيُجمّد
+    -- اختيارهم على ما كان يوم الترقية، ولا يسري تغيير المدير على أحد.
+    ALTER TABLE dbo.customers ADD card_mode NVARCHAR(20) NULL;
+    PRINT N'أُضيف عمود customers.card_mode';
+END
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.columns
+               WHERE object_id = OBJECT_ID('dbo.customers') AND name = 'daily_cap')
+BEGIN
+    ALTER TABLE dbo.customers ADD daily_cap DECIMAL(18,2) NOT NULL
+        CONSTRAINT df_customers_daily_cap DEFAULT 0;
+    PRINT N'أُضيف عمود customers.daily_cap';
+END
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.check_constraints WHERE name = 'CK_customers_card_mode')
+   AND EXISTS (SELECT 1 FROM sys.columns
+               WHERE object_id = OBJECT_ID('dbo.customers') AND name = 'card_mode')
+BEGIN
+    -- 'phone' مسموح في القيد ولو لم يُعرَض بعد في الواجهة: القيد يحرس ما
+    -- يُكتَب، والنمط سيُفعَّل يوم تُبنى قناة الإرسال بلا ترحيل ثانٍ.
+    ALTER TABLE dbo.customers ADD CONSTRAINT CK_customers_card_mode
+        CHECK (card_mode IS NULL OR card_mode IN ('card','pin','phone'));
+    PRINT N'أُضيف قيد CK_customers_card_mode';
+END
+GO
+
+PRINT N'أنماط بطاقة المحفظة جاهزة';
+GO
+
+-- ----------------------------------------------------------------------------
 --  فهارس الأداء — ملف منفصل لأنه يُنفَّذ ويُعاد بلا خطر
 -- ----------------------------------------------------------------------------
 PRINT N'لا تنسَ تنفيذ docs\INDEXES.sql على هذه القاعدة أيضاً.';

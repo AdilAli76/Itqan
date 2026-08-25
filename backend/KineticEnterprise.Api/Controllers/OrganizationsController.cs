@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using KineticEnterprise.Api.Data;
+using KineticEnterprise.Api.Models;
 
 namespace KineticEnterprise.Api.Controllers;
 
@@ -10,8 +11,8 @@ public record BrandingResponse(string DisplayName, string? LogoUrl, string Prima
 public record UpdateBrandingRequest(string DisplayName, string PrimaryColor, string SecondaryColor, string NavLayout);
 public record SetLogoRequest(Guid? AttachmentId);
 
-public record OrganizationSettingsDto(string CurrencyCode, string CurrencySymbol, string Locale, decimal TaxRate, int PasswordMinLength, double ReceiptWidthMm, bool PosAllowOpenProduct);
-public record UpdateSettingsRequest(string CurrencyCode, string CurrencySymbol, string Locale, decimal TaxRate, int PasswordMinLength, double ReceiptWidthMm, bool PosAllowOpenProduct);
+public record OrganizationSettingsDto(string CurrencyCode, string CurrencySymbol, string Locale, decimal TaxRate, int PasswordMinLength, double ReceiptWidthMm, bool PosAllowOpenProduct, string CardModesAllowed, string CardModeDefault, decimal CardOpenModeDailyCap);
+public record UpdateSettingsRequest(string CurrencyCode, string CurrencySymbol, string Locale, decimal TaxRate, int PasswordMinLength, double ReceiptWidthMm, bool PosAllowOpenProduct, string? CardModesAllowed, string? CardModeDefault, decimal? CardOpenModeDailyCap);
 
 public record BarcodeTemplateDto(double WidthMm, double HeightMm, bool ShowName, bool ShowPrice, bool ShowSku);
 
@@ -100,7 +101,8 @@ public class OrganizationsController : ControllerBase
         var org = await _db.Organizations.FirstOrDefaultAsync();
         if (org is null) return NotFound();
 
-        return new OrganizationSettingsDto(org.CurrencyCode, org.CurrencySymbol, org.Locale, org.TaxRate, org.PasswordMinLength, org.ReceiptWidthMm, org.PosAllowOpenProduct);
+        return new OrganizationSettingsDto(org.CurrencyCode, org.CurrencySymbol, org.Locale, org.TaxRate, org.PasswordMinLength, org.ReceiptWidthMm, org.PosAllowOpenProduct,
+            string.Join(",", CardModeGate.AllowedModes(org)), org.CardModeDefault, org.CardOpenModeDailyCap);
     }
 
     [HttpPut("me/settings")]
@@ -132,6 +134,41 @@ public class OrganizationsController : ControllerBase
         // بيع بقيمة يكتبها الكاشير هو أوسع باب لسحب نقدية بلا بضاعة مقابلة،
         // فتغييره محصور بـ super_admin مثل بقية هذه الشاشة.
         org.PosAllowOpenProduct = request.PosAllowOpenProduct;
+
+        // أنماط البطاقة — تُحدَّث فقط إن أُرسلت: عميل قديم لا يعرف هذه الحقول
+        // يجب ألّا يمحو إعداداً بحفظه شاشة العملة.
+        if (request.CardModesAllowed is { } modesRaw)
+        {
+            var modes = modesRaw
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Where(CardModes.IsSelectable)
+                .Distinct()
+                .ToArray();
+            if (modes.Length == 0)
+            {
+                return BadRequest(new { message = "يجب السماح بنمط تحقّق واحد على الأقل" });
+            }
+            org.CardModesAllowed = string.Join(",", modes);
+
+            var fallbackDefault = request.CardModeDefault ?? org.CardModeDefault;
+            if (!modes.Contains(fallbackDefault))
+            {
+                // النمط الافتراضي يجب أن يكون من المسموح، وإلا فكل حساب جديد
+                // يسقط إلى مسارٍ لم يقصده المدير.
+                return BadRequest(new { message = "النمط الافتراضي يجب أن يكون ضمن الأنماط المسموحة" });
+            }
+            org.CardModeDefault = fallbackDefault;
+        }
+
+        if (request.CardOpenModeDailyCap is { } cap)
+        {
+            if (cap < 0)
+            {
+                return BadRequest(new { message = "السقف اليومي لا يكون سالباً" });
+            }
+            org.CardOpenModeDailyCap = cap;
+        }
+
         org.UpdatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync();
 

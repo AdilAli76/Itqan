@@ -497,9 +497,12 @@ class _PosScreenState extends ConsumerState<PosScreen> {
     await _checkout('cash');
   }
 
-  /// الخصم من المحفظة يمرّ بالرقم السري إلزامياً — بطاقة بلا رقم سري نقودٌ
-  /// لحاملها، من وجدها أنفقها. الرقم يُرسَل مع الفاتورة نفسها ويُتحقَّق منه
-  /// في السيرفر (راجع InvoicesController.Create)، فلا يمكن تجاوزه من الواجهة.
+  /// الخصم من المحفظة بحسب نمط تحقّق الحساب.
+  ///
+  /// النمط يأتي من الخادم مع بيانات العميل (`effectiveCardMode`) **ولا
+  /// يختاره الكاشير**: من يستطيع خفض الحماية لحظة الصرف لا تحميه حمايةٌ.
+  /// وما تفعله هذه الدالة عرضٌ فحسب — الخادم يُعيد الفحص كاملاً بنمطه هو
+  /// وسقفه هو (راجع CardModeGate)، فتخطّي الحوار من الواجهة لا يُمرّر شيئاً.
   Future<void> _startWalletCheckout() async {
     if (_cart.isEmpty) {
       _fail('السلة فارغة');
@@ -509,12 +512,34 @@ class _PosScreenState extends ConsumerState<PosScreen> {
       _fail('امسح بطاقة العميل أو اختره أولاً للخصم من رصيده');
       return;
     }
+
+    final symbol = ref.read(brandingProvider).valueOrNull?.currencySymbol ?? 'د.ل';
+    final name = _customer!['fullName'] as String? ?? '';
+    final mode = _customer!['effectiveCardMode'] as String? ?? 'pin';
+
+    if (mode == 'card') {
+      // بلا رقم سرّي: تأكيدٌ يرى فيه الطرفان المبلغ والسقف. السقف يُعرَض لأن
+      // الرفض بعد الضغط يبدو عطلاً في النظام ما لم يُعرف حدّه قبله.
+      final cap = (_customer!['effectiveDailyCap'] as num?)?.toDouble() ?? 0;
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (_) => _WalletCardConfirmDialog(
+          customerName: name,
+          amount: _subtotal,
+          dailyCap: cap,
+          currencySymbol: symbol,
+        ),
+      );
+      if (confirmed == true) await _checkout('customer_wallet');
+      return;
+    }
+
     final pin = await showDialog<String>(
       context: context,
       builder: (_) => _WalletPinDialog(
-        customerName: _customer!['fullName'] as String? ?? '',
+        customerName: name,
         amount: _subtotal,
-        currencySymbol: ref.read(brandingProvider).valueOrNull?.currencySymbol ?? 'د.ل',
+        currencySymbol: symbol,
       ),
     );
     if (pin != null) await _checkout('customer_wallet', customerPin: pin);
@@ -612,6 +637,10 @@ class _PosScreenState extends ConsumerState<PosScreen> {
       //
       // والدفع من المحفظة لا يُطابَر أبداً مهما كان سبب الفشل: التحقّق من
       // الرصيد والرقم السري لا يمكن إلا على الخادم (راجع OfflineQueue).
+      //
+      // ونمط «البطاقة وحدها» يزيد هذا إلزاماً: سقفه اليومي يُقاس بجمع ما
+      // صُرف فعلاً من الدفتر، وجهازٌ مقطوع لا يعرف ما صُرف على جهاز آخر —
+      // فطابورٌ يقبل هذه العمليات يجعل السقف يُتجاوَز بعدد الأجهزة.
       final offlineCapable = _isNetworkFailure(e) && paymentMethod == 'cash';
       if (offlineCapable) {
         final queued = await ref.read(offlineQueueProvider.notifier).enqueue(payload);
@@ -1727,6 +1756,76 @@ class _CustomerPickerDialogState extends ConsumerState<_CustomerPickerDialog> {
 /// يعرض اسم صاحب البطاقة والمبلغ قبل اللوحة عمداً: الكاشير قد يكون مسح بطاقة
 /// خاطئة أو بقي عميل سابق مختاراً من عملية لم تكتمل، والعميل نفسه يجب أن يرى
 /// المبلغ الذي يوافق عليه قبل أن يُدخل رقمه.
+/// تأكيد الخصم في نمط «البطاقة فقط» — بلا رقم سرّي.
+///
+/// حوارٌ لا حارس: ما يحرس فعلاً هو السقف اليومي في الخادم. وجوده لأن خصماً
+/// يقع بضغطة واحدة بلا لحظة يرى فيها الطرفان المبلغ يُنتج خصوماتٍ بالخطأ
+/// أكثر ممّا ينتجه أي سرقة.
+class _WalletCardConfirmDialog extends StatelessWidget {
+  const _WalletCardConfirmDialog({
+    required this.customerName,
+    required this.amount,
+    required this.dailyCap,
+    required this.currencySymbol,
+  });
+
+  final String customerName;
+  final double amount;
+  final double dailyCap;
+  final String currencySymbol;
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('تأكيد الخصم من البطاقة'),
+      content: SizedBox(
+        width: 320,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: AppColors.surfaceAlt,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('صاحب البطاقة', style: AppTextStyles.labelMd()),
+                  const SizedBox(height: 2),
+                  Text(customerName, style: AppTextStyles.headlineMd()),
+                  const SizedBox(height: 10),
+                  Text('المبلغ المخصوم', style: AppTextStyles.labelMd()),
+                  const SizedBox(height: 2),
+                  CurrencyBadge(amount: amount, currencySymbol: currencySymbol),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'هذا الحساب يعمل بنمط «البطاقة فقط» — لا رقم سرّي، '
+              'والسقف اليومي ${dailyCap.toStringAsFixed(2)} $currencySymbol.',
+              style: AppTextStyles.caption(),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context, false),
+          child: const Text('إلغاء'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, true),
+          child: const Text('تأكيد الخصم'),
+        ),
+      ],
+    );
+  }
+}
+
 class _WalletPinDialog extends StatefulWidget {
   const _WalletPinDialog({
     required this.customerName,

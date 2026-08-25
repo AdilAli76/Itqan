@@ -18,6 +18,13 @@ if (args.Length > 0 && args[0] == KineticEnterprise.Api.Data.WebAssetCompressor.
     return KineticEnterprise.Api.Data.WebAssetCompressor.Run(args);
 }
 
+// أوامر الترخيص — التوقيع يحتاج المفتاح الخاصّ، وهو لا يوضع على خادم عميل
+// إطلاقاً. راجع LicenseCommands.
+if (args.Length > 0 && KineticEnterprise.Api.Data.LicenseCommands.Handles(args[0]))
+{
+    return KineticEnterprise.Api.Data.LicenseCommands.Run(args);
+}
+
 if (args.Length > 0 &&
     (args[0] == KineticEnterprise.Api.Data.PlatformOwnerBootstrap.CommandName ||
      args[0] == KineticEnterprise.Api.Data.PlatformOwnerBootstrap.ResetCommandName ||

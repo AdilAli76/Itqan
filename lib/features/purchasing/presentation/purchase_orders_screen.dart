@@ -1129,10 +1129,10 @@ class _PurchaseAttachmentsState extends State<_PurchaseAttachments> {
     final picked = await FilePicker.pickFiles(
       type: FileType.custom,
       allowedExtensions: const ['png', 'jpg', 'jpeg', 'webp', 'pdf'],
-      withData: true,
     );
-    final file = picked?.files.firstOrNull;
-    if (file == null || file.bytes == null) return;
+    final file = picked.firstOrNull;
+    if (file == null) return;
+    final bytes = await file.readAsBytes();
 
     setState(() {
       _busy = true;
@@ -1140,7 +1140,7 @@ class _PurchaseAttachmentsState extends State<_PurchaseAttachments> {
     });
     try {
       final form = FormData.fromMap({
-        'file': MultipartFile.fromBytes(file.bytes!, filename: file.name),
+        'file': MultipartFile.fromBytes(bytes, filename: file.name),
       });
       await ApiClient.instance.dio.post('/files',
           data: form,

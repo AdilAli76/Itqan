@@ -91,6 +91,26 @@ public class Organization
     // لسحب نقدية بلا أثر. تفعيله قرار مدير المنظمة (super_admin) وحده،
     // ولا يُضبط من إعدادات جهاز الكاشير.
     public bool PosAllowOpenProduct { get; set; }
+
+    // ── أنماط بطاقة المحفظة (راجع [CardModes]) ──────────────────────────
+
+    /// <summary>
+    /// الأنماط المسموحة في هذه المنظمة، مفصولة بفاصلة. المدير يحدّد
+    /// **المظروف** لا اختيار كل زبون: محلٌّ بلا إنترنت مستقرّ لا يفعّل
+    /// التأكيد بالهاتف، ومحلٌّ يخدم كباراً قد يُلغي الرقم السرّي كلّه.
+    /// </summary>
+    public string CardModesAllowed { get; set; } = $"{CardModes.Card},{CardModes.Pin}";
+
+    /// <summary>نمط الحساب الجديد — كل حساب يبدأ من مكان معلوم.</summary>
+    public string CardModeDefault { get; set; } = CardModes.Pin;
+
+    /// <summary>
+    /// السقف اليومي لنمط «بطاقة فقط». صفر = النمط معطَّل فعلياً.
+    ///
+    /// <para>هو ما يجعل النمط المكشوف مقبولاً: خطرُه محصور برقم يقرّره
+    /// المدير، لا بكامل رصيد الزبون.</para>
+    /// </summary>
+    public decimal CardOpenModeDailyCap { get; set; } = 50;
     public bool IsActive { get; set; } = true;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
@@ -846,6 +866,22 @@ public class Customer
     public string? PinHash { get; set; }
     public DateTime? PinLockedUntil { get; set; }
 
+    /// <summary>
+    /// نمط التحقّق لهذا الحساب — راجع [CardModes]. NULL = افتراضي المنظمة.
+    ///
+    /// <para>يختاره **صاحب الحساب** لا الكاشير: ماله هو. والتشديد حقٌّ بلا
+    /// إذن، أمّا التخفيف فلا يقع إلا بحضوره.</para>
+    /// </summary>
+    public string? CardMode { get; set; }
+
+    /// <summary>
+    /// سقف يومي أشدّ يختاره الزبون لنفسه. صفر = سقف المنظمة.
+    ///
+    /// <para>يُقبل الأقلّ فقط: سقفٌ أعلى من سقف المنظمة تجاوزٌ لحدّ وضعه
+    /// صاحب المحل لمخاطرته هو.</para>
+    /// </summary>
+    public decimal DailyCap { get; set; }
+
     // ---- نموذج الحساب ----
     // راجع [AccountModels] لسبب الفصل بين النموذجين.
     public string AccountModel { get; set; } = AccountModels.Prepaid;
@@ -980,6 +1016,62 @@ public class CustomerWalletTransaction
 /// المصدر الوحيد لإشارة كل نوع حركة — أي حساب للرصيد في النظام يمرّ من هنا،
 /// فلا يمكن أن يحسب موضعان الرصيد بإشارتين مختلفتين.
 /// </summary>
+/// <summary>
+/// أنماط التحقّق عند الصرف من بطاقة المحفظة.
+///
+/// <para><b>المشكلة التي تحلّها:</b> الرقم السري كان **إلزامياً دائماً**
+/// بلا بديل. والرقم وسيلةُ إثبات يعرفها طرفان: الزبون يُدخله على جهاز
+/// الكاشير، فيراه أو يلتقطه أو يحفظه — ثم يسحب بعد انصراف الزبون بالبحث
+/// عن اسمه. إلزامٌ بلا بديل هو ما يخلق الثغرة، لا ضعف الرقم.</para>
+///
+/// <para><b>وقاعدة الحوكمة:</b> التشديد على النفس حقٌّ لا يحتاج إذناً،
+/// والتخفيف لا يقع إلا برضا صاحب المال. **والكاشير لا يغيّر النمط
+/// إطلاقاً** — من يستطيع خفض الحماية لحظة الصرف لا تحميه حمايةٌ.</para>
+/// </summary>
+public static class CardModes
+{
+    /// <summary>
+    /// مسح البطاقة وحده، **بسقف يومي**.
+    ///
+    /// <para>لمن لا يملك هاتفاً ولا يحفظ رقماً. والرقم السري هنا **يختفي
+    /// تماماً** فلا شيء يُحفَظ أصلاً — الثغرة تُغلق بحذف الوسيلة لا
+    /// بحراستها، وهذا أقوى من أي ضبط.</para>
+    /// </summary>
+    public const string Card = "card";
+
+    /// <summary>بطاقة + رقم سرّي — السلوك القائم، ويبقى خياراً.</summary>
+    public const string Pin = "pin";
+
+    /// <summary>
+    /// بطاقة + تأكيد من هاتف الزبون.
+    ///
+    /// <para><b>معرَّف ولا يُعرَض بعد:</b> لا قناة إرسال في النظام، وإتاحة
+    /// نمطٍ يفشل صامتاً أسوأ من غيابه. يُضاف إلى [Selectable] يوم تُبنى
+    /// القناة.</para>
+    /// </summary>
+    public const string Phone = "phone";
+
+    /// <summary>ما يجوز اختياره فعلياً اليوم.</summary>
+    public static readonly string[] Selectable = { Card, Pin };
+
+    public static bool IsSelectable(string? mode) =>
+        mode is not null && Selectable.Contains(mode);
+
+    /// <summary>
+    /// هل الأول أشدّ من الثاني — أساس قاعدة «التشديد بلا إذن».
+    /// </summary>
+    public static bool IsStricter(string mode, string than) =>
+        Rank(mode) > Rank(than);
+
+    private static int Rank(string mode) => mode switch
+    {
+        Card => 0,
+        Phone => 1,
+        Pin => 2,
+        _ => 0,
+    };
+}
+
 public static class WalletKinds
 {
     public const string TopUp = "topup";

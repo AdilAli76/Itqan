@@ -34,20 +34,17 @@ class _ImportProductsDialogState extends ConsumerState<ImportProductsDialog> {
     final result = await FilePicker.pickFiles(
       type: FileType.custom,
       allowedExtensions: ['xlsx', 'xlsm', 'csv'],
-      // withData ضروري على الويب وعلى أندرويد: المسار قد لا يكون متاحاً
-      // أصلاً، والبايتات هي الطريق الوحيد المضمون على كل المنصات.
-      withData: true,
     );
-    if (result == null || result.files.isEmpty) return;
+    if (result.isEmpty) return;
 
-    final file = result.files.first;
-    if (file.bytes == null) {
-      setState(() => _error = 'تعذّرت قراءة الملف');
-      return;
-    }
+    // المسار قد لا يكون متاحاً على الويب ولا على أندرويد، فالبايتات هي
+    // الطريق الوحيد المضمون على كل المنصات.
+    final file = result.first;
+    final bytes = await file.readAsBytes();
+
     setState(() {
       _fileName = file.name;
-      _fileBytes = file.bytes;
+      _fileBytes = bytes;
       _preview = null;
       _error = null;
       _done = false;

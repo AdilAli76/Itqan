@@ -1,4 +1,4 @@
-using System.IdentityModel.Tokens.Jwt;
+﻿using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -9,7 +9,14 @@ using KineticEnterprise.Api.Models;
 
 namespace KineticEnterprise.Api.Controllers;
 
-public record IssueCardForCustomerRequest(Guid CustomerId, string Pin, DateOnly? ExpiryDate, string? HolderName);
+/// <param name="Pin">
+/// اختياريّ: نمط «البطاقة فقط» لا رقم فيه، وإلزامه هناك يُنشئ سرّاً لا
+/// يستعمله أحد ويبقى قابلاً للتسريب.
+/// </param>
+/// <param name="CardMode">راجع [CardModes]. null = افتراضي المنظمة.</param>
+public record IssueCardForCustomerRequest(
+    Guid CustomerId, string? Pin, DateOnly? ExpiryDate, string? HolderName,
+    string? CardMode = null, decimal? DailyCap = null);
 public record BlockCardRequest(string? Reason);
 public record ResetCardPinRequest(string Pin);
 
@@ -17,7 +24,9 @@ public record WalletCardDto(
     string CardCode, Guid CustomerId, string CustomerName, string? CustomerPhone,
     string State, bool IsUsable, decimal Balance,
     DateTime IssuedAt, DateOnly? ExpiryDate, string? BlockedReason, string? IssuedByName,
-    string? HolderName);
+    string? HolderName,
+    /// النمط الفعّال لهذه البطاقة وسقفه — ما سيحدث فعلاً عند الصرف.
+    string CardMode, decimal DailyCap);
 
 /// صفحة بطاقات محفظة.
 public record WalletCardPageDto(List<WalletCardDto> Items, int TotalCount, int Page, int PageSize);
@@ -107,6 +116,8 @@ public class WalletCardsController : ControllerBase
             })
             .ToDictionaryAsync(x => x.CustomerId, x => x.In - x.Out);
 
+        var listOrg = await _db.Organizations.FirstOrDefaultAsync();
+
         var items = cards
             .Where(c => customers.ContainsKey(c.CustomerId))
             .Select(c =>
@@ -117,7 +128,9 @@ public class WalletCardsController : ControllerBase
                     c.State, c.IsUsable(today), balances.GetValueOrDefault(c.CustomerId),
                     c.IssuedAt, c.ExpiryDate, c.BlockedReason,
                     c.IssuedBy.HasValue ? issuers.GetValueOrDefault(c.IssuedBy.Value) : null,
-                    c.HolderName);
+                    c.HolderName,
+                    listOrg is null ? (customer.CardMode ?? CardModes.Pin) : CardModeGate.EffectiveMode(listOrg, customer),
+                    listOrg is null ? customer.DailyCap : CardModeGate.EffectiveCap(listOrg, customer));
             })
             .ToList();
 
@@ -135,8 +148,38 @@ public class WalletCardsController : ControllerBase
         var customer = await _db.Customers.FirstOrDefaultAsync(c => c.Id == request.CustomerId && !c.IsDeleted);
         if (customer is null) return NotFound(new { message = "العميل غير موجود" });
 
-        var pinError = CustomerCards.ValidatePin(request.Pin);
-        if (pinError is not null) return BadRequest(new { message = pinError });
+        var org = await _db.Organizations.FirstOrDefaultAsync();
+        if (org is null) return BadRequest(new { message = "تعذّر تحديد المنظمة" });
+
+        var mode = request.CardMode ?? org.CardModeDefault;
+        if (!CardModeGate.AllowedModes(org).Contains(mode))
+        {
+            return BadRequest(new { message = "هذا النمط غير مسموح في إعدادات المنظمة" });
+        }
+
+        // الرقم يُطلَب في نمطه وحده.
+        if (mode == CardModes.Pin)
+        {
+            var pinError = CustomerCards.ValidatePin(request.Pin ?? "");
+            if (pinError is not null) return BadRequest(new { message = pinError });
+        }
+        else if (!string.IsNullOrEmpty(request.Pin))
+        {
+            return BadRequest(new { message = "نمط «بطاقة فقط» لا يأخذ رقماً سرّياً" });
+        }
+
+        if (request.DailyCap is { } cap)
+        {
+            if (cap < 0) return BadRequest(new { message = "السقف لا يكون سالباً" });
+            if (cap > 0 && cap > org.CardOpenModeDailyCap)
+            {
+                return BadRequest(new
+                {
+                    message = $"سقف الزبون لا يتجاوز سقف المنظمة ({org.CardOpenModeDailyCap:0.##})"
+                });
+            }
+            customer.DailyCap = cap;
+        }
 
         var existing = await _db.CustomerCardIndexes.FirstOrDefaultAsync(c => c.CustomerId == customer.Id);
         if (existing is not null) _db.CustomerCardIndexes.Remove(existing);
@@ -162,16 +205,22 @@ public class WalletCardsController : ControllerBase
 
         // نفس الرمز هو باركود البطاقة — هوية واحدة تُمسح وتُكتب وتُطبع.
         customer.CardBarcode = code;
-        customer.PinHash = BCrypt.Net.BCrypt.HashPassword(request.Pin);
+        customer.CardMode = mode;
+        // في غير نمط الرقم يُمحى أي رقم قديم: النمط قائم على أن لا سرّ
+        // يُحفَظ أصلاً، وإبقاؤه يترك ما يُسرَّب بلا فائدة.
+        customer.PinHash = mode == CardModes.Pin
+            ? BCrypt.Net.BCrypt.HashPassword(request.Pin!)
+            : null;
         customer.PinLockedUntil = null;
 
         _db.LogAudit(customer.OrganizationId, CurrentUserId(), "card.issued", "customer_card_index", customer.Id,
-            newValues: new { customer.FullName, Reissued = existing is not null, card.ExpiryDate, card.HolderName });
+            newValues: new { customer.FullName, Reissued = existing is not null, card.ExpiryDate, card.HolderName, Mode = mode });
         await _db.SaveChangesAsync();
 
         return new WalletCardDto(code, customer.Id, customer.FullName, customer.Phone,
             card.State, true, await WalletBalances.ComputeAsync(_db, customer.Id),
-            card.IssuedAt, card.ExpiryDate, null, null, card.HolderName);
+            card.IssuedAt, card.ExpiryDate, null, null, card.HolderName,
+            CardModeGate.EffectiveMode(org, customer), CardModeGate.EffectiveCap(org, customer));
     }
 
     [HttpPost("{cardCode}/block")]
@@ -224,6 +273,10 @@ public class WalletCardsController : ControllerBase
 
         customer.PinHash = BCrypt.Net.BCrypt.HashPassword(request.Pin);
         customer.PinLockedUntil = null;
+        // ضبط رقم لحسابٍ في نمط «بطاقة فقط» يعني اختيار النمط الأشدّ — وهذا
+        // تشديد لا تخفيف، فيقع بلا شرط إضافي. ولولا هذا السطر لبقي الرقم
+        // مضبوطاً ولا يُطلَب أبداً.
+        customer.CardMode = CardModes.Pin;
         _db.LogAudit(card.OrganizationId, CurrentUserId(), "card.pin_reset", "customer_card_index", card.CustomerId,
             newValues: new { cardCode });
         await _db.SaveChangesAsync();

@@ -203,8 +203,14 @@ public class InvoicesController : ControllerBase
             if (existing is not null) return existing;
         }
 
+        // تُقرأ المنظمة هنا لا بعد التسعير: نمط التحقّق من البطاقة من
+        // إعداداتها، ويلزم معرفته **قبل** أن نقرّر هل يُطلب رقم سرّي.
+        var org = await _db.Organizations.FirstOrDefaultAsync();
+        if (org is null) return BadRequest(new { message = "تعذّر تحديد المنظمة" });
+
         var payingFromWallet = request.PaymentMethod == "customer_wallet" && request.CustomerId.HasValue;
         Customer? walletCustomer = null;
+        var cardMode = CardModes.Pin;
 
         // الرقم السري يُتحقَّق منه *قبل* فتح المعاملة وقبل لمس المخزون.
         //
@@ -217,16 +223,28 @@ public class InvoicesController : ControllerBase
             walletCustomer = await _db.Customers.FindAsync(request.CustomerId!.Value);
             if (walletCustomer is null) return BadRequest(new { message = "العميل غير موجود" });
 
-            var pinResult = await CustomerPinGate.VerifyAsync(
-                _db, walletCustomer, request.CustomerPin, HttpContext.Connection.RemoteIpAddress?.ToString());
-            await _db.SaveChangesAsync();
+            // النمط من إعدادات المنظمة واختيار الزبون — **لا من الطلب**.
+            // لو أرسله العميل لاختار السارق «بطاقة فقط» لكل عملية فسقطت
+            // الحماية كلّها بحقل في JSON.
+            cardMode = CardModeGate.EffectiveMode(org, walletCustomer);
 
-            if (pinResult.Result != PinCheck.Ok)
+            if (cardMode == CardModes.Pin)
             {
-                return pinResult.Result == PinCheck.Locked
-                    ? StatusCode(429, new { message = pinResult.Message })
-                    : BadRequest(new { message = pinResult.Message });
+                var pinResult = await CustomerPinGate.VerifyAsync(
+                    _db, walletCustomer, request.CustomerPin,
+                    HttpContext.Connection.RemoteIpAddress?.ToString());
+                await _db.SaveChangesAsync();
+
+                if (pinResult.Result != PinCheck.Ok)
+                {
+                    return pinResult.Result == PinCheck.Locked
+                        ? StatusCode(429, new { message = pinResult.Message })
+                        : BadRequest(new { message = pinResult.Message });
+                }
             }
+            // نمط «بطاقة فقط»: لا رقم يُطلب هنا — الحدّ سقفٌ يوميّ يُفحَص بعد
+            // التسعير داخل المعاملة، لأن المبلغ لا يُعرف قبله ولا يُؤخذ من
+            // الطلب.
         }
 
         // ------------------------------------------------------------------
@@ -242,9 +260,6 @@ public class InvoicesController : ControllerBase
         //   1) صنف مفتوح القيمة (TracksStock = false) وإعداد المنظمة يسمح.
         //   2) حامل صلاحية pos.price_override — ويُسجَّل التجاوز في التدقيق.
         // ------------------------------------------------------------------
-        var org = await _db.Organizations.FirstOrDefaultAsync();
-        if (org is null) return BadRequest(new { message = "تعذّر تحديد المنظمة" });
-
         var canOverridePrice = await HasPriceOverrideAsync();
         var resolvedLines = new List<(Product Product, decimal Quantity, decimal UnitPrice, bool Overridden, bool SoldAsSubUnit)>();
 
@@ -650,6 +665,23 @@ public class InvoicesController : ControllerBase
             if (balance < invoice.TotalAmount)
             {
                 return BadRequest(new { message = "رصيد العميل غير كافٍ" });
+            }
+
+            // السقف اليومي لنمط «بطاقة فقط» — هنا لا قبل التسعير: المبلغ
+            // الحقيقي لا يُعرف إلا بعد تثبيت الأسعار من الكتالوج، وفحصُه على
+            // مبلغ من الطلب يُفحَص ما يقوله المرسِل لا ما يُخصَم فعلاً.
+            //
+            // وداخل المعاملة لا خارجها: قفل النطاق أعلاه يمنع حركات متزامنة
+            // لهذا العميل، فبيعتان في اللحظة نفسها لا تمرّان كلتاهما تحت سقف
+            // يتّسع لواحدة.
+            if (cardMode == CardModes.Card)
+            {
+                var modeCheck = await CardModeGate.CheckAsync(
+                    _db, org, walletCustomer, invoice.TotalAmount, DateTime.UtcNow);
+                if (!modeCheck.Allowed)
+                {
+                    return BadRequest(new { message = modeCheck.Message });
+                }
             }
         }
 
