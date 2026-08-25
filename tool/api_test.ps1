@@ -850,6 +850,120 @@ if ($fieldProduct.Status -notin 200,201 -or $newCount.Status -notin 200,201) {
 }
 
 # -----------------------------------------------------------------------------
+Section "٥.٥ المحاسبة — الترحيل الآلي"
+
+# السؤال الذي يُجاب هنا: هل يوازن الدفتر بعد بيعٍ ومرتجع فعليّين؟
+#
+# القيد غير المتوازن يُفسد ميزان المراجعة إلى الأبد: لا يظهر في أي شاشة بيع،
+# ولا يُكتشف إلا يوم يُقفل الحساب فلا يُعرف أي قيدٍ من آلاف القيود سببه.
+
+$chart = Api GET "/accounting/accounts" -Token $token
+if ($chart.Status -eq 403) {
+    Skipped "المحاسبة" "وحدة accounting غير مفعّلة لهذه المنظمة (إصدار المؤسسات وحده)"
+} elseif ($chart.Status -ne 200) {
+    Skipped "المحاسبة" "تعذّرت قراءة دليل الحسابات (حالة $($chart.Status))"
+} else {
+
+if (@($chart.Body).Count -eq 0) {
+    $seed = Api POST "/accounting/accounts/seed" -Token $token -Body @{}
+    Check "بذر دليل الحسابات الافتراضي" ($seed.Status -eq 200) "حالة $($seed.Status)"
+    $chart = Api GET "/accounting/accounts" -Token $token
+}
+
+$accounts = @($chart.Body)
+Check "الدليل يحوي الأقسام الأربعة" (
+    ($accounts | Where-Object { $_.code -eq '1' }) -and
+    ($accounts | Where-Object { $_.code -eq '2' }) -and
+    ($accounts | Where-Object { $_.code -eq '3' }) -and
+    ($accounts | Where-Object { $_.code -eq '4' })
+) "الأصول والالتزامات والاستخدامات والإيرادات"
+
+# الوسيط لا يُرحَّل إليه: قيدٌ على «الأصول» مباشرةً يكسر تساوي الأب بمجموع أبنائه.
+$root = $accounts | Where-Object { $_.code -eq '1' } | Select-Object -First 1
+Check "الحساب الجذر غير قابل للترحيل" ($root.isPostable -eq $false) `
+    "قيدٌ على «الأصول» مباشرةً يجعل رصيد الأب لا يساوي مجموع أبنائه"
+
+# البذر آمن للتكرار — لا يمحو دليلاً عدّله محاسب.
+$reseed = Api POST "/accounting/accounts/seed" -Token $token -Body @{}
+Check "إعادة البذر لا تمحو الدليل" ($reseed.Status -eq 200 -and $reseed.Body.seeded -eq $false) `
+    "seeded = $($reseed.Body.seeded)"
+
+# ── بيع فعليّ ثم قراءة الميزان ────────────────────────────────────────────
+if (-not $canManageInventory) {
+    Skipped "ترحيل الفاتورة" "يتطلّب إنشاء صنف"
+} else {
+    $accProduct = Api POST "/products" -Token $token -Body @{
+        sku = "TEST-ACC-$stamp"; name = "صنف محاسبة $stamp"
+        salePrice = 30; costPrice = 12
+        unitBase = "piece"; tracksStock = $false; reorderLevel = 0
+    }
+
+    if ($accProduct.Status -notin 200,201) {
+        Skipped "ترحيل الفاتورة" "تعذّر إنشاء الصنف (حالة $($accProduct.Status))"
+    } else {
+        $before = Api GET "/accounting/journal" -Token $token
+        $countBefore = @($before.Body).Count
+
+        $accSale = Api POST "/invoices" -Token $token -Body @{
+            branchId = $branchId; paymentMethod = "cash"
+            lines = @(@{ productId = $accProduct.Body.id; quantity = 2 })
+        }
+        Check "البيع يمرّ مع تفعيل المحاسبة" ($accSale.Status -in 200,201) `
+            "حالة $($accSale.Status) — $($accSale.Body.message)"
+
+        if ($accSale.Status -in 200,201) {
+            $after = Api GET "/accounting/journal" -Token $token
+            Check "الفاتورة ولّدت قيداً آلياً" (@($after.Body).Count -gt $countBefore) `
+                "قبل $countBefore وبعد $(@($after.Body).Count)"
+
+            $saleEntry = @($after.Body) | Where-Object { $_.sourceId -eq $accSale.Body.id } | Select-Object -First 1
+            if ($saleEntry) {
+                $d = ($saleEntry.lines | Measure-Object -Property debit -Sum).Sum
+                $c = ($saleEntry.lines | Measure-Object -Property credit -Sum).Sum
+                Check "قيد الفاتورة متوازن" ([Math]::Abs($d - $c) -lt 0.01) "مدين $d ودائن $c"
+            } else {
+                Check "قيد الفاتورة موجود" $false "لم يُعثر على قيدٍ بمصدر الفاتورة"
+            }
+
+            # ── المرتجع ───────────────────────────────────────────────────
+            $accRefund = Api POST "/invoices/$($accSale.Body.id)/refund" -Token $token -Body @{}
+            Check "المرتجع يمرّ مع تفعيل المحاسبة" ($accRefund.Status -in 200,201) `
+                "حالة $($accRefund.Status) — $($accRefund.Body.message)"
+
+            if ($accRefund.Status -in 200,201) {
+                $afterRefund = Api GET "/accounting/journal" -Token $token
+                $retEntry = @($afterRefund.Body) | Where-Object { $_.source -eq 'invoice_return' } | Select-Object -First 1
+                Check "المرتجع ولّد قيداً آلياً" ($null -ne $retEntry) `
+                    "مرتجعٌ بلا قيد يترك المبيعات مضخّمة بما رُدّ"
+
+                if ($retEntry) {
+                    $rd = ($retEntry.lines | Measure-Object -Property debit -Sum).Sum
+                    $rc = ($retEntry.lines | Measure-Object -Property credit -Sum).Sum
+                    Check "قيد المرتجع متوازن" ([Math]::Abs($rd - $rc) -lt 0.01) "مدين $rd ودائن $rc"
+
+                    # مردودات المبيعات حسابٌ مستقلّ لا خصمٌ من المبيعات: الخصم
+                    # يُخفي حجم المرتجع تماماً.
+                    $usesReturns = $retEntry.lines | Where-Object { $_.accountCode -eq '4102' }
+                    Check "المرتجع يُرحَّل إلى «مردودات المبيعات» لا إلى «المبيعات»" `
+                        ($null -ne $usesReturns) "الخصم من المبيعات يُخفي حجم المرتجع"
+                }
+            }
+        }
+    }
+}
+
+# ── ميزان المراجعة ───────────────────────────────────────────────────────
+$tb = Api GET "/accounting/trial-balance" -Token $token
+Check "ميزان المراجعة يُقرأ" ($tb.Status -eq 200) "حالة $($tb.Status)"
+if ($tb.Status -eq 200) {
+    Check "ميزان المراجعة متوازن" `
+        ([Math]::Abs([double]$tb.Body.totalDebit - [double]$tb.Body.totalCredit) -lt 0.01) `
+        "مدين $($tb.Body.totalDebit) ودائن $($tb.Body.totalCredit) — الاختلال يعني قيداً دخل من خارج النظام"
+}
+
+}
+
+# -----------------------------------------------------------------------------
 Section "٦. العزل بين المنظمات"
 
 $otherOrgProduct = Api GET "/products/00000000-0000-0000-0000-000000000042" -Token $token

@@ -922,6 +922,9 @@ public class InvoicesController : ControllerBase
             return BadRequest(new { message = "تم استرجاع هذه الفاتورة مسبقاً" });
         }
 
+        // تكلفة البضاعة العائدة — تُجمَع من الدفتر أثناء الإرجاع.
+        decimal returnedCost = 0;
+
         var refund = new Invoice
         {
             OrganizationId = original.OrganizationId,
@@ -990,11 +993,15 @@ public class InvoicesController : ControllerBase
 
                 var product = await _db.Products.FirstOrDefaultAsync(p => p.Id == item.ProductId);
 
+                var returnedUnitCost = originalCost ?? product?.CostPrice ?? 0;
+                // تكلفة ما عاد إلى الرفّ — يُعكَس بها قيد التكلفة أدناه.
+                returnedCost += batchQuantity * returnedUnitCost;
+
                 await StockLedger.ReceiveAsync(
                     _db, original.OrganizationId, original.BranchId, warehouseId: null,
                     productId: item.ProductId,
                     quantity: batchQuantity,
-                    unitCost: originalCost ?? product?.CostPrice ?? 0,
+                    unitCost: returnedUnitCost,
                     sourceType: StockSourceTypes.InvoiceReturn, sourceId: original.Id,
                     userId: CurrentUserId(),
                     batchNumber: batchNumber,
@@ -1039,9 +1046,89 @@ public class InvoicesController : ControllerBase
             await _db.SaveChangesAsync();
         }
 
+        await PostRefundAsync(original, refund, walletRefundAmount, returnedCost);
+
         await transaction.CommitAsync();
 
         return CreatedAtAction(nameof(GetById), new { id = refund.Id }, refund);
+    }
+
+    /// <summary>
+    /// قيد المرتجع.
+    ///
+    /// <code>
+    ///   من ح/ مردودات المبيعات   (الصافي قبل الضريبة)
+    ///   من ح/ ضريبة المبيعات     (إطفاء الضريبة المستحقّة)
+    ///       إلى ح/ أرصدة العملاء (المردود إلى المحفظة)
+    ///       إلى ح/ الصندوق       (المردود نقداً)
+    ///
+    ///   من ح/ المخزون
+    ///       إلى ح/ تكلفة البضاعة المباعة
+    /// </code>
+    ///
+    /// <para><b>لماذا «مردودات المبيعات» لا خصمٌ من «المبيعات»:</b> الخصم
+    /// يُخفي حجم المرتجع تماماً — تُقرأ المبيعات صافيةً ولا يُعرف كم بضاعةٍ
+    /// عادت. وحجم المرتجع رقمٌ يقول شيئاً عن جودة البضاعة وعن البيع نفسه،
+    /// فيُفرَد ليُقرأ.</para>
+    ///
+    /// <para><b>ولماذا قيدٌ جديد لا عكسٌ لقيد البيع:</b> العكس يمحو أثر
+    /// البيع من الدفتر فتبدو الفاتورة كأنها لم تقع. والمرتجع **حدثٌ ثانٍ
+    /// وقع فعلاً** — بيعٌ ثم ردّ — والدفتر يحكي ما جرى لا ما بقي.</para>
+    ///
+    /// <para>والضريبة تُطفأ بمدين لأنها سُجّلت دائناً عند البيع: بضاعة عادت
+    /// فلم تعد ضريبتها مستحقّة على المنشأة.</para>
+    /// </summary>
+    private async Task PostRefundAsync(
+        Invoice original, Invoice refund, decimal walletRefundAmount, decimal returnedCost)
+    {
+        var org = await _db.Organizations.FirstOrDefaultAsync();
+        var license = await _db.Licenses.FirstOrDefaultAsync();
+        if (org is null || !Ledger.IsEnabled(org, license)) return;
+
+        var net = refund.Subtotal - refund.DiscountAmount;
+        var lines = new List<PostingLine>
+        {
+            new(AccountRoles.SalesReturns, net, 0),
+        };
+        if (refund.TaxAmount > 0)
+        {
+            lines.Add(new PostingLine(AccountRoles.SalesTax, refund.TaxAmount, 0));
+        }
+
+        if (walletRefundAmount > 0)
+        {
+            lines.Add(new PostingLine(AccountRoles.CustomerWallet, 0, walletRefundAmount,
+                "ردّ إلى رصيد العميل"));
+        }
+
+        // الباقي نقداً. **وهو ما يخرج من الدرج فعلاً** — الرد النقدي إجراء
+        // يدوي خارج النظام (لا حساب بنكي مربوط)، لكنه وقع، وقيدٌ لا يعترف
+        // به يجعل النقدية الدفترية أعلى من نقدية الدرج بمقدار كل مرتجع.
+        var cashBack = refund.TotalAmount - walletRefundAmount;
+        if (cashBack > 0)
+        {
+            lines.Add(new PostingLine(AccountRoles.Cash, 0, cashBack, "ردّ نقدي"));
+        }
+
+        await Ledger.PostAsync(_db, original.OrganizationId, original.BranchId,
+            JournalSources.InvoiceReturn, refund.Id,
+            $"مرتجع فاتورة {original.InvoiceNumber}", lines, CurrentUserId());
+
+        // عكس قيد التكلفة: البضاعة عادت من التكلفة إلى المخزون.
+        if (returnedCost > 0)
+        {
+            await Ledger.PostAsync(_db, original.OrganizationId, original.BranchId,
+                JournalSources.InvoiceReturn, refund.Id,
+                $"عودة تكلفة مرتجع {original.InvoiceNumber}",
+                new[]
+                {
+                    new PostingLine(AccountRoles.Inventory, returnedCost, 0),
+                    new PostingLine(AccountRoles.CostOfGoodsSold, 0, returnedCost),
+                },
+                CurrentUserId());
+        }
+
+        await _db.SaveChangesAsync();
     }
 
     /// <summary>

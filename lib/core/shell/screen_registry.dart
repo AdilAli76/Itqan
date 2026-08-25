@@ -15,6 +15,7 @@ import '../../features/license/presentation/license_screen.dart';
 import '../../features/settings/presentation/settings_screen.dart';
 import '../../features/stock_transfer/presentation/stock_transfer_screen.dart';
 import '../../features/stock_count/presentation/stock_count_screen.dart';
+import '../../features/accounting/presentation/accounting_screen.dart';
 import '../../features/barcode_designer/presentation/barcode_designer_screen.dart';
 import '../../features/support/presentation/support_screen.dart';
 import '../../features/pharmacy/presentation/medicine_reference_screen.dart';
@@ -66,6 +67,8 @@ Widget buildScreenForRoute(String route) {
       return const StockTransferScreen();
     case '/stock-count':
       return const StockCountScreen();
+    case '/accounting':
+      return const AccountingScreen();
     case '/barcode-designer':
       return const BarcodeDesignerScreen();
     case '/support':

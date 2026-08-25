@@ -10,6 +10,7 @@ import '../../../core/auth/permissions.dart';
 import '../../../core/feedback/pos_sounds.dart';
 import '../../../core/network/api_client.dart';
 import 'barcode_scanner_sheet.dart';
+import 'return_invoice_sheet.dart';
 import '../../../core/printing/print_settings_provider.dart';
 import '../../../core/printing/receipt_printer.dart';
 import '../../../core/responsive/adaptive_scaffold.dart';
@@ -206,6 +207,21 @@ class _PosScreenState extends ConsumerState<PosScreen> {
 
   /// يفتح كاميرا الجهاز، ويمرّر الرمز الممسوح إلى نفس مسار القارئ السلكي —
   /// فسلوك الجهازين واحد: باركود صنف أولاً، ثم بطاقة عميل.
+  /// يفتح حوار الإرجاع، ويُنعش الشاشة بعد نجاحه.
+  Future<void> _startReturn() async {
+    final done = await showDialog<bool>(
+      context: context,
+      builder: (_) => const ReturnInvoiceSheet(),
+    );
+    if (done == true && mounted) {
+      // الكمية عادت إلى المخزون، فأرصدة شبكة الوصول السريع لم تعد صحيحة.
+      ref.invalidate(posQuickPicksProvider);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('تمّ الإرجاع — عادت الكمية إلى المخزون')),
+      );
+    }
+  }
+
   Future<void> _scanWithCamera() async {
     final code = await Navigator.of(context).push<String>(
       MaterialPageRoute(builder: (_) => const BarcodeScannerSheet(), fullscreenDialog: true),
@@ -759,6 +775,18 @@ class _PosScreenState extends ConsumerState<PosScreen> {
       title: 'نقطة البيع',
       activeRoute: '/pos',
       actions: [
+        // الإرجاع من نقطة البيع نفسها.
+        //
+        // كان في شاشة الفواتير وحدها: الكاشير أمام زبون يُرجع بضاعة يترك
+        // نقطة البيع ويبحث في الفواتير والزبون ينتظر. وهذا ما يدفع إلى
+        // تسوية المرتجع نقداً من الدرج بلا فاتورة — فيخرج المال ولا يعود
+        // الصنف إلى المخزون ولا أثر لشيء.
+        if (ref.watch(myPermissionsProvider).valueOrNull?.can('invoices.refund') ?? false)
+          TextButton.icon(
+            onPressed: _startReturn,
+            icon: const Icon(Icons.assignment_return_outlined, size: 18),
+            label: const Text('إرجاع'),
+          ),
         // وضع اللمس إعداد للجهاز لا للمنظمة: جهاز الكاشير شاشة لمس وجهاز
         // المدير فأرة، في نفس اللحظة وعلى نفس الحساب.
         Tooltip(

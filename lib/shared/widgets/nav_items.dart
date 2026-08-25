@@ -114,6 +114,15 @@ List<NavGroup> navGroupsFor({required bool isPlatformAdmin, String edition = 'st
           label: 'الصيدلية',
           items: [kPrescriptionsItem],
         ),
+      // المحاسبة لإصدار المؤسسات وحده — بقّالة بفرع واحد لا تحتاج ميزان
+      // مراجعة، وشجرة حسابات في قائمتها بند يُربك ولا يُفيد. والترشيح هنا
+      // لا في كل واجهة: ثلاثة مواضع تعرض هذه القائمة.
+      if (edition == 'enterprise')
+        const NavGroup(
+          icon: Icons.account_balance_outlined,
+          label: 'المحاسبة',
+          items: [NavItem(Icons.account_tree_outlined, 'دليل الحسابات', '/accounting')],
+        ),
       _reportsGroup,
       NavGroup(icon: _notifications.icon, label: _notifications.label, items: const [_notifications]),
       _adminGroup,
