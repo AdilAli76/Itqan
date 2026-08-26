@@ -124,6 +124,18 @@ public static class ChartOfAccounts
             }
         }
 
+        // الحسابات تُحفَظ **قبل** الربط.
+        //
+        // <para><b>العطب الذي يصلحه:</b> account_mappings يحمل مفتاحاً
+        // خارجياً على accounts، و**EF لا يعرف هذا الاعتماد** لأن لا خاصية
+        // تنقّل بينهما (مفتاح مركّب فقط). فيُدرج الربط قبل الحسابات فيرفضه
+        // المفتاح الخارجي، ويفشل بذر الدليل كلّه بـ400 — ومعه كل بيع في
+        // منظمة مفعَّلة المحاسبة.</para>
+        //
+        // <para>نفس ما وقع بين prescriptions وinvoices، وعُولج بنفس الترتيب.
+        // وكلاهما داخل معاملة المستدعي، فإمّا يمرّان معاً أو لا شيء.</para>
+        await db.SaveChangesAsync();
+
         foreach (var seed in Default.Where(s => s.Role is not null))
         {
             db.AccountMappings.Add(new AccountMapping
@@ -192,6 +204,8 @@ public static class ChartOfAccounts
                 if (parent is not null) parent.IsPostable = false;
                 db.Accounts.Add(account);
                 byCode[seed.Code] = account;
+                // يُحفَظ قبل ربطه — نفس سبب الترتيب في SeedAsync أعلاه.
+                await db.SaveChangesAsync();
             }
 
             db.AccountMappings.Add(new AccountMapping

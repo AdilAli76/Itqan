@@ -56,7 +56,10 @@ public static class Ledger
         var material = lines.Where(l => l.Debit != 0 || l.Credit != 0).ToList();
         if (material.Count == 0)
         {
-            throw new InvalidOperationException("قيد بلا سطور — لا شيء يُرحَّل.");
+            // الرسالة تحمل مصدرها ووصفها: «قيد بلا سطور» وحدها لا تقول عن أي
+            // مستند، فيبقى من يقرأ السجلّ يبحث في كل فواتير الدقيقة.
+            throw new InvalidOperationException(
+                $"قيد بلا سطور — لا شيء يُرحَّل. المصدر {source}، الوصف «{description}».");
         }
 
         var debit = material.Sum(l => l.Debit);
@@ -71,7 +74,8 @@ public static class Ledger
         if (Math.Abs(debit - credit) > 0.01m)
         {
             throw new InvalidOperationException(
-                $"قيد غير متوازن: مدين {debit:0.##} ودائن {credit:0.##} — لم يُكتب شيء.");
+                $"قيد غير متوازن: مدين {debit:0.##} ودائن {credit:0.##} — لم يُكتب شيء. " +
+                $"المصدر {source}، الوصف «{description}».");
         }
 
         var mappings = await db.AccountMappings.ToDictionaryAsync(m => m.Role, m => m.AccountId);
@@ -147,7 +151,8 @@ public static class Ledger
         if (Math.Abs(debit - credit) > 0.01m)
         {
             throw new InvalidOperationException(
-                $"قيد غير متوازن: مدين {debit:0.##} ودائن {credit:0.##} — لم يُكتب شيء.");
+                $"قيد غير متوازن: مدين {debit:0.##} ودائن {credit:0.##} — لم يُكتب شيء. " +
+                $"المصدر {source}، الوصف «{description}».");
         }
 
         var mappings = await db.AccountMappings.ToDictionaryAsync(m => m.Role, m => m.AccountId);
@@ -271,6 +276,24 @@ public static class Ledger
             "SELECT ISNULL(MAX(number), 0) + 1 FROM dbo.journal_entries WITH (UPDLOCK, HOLDLOCK);";
 
         var result = await cmd.ExecuteScalarAsync();
-        return result is null or DBNull ? 1 : Convert.ToInt64(result);
+        var fromDatabase = result is null or DBNull ? 1L : Convert.ToInt64(result);
+
+        // ورقمُ ما لم يُحفَظ بعد.
+        //
+        // <para><b>العطب الذي يصلحه:</b> الفاتورة تكتب **قيدين** في نداء
+        // واحد (إثبات الإيراد ثم نقل التكلفة)، وكلاهما يستدعي هذه الدالة
+        // قبل أن يُحفظ الأول — فتقرأ القاعدة نفس الأقصى فيأخذان الرقم نفسه،
+        // ويسقط الحفظ على UQ_journal_entries_number. أي أن **كل بيع في
+        // منظمة مفعَّلة المحاسبة يفشل**.</para>
+        //
+        // <para>ولا يكفي الحفظ بين النداءين: يبقى الاعتماد على انتباه من
+        // يكتب المسار التالي، وهو ما يهدم معنى الطريق الواحد.</para>
+        var staged = db.ChangeTracker.Entries<JournalEntry>()
+            .Where(e => e.State == EntityState.Added)
+            .Select(e => e.Entity.Number)
+            .DefaultIfEmpty(0)
+            .Max();
+
+        return Math.Max(fromDatabase, staged + 1);
     }
 }

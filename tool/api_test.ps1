@@ -146,6 +146,7 @@ if ($ping.Status -eq 0) {
 Check "السيرفر يستجيب" ($ping.Status -ne 0) ""
 Check "نقطة نهاية محمية ترفض بلا توكن (401)" ($ping.Status -eq 401) "رجعت $($ping.Status) — نقطة نهاية مكشوفة!"
 
+if (-not $Email -and $env:KINETIC_TEST_EMAIL) { $Email = $env:KINETIC_TEST_EMAIL }
 if (-not $Email) { $Email = Read-Host "  البريد الإلكتروني" }
 
 # قراءة كلمة المرور حرفاً حرفاً بدل Read-Host -AsSecureString.
@@ -175,6 +176,21 @@ function Read-Password([string]$label) {
 }
 
 $plain = ""
+
+# مسار آليّ: كلمة المرور من متغيّر بيئة.
+#
+# **لتشغيل الفحص بلا طرفية** — على خادم بناء، أو في جولة تحقّق محلية على
+# قاعدة فحص. ولا يُمرَّر كوسيط سطر أوامر: الوسائط تُسجَّل في تاريخ الأوامر
+# وفي قائمة العمليات، ومتغيّر البيئة أضيق انتشاراً.
+#
+# ⚠ **لقاعدة فحص لا لإنتاج**: هذا السكربت يكتب بيانات (أصناف وفواتير باسم
+# TEST-)، وحسابٌ حقيقي في متغيّر بيئة على جهاز مشترك يُقرأ من أي عملية
+# تعمل بنفس الحساب.
+if ($env:KINETIC_TEST_PASSWORD) {
+    $plain = $env:KINETIC_TEST_PASSWORD
+    Write-Host "  كلمة المرور من KINETIC_TEST_PASSWORD (تشغيل آليّ)" -ForegroundColor DarkGray
+}
+else {
 try {
     $plain = Read-Password "كلمة المرور"
 } catch {
@@ -184,10 +200,13 @@ try {
     $plain = [Runtime.InteropServices.Marshal]::PtrToStringAuto(
         [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure))
 }
+}
 
 $capturedLength = $plain.Length
 if ($capturedLength -eq 0) {
-    Write-Host "  لم يُلتقط أي حرف من كلمة المرور — شغّل السكربت من نافذة PowerShell حقيقية." -ForegroundColor Red
+    Write-Host "  لم يُلتقط أي حرف من كلمة المرور." -ForegroundColor Red
+    Write-Host "  شغّله من نافذة PowerShell حقيقية، أو اضبط KINETIC_TEST_EMAIL و" -ForegroundColor DarkYellow
+    Write-Host "  KINETIC_TEST_PASSWORD للتشغيل الآليّ على قاعدة فحص." -ForegroundColor DarkYellow
     exit 1
 }
 
@@ -713,10 +732,17 @@ if ($cardCustomer.Status -notin 200,201) {
     if ($topUp.Status -notin 200,201 -or -not $canManageInventory) {
         Skipped "فرض السقف اليومي" "يتطلّب شحن محفظة وإنشاء صنف (حالة الشحن $($topUp.Status))"
     } else {
+        # يتتبّع المخزون: الصنف غير المتتبَّع يُعامَل «مفتوح القيمة» ويحتاج
+        # إعداد posAllowOpenProduct — فيفشل البيع لسبب لا علاقة له بالسقف.
         $capProduct = Api POST "/products" -Token $token -Body @{
             sku = "TEST-CAP-$stamp"; name = "صنف اختبار السقف $stamp"
             salePrice = 15; costPrice = 5
-            unitBase = "piece"; tracksStock = $false; reorderLevel = 0
+            unitBase = "piece"; tracksStock = $true; reorderLevel = 0
+        }
+        if ($capProduct.Status -in 200,201) {
+            Api POST "/products/$($capProduct.Body.id)/stock-adjustments" -Token $token -Body @{
+                branchId = $branchId; quantityDelta = 100
+            } | Out-Null
         }
 
         if ($capProduct.Status -notin 200,201) {
@@ -895,7 +921,12 @@ if (-not $canManageInventory) {
     $accProduct = Api POST "/products" -Token $token -Body @{
         sku = "TEST-ACC-$stamp"; name = "صنف محاسبة $stamp"
         salePrice = 30; costPrice = 12
-        unitBase = "piece"; tracksStock = $false; reorderLevel = 0
+        unitBase = "piece"; tracksStock = $true; reorderLevel = 0
+    }
+    if ($accProduct.Status -in 200,201) {
+        Api POST "/products/$($accProduct.Body.id)/stock-adjustments" -Token $token -Body @{
+            branchId = $branchId; quantityDelta = 100
+        } | Out-Null
     }
 
     if ($accProduct.Status -notin 200,201) {
@@ -932,7 +963,14 @@ if (-not $canManageInventory) {
 
             if ($accRefund.Status -in 200,201) {
                 $afterRefund = Api GET "/accounting/journal" -Token $token
-                $retEntry = @($afterRefund.Body) | Where-Object { $_.source -eq 'invoice_return' } | Select-Object -First 1
+                # المرتجع يكتب قيدين: إثبات الردّ ثم عودة التكلفة. والدفتر
+                # يُرتَّب تنازلياً، فأحدثهما هو قيد التكلفة — والمقصود هنا
+                # قيد الإيراد. يُلتقط بأنه الذي يمسّ «مردودات المبيعات».
+                $returnEntries = @($afterRefund.Body) | Where-Object { $_.source -eq 'invoice_return' }
+                $retEntry = $returnEntries | Where-Object {
+                    $_.lines | Where-Object { $_.accountCode -eq '4102' }
+                } | Select-Object -First 1
+                if (-not $retEntry) { $retEntry = $returnEntries | Select-Object -First 1 }
                 Check "المرتجع ولّد قيداً آلياً" ($null -ne $retEntry) `
                     "مرتجعٌ بلا قيد يترك المبيعات مضخّمة بما رُدّ"
 

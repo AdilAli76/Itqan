@@ -1728,8 +1728,11 @@ IF EXISTS (SELECT 1 FROM sys.columns
            WHERE object_id = OBJECT_ID('dbo.stock_count_items') AND name = 'counted_at')
 BEGIN
     DECLARE @orgId UNIQUEIDENTIFIER;
+    -- **من app_users لا من organizations**: الأخير محمي بسياسة العزل، ويُقرأ
+    -- هنا قبل ضبط أي سياق فيُرجع صفر صفوف — فيدور المؤشّر على لا شيء ولا
+    -- يُنفَّذ التحديث أبداً، صامتاً. (وقع فعلاً في أول كتابة لهذه الكتلة.)
     DECLARE org_cursor CURSOR LOCAL FAST_FORWARD FOR
-        SELECT id FROM dbo.organizations;
+        SELECT DISTINCT organization_id FROM dbo.app_users;
     OPEN org_cursor;
     FETCH NEXT FROM org_cursor INTO @orgId;
     WHILE @@FETCH_STATUS = 0
@@ -1910,6 +1913,61 @@ END
 GO
 
 PRINT N'المصروفات جاهزة';
+GO
+
+-- ----------------------------------------------------------------------------
+--  منح وحدة accounting لتراخيص المؤسسات القائمة
+--
+--  ⚠ **قاعدة عامّة، لا حالة واحدة:** الوحدات الفعّالة = وحدات الإصدار ∩
+--  قائمة الترخيص (راجع LicenseLimits.EffectiveModules). والقائمة تُكتب في
+--  الترخيص لحظة إصداره وتُجمَّد. فأيّ وحدة تُضاف إلى إصدارٍ بعد ذلك
+--  **تختفي صامتةً عن كل عميل قائم** — لا رسالة ولا أثر، فقط شاشة لا تظهر
+--  وترحيلٌ لا يقع.
+--
+--  وهذا أخطر ما يكون في المحاسبة تحديداً: مالك المنصّة يتجاوز فحص الوحدات
+--  بحكم التصميم، فيرى الشاشة تعمل عنده بينما لا قيد يُكتب عند العميل.
+--
+--  فكل إضافة وحدة إلى إصدار تستلزم كتلةً كهذه.
+-- ----------------------------------------------------------------------------
+IF EXISTS (SELECT 1 FROM sys.columns
+           WHERE object_id = OBJECT_ID('dbo.licenses') AND name = 'enabled_modules')
+BEGIN
+    DECLARE @orgId UNIQUEIDENTIFIER;
+    DECLARE @granted INT = 0;
+
+    -- من app_users لنفس السبب أعلاه. والإصدار يُفحَص **داخل** الحلقة بعد
+    -- ضبط السياق، إذ لا يمكن قراءته من خارجها.
+    DECLARE org_cursor CURSOR LOCAL FAST_FORWARD FOR
+        SELECT DISTINCT organization_id FROM dbo.app_users;
+    OPEN org_cursor;
+    FETCH NEXT FROM org_cursor INTO @orgId;
+    WHILE @@FETCH_STATUS = 0
+    BEGIN
+        -- RLS تحجب صفوف المنظمات الأخرى، فتحديثٌ بلا سياق يُصيب صفر صفوف
+        -- صامتاً (راجع رأس هذا الملف).
+        EXEC sp_set_session_context @key = N'organization_id', @value = @orgId;
+
+        -- تُضاف فقط لمن لا يملكها، ولا تُمسّ قائمة قُيّدت عمداً بغير ذلك:
+        -- الشرط أن تكون القائمة تحوي وحدات المؤسسات الأخرى — أي أنها
+        -- «كل ما يمنحه الإصدار» وقت إصدارها، لا اشتراكاً مقيَّداً.
+        UPDATE dbo.licenses
+        SET enabled_modules = JSON_MODIFY(enabled_modules, 'append $', 'accounting')
+        WHERE EXISTS (SELECT 1 FROM dbo.organizations o WHERE o.edition = 'enterprise')
+          AND ISJSON(enabled_modules) = 1
+          AND enabled_modules NOT LIKE '%accounting%'
+          AND enabled_modules LIKE '%warehouses%'
+          AND enabled_modules LIKE '%valuation%'
+          AND enabled_modules LIKE '%procurement%';
+
+        SET @granted = @granted + @@ROWCOUNT;
+        FETCH NEXT FROM org_cursor INTO @orgId;
+    END
+    CLOSE org_cursor;
+    DEALLOCATE org_cursor;
+    EXEC sp_set_session_context @key = N'organization_id', @value = NULL;
+
+    PRINT N'مُنحت وحدة accounting لـ ' + CAST(@granted AS NVARCHAR(10)) + N' ترخيص مؤسسات';
+END
 GO
 
 -- ----------------------------------------------------------------------------

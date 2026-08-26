@@ -12,7 +12,22 @@ using KineticEnterprise.Api.Models;
 namespace KineticEnterprise.Api.Controllers;
 
 public record InvoiceLineRequest(
-    Guid ProductId, decimal Quantity, decimal UnitPrice,
+    Guid ProductId, decimal Quantity,
+    /// <summary>
+    /// السعر المطلوب. **NULL = سعر الكتالوج** — وهو الغالب.
+    ///
+    /// <para><b>لماذا يقبل NULL:</b> كان <c>decimal</c> غير قابل للإفراغ،
+    /// فطلبٌ لا يذكر السعر يصل بقيمة صفر. ومن يملك <c>pos.price_override</c>
+    /// — و<c>super_admin</c> يملكها دائماً — كان الصفر يمرّ عنده **تجاوزاً
+    /// متعمّداً**: أي أن طلب HTTP مباشراً بلا حقل سعر يبيع كل شيء مجاناً،
+    /// ويُسجَّل في التدقيق «تجاوز سعر» لا خطأً.</para>
+    ///
+    /// <para>وهذا نقض للغرض الذي بُنيت له كتلة التسعير أصلاً: منع من يتجاوز
+    /// الواجهة من فرض سعره. والفرق بين «لم يقل» و«قال صفراً» لا يُلتقط إلا
+    /// بحقل قابل للإفراغ. والصفر الصريح يبقى مسموحاً لصاحب الصلاحية —
+    /// الهدية تقع فعلاً — لكنه يصير قراراً مكتوباً لا سهواً.</para>
+    /// </summary>
+    decimal? UnitPrice,
     /// بيع بالوحدة الجزئية (حبّة من شريط). الكمية والسعر حينها بالوحدة
     /// الجزئية، والخصم من المخزون وحده هو ما يُحوَّل إلى الوحدة الأساسية.
     bool SoldAsSubUnit = false);
@@ -292,11 +307,11 @@ public class InvoicesController : ControllerBase
                 {
                     return BadRequest(new { message = "بيع الأصناف مفتوحة القيمة غير مفعَّل في هذه المنظمة" });
                 }
-                if (line.UnitPrice <= 0)
+                if (line.UnitPrice is not { } openPrice || openPrice <= 0)
                 {
                     return BadRequest(new { message = "قيمة الصنف المفتوح يجب أن تكون أكبر من صفر" });
                 }
-                unitPrice = line.UnitPrice;
+                unitPrice = openPrice;
             }
             else if (line.SoldAsSubUnit)
             {
@@ -310,7 +325,8 @@ public class InvoicesController : ControllerBase
                         message = $"«{product.Name}» غير مهيَّأ للبيع بالوحدة الجزئية"
                     });
                 }
-                if (line.UnitPrice == product.SubUnitPrice)
+                // NULL = سعر الكتالوج، لا تجاوزاً بصفر.
+                if (line.UnitPrice is null || line.UnitPrice == product.SubUnitPrice)
                 {
                     unitPrice = product.SubUnitPrice;
                 }
@@ -320,7 +336,7 @@ public class InvoicesController : ControllerBase
                     {
                         return BadRequest(new { message = "السعر لا يمكن أن يكون سالباً" });
                     }
-                    unitPrice = line.UnitPrice;
+                    unitPrice = line.UnitPrice.Value;
                     overridden = true;
                 }
                 else
@@ -331,7 +347,7 @@ public class InvoicesController : ControllerBase
                     });
                 }
             }
-            else if (line.UnitPrice == product.SalePrice)
+            else if (line.UnitPrice is null || line.UnitPrice == product.SalePrice)
             {
                 unitPrice = product.SalePrice;
             }
@@ -341,7 +357,7 @@ public class InvoicesController : ControllerBase
                 {
                     return BadRequest(new { message = "السعر لا يمكن أن يكون سالباً" });
                 }
-                unitPrice = line.UnitPrice;
+                unitPrice = line.UnitPrice.Value;
                 overridden = true;
             }
             else
