@@ -41,6 +41,7 @@ class AdaptiveScaffold extends ConsumerWidget {
     this.activeRoute = '',
     this.actions,
     this.floatingActionButton,
+    this.scrollable = true,
   });
 
   final String title;
@@ -48,6 +49,17 @@ class AdaptiveScaffold extends ConsumerWidget {
   final String activeRoute;
   final List<Widget>? actions;
   final Widget? floatingActionButton;
+
+  /// هل تُلفّ الشاشة بمُمرِّر على الجوّال.
+  ///
+  /// <para><b>ولماذا يلزم إطفاؤه أحياناً:</b> المُمرِّر يعطي ارتفاعاً غير
+  /// محدود، وشاشةٌ تبني تخطيطها على الارتفاع المتاح (تبويبات، قائمة تملأ ما
+  /// بقي) تفيض عنده. وقع في شاشة المحاسبة: TabBarView داخل Expanded داخل
+  /// مُمرِّر — تعمل على سطح المكتب وتفيض على الهاتف.</para>
+  ///
+  /// <para>واطفاؤه لا يُلغي التمرير بل ينقله إلى داخل الشاشة، حيث تعرف كل
+  /// قائمة ما تمرّره.</para>
+  final bool scrollable;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -113,7 +125,19 @@ class AdaptiveScaffold extends ConsumerWidget {
       ),
     );
 
-    final content = Expanded(
+    // الشاشة التي تدير تمريرها بنفسها تُعطى الارتفاع كما هو — بلا مُمرِّر
+    // ولا توسيط رأسي. راجع [scrollable].
+    final content = !scrollable
+        ? Expanded(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 1440),
+                child: body,
+              ),
+            ),
+          )
+        : Expanded(
       child: LayoutBuilder(
         builder: (context, constraints) => SingleChildScrollView(
           padding: const EdgeInsets.all(24),
@@ -201,10 +225,12 @@ class AdaptiveScaffold extends ConsumerWidget {
                   children: [
                     if (actions != null && actions!.isNotEmpty) header,
                     Expanded(
-                      child: SingleChildScrollView(
-                        padding: const EdgeInsets.all(16),
-                        child: body,
-                      ),
+                      child: scrollable
+                          ? SingleChildScrollView(
+                              padding: const EdgeInsets.all(16),
+                              child: body,
+                            )
+                          : body,
                     ),
                   ],
                 ),

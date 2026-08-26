@@ -13,6 +13,7 @@ import 'package:kinetic_enterprise/core/shell/screen_registry.dart';
 import 'package:kinetic_enterprise/core/theme/app_theme.dart';
 import 'package:kinetic_enterprise/core/theme/app_colors.dart';
 import 'package:kinetic_enterprise/core/time/app_clock.dart';
+import 'support/tour_data.dart';
 
 /// ============================================================================
 ///  فحص بصري آلي لكل شاشات النظام
@@ -45,12 +46,15 @@ const _pixelRatios = <String, double>{
   'سطح مكتب': 1.0,
 };
 
-const _routes = [
-  '/dashboard', '/branches', '/pos', '/inventory', '/purchasing',
-  '/customers', '/wallet-cards', '/invoices', '/notifications', '/reports',
-  '/audit-log', '/users', '/permissions', '/license', '/settings',
-  '/stock-transfer', '/stock-count', '/barcode-designer', '/support',
-];
+/// من قائمة الجولة نفسها لا قائمة ثانية.
+///
+/// **العطب الذي يصلحه:** كانت هنا قائمة مكتوبة باليد **ثالثة** (بعد
+/// screen_registry وkTourScreens)، فتخلّفت عن الاثنتين. وشاشةٌ خارج القوائم
+/// لا يفتحها اختبار قطّ — فبقيت المصروفات والمحاسبة والشركات المشترَكة بلا
+/// أي فحص، وواحدة منها تطلب مساراً خاطئاً من الخادم.
+///
+/// وقائمةٌ واحدة محروسة بـtour_covers_registry_test خيرٌ من ثلاث تتفرّق.
+final _routes = kTourScreens.map((s) => s.route).toList();
 
 /// أصغر هدف لمس موصى به. القيمة من إرشادات Material (48dp) و Apple (44pt)؛
 /// أخذنا الأصغر لتفادي بلاغات لا تنتهي على تصميم مبني للفأرة أصلاً.

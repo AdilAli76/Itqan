@@ -8,6 +8,7 @@ import '../../../core/responsive/adaptive_scaffold.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_text_styles.dart';
 import '../../../shared/widgets/app_surface.dart';
+import '../data/platform_organizations_providers.dart';
 
 final _dateFormat = DateFormat('yyyy-MM-dd');
 
@@ -24,12 +25,6 @@ const _tierLabels = {
   'professional': 'احترافية',
   'enterprise': 'مؤسسات',
 };
-
-final platformOrganizationsProvider =
-    FutureProvider.autoDispose<List<Map<String, dynamic>>>((ref) async {
-  final response = await ApiClient.instance.dio.get('/platform');
-  return (response.data as List).map((e) => Map<String, dynamic>.from(e as Map)).toList();
-});
 
 /// نصّ الخطأ كما يقوله الخادم — بما فيه الرمز المرجعي إن وُجد.
 String _errorDetail(Object err) {
@@ -57,6 +52,10 @@ class PlatformOrganizationsScreen extends ConsumerWidget {
     return AdaptiveScaffold(
       title: 'الشركات المشترَكة',
       activeRoute: '/platform/organizations',
+      // القائمة تمرّر نفسها: لفّها بمُمرِّر خارجي يعطيها ارتفاعاً غير محدود
+      // فتنهار بـ«Vertical viewport was given unbounded height» — شاشةٌ
+      // بيضاء عند المستخدم بلا رسالة. راجع AdaptiveScaffold.scrollable.
+      scrollable: false,
       body: orgsAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         // رسالة الخادم كما هي لا نصٌّ عامّ.
@@ -232,7 +231,7 @@ class _EditOrgDialogState extends ConsumerState<_EditOrgDialog> {
       _error = null;
     });
     try {
-      await ApiClient.instance.dio.put('/platform/${widget.org['id']}', data: {
+      await ApiClient.instance.dio.put('/platform/organizations/${widget.org['id']}', data: {
         'legalName': _legalController.text.trim(),
         'displayName': _displayController.text.trim(),
         'isActive': _isActive,

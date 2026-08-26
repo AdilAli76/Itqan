@@ -32,5 +32,9 @@
   "/platform-settings": "platform-settings.json",
   "/platform/organizations": "platform_organizations.json",
   "/reports/debt-aging": "reports_debt-aging.json",
-  "/reports/inventory-valuation": "reports_inventory_valuation.json"
+  "/reports/inventory-valuation": "reports_inventory_valuation.json",
+  "/expenses": "expenses.json",
+  "/accounting/accounts": "accounting_accounts.json",
+  "/accounting/journal": "accounting_journal.json",
+  "/accounting/trial-balance": "accounting_trial_balance.json"
 }

@@ -1,0 +1,43 @@
+{
+  "from": "2026-01-01T00:00:00",
+  "to": "2026-08-25T00:00:00",
+  "totalDebit": 10230.5,
+  "totalCredit": 10230.5,
+  "rows": [
+    {
+      "code": "1101",
+      "name": "الصندوق",
+      "type": "asset",
+      "debit": 3500.0,
+      "credit": 0
+    },
+    {
+      "code": "1104",
+      "name": "المخزون",
+      "type": "asset",
+      "debit": 5000.0,
+      "credit": 0
+    },
+    {
+      "code": "2101",
+      "name": "الموردون",
+      "type": "liability",
+      "debit": 0,
+      "credit": 8000.0
+    },
+    {
+      "code": "3201",
+      "name": "مصروفات عمومية",
+      "type": "expense",
+      "debit": 1730.5,
+      "credit": 0
+    },
+    {
+      "code": "4101",
+      "name": "المبيعات",
+      "type": "revenue",
+      "debit": 0,
+      "credit": 2230.5
+    }
+  ]
+}

@@ -59,6 +59,10 @@ class _AccountingScreenState extends ConsumerState<AccountingScreen>
     return AdaptiveScaffold(
       title: 'المحاسبة',
       activeRoute: '/accounting',
+      // التبويبات تبني تخطيطها على الارتفاع المتاح، فلا تُلفّ بمُمرِّر:
+      // الارتفاع غير المحدود يجعلها تفيض على الهاتف. وكل تبويب يمرّر محتواه
+      // بنفسه — راجع AdaptiveScaffold.scrollable.
+      scrollable: false,
       body: Column(
         children: [
           TabBar(

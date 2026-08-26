@@ -36,6 +36,10 @@ class ExpensesScreen extends ConsumerWidget {
     return AdaptiveScaffold(
       title: 'المصروفات',
       activeRoute: '/expenses',
+      // القائمة تمرّر نفسها: لفّها بمُمرِّر خارجي يعطيها ارتفاعاً غير محدود
+      // فتنهار بـ«Vertical viewport was given unbounded height» — شاشةٌ
+      // بيضاء عند المستخدم بلا رسالة. راجع AdaptiveScaffold.scrollable.
+      scrollable: false,
       actions: [
         if (canAdd)
           TextButton.icon(

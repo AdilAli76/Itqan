@@ -53,6 +53,10 @@ const kTourScreens = [
   TourScreen('/medicine-reference', 'نشرات الأدوية'),
   TourScreen('/prescriptions', 'دفتر الوصفات'),
   TourScreen('/reorder', 'إعادة الطلب'),
+  TourScreen('/expenses', 'المصروفات'),
+  TourScreen('/accounting', 'المحاسبة'),
+  TourScreen('/platform/organizations', 'الشركات المشترَكة'),
+  TourScreen('/platform/organizations/new', 'إنشاء منظمة جديدة'),
 ];
 
 /// استثناءات رُصدت أثناء الجولة — تُجمَع ولا تُفشل، فتُصوَّر الشاشة بعطبها.
