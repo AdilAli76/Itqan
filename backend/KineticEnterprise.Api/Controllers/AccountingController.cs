@@ -32,6 +32,12 @@ public record TrialBalanceDto(DateTime From, DateTime To, List<TrialBalanceRow> 
 
 public record ReverseEntryRequest(string Reason);
 
+/// <param name="Debit">مدين هذا السطر. صفر إن كان دائناً.</param>
+public record ManualEntryLineRequest(Guid AccountId, decimal Debit, decimal Credit, string? Note);
+
+public record CreateManualEntryRequest(
+    DateTime EntryDate, string Description, List<ManualEntryLineRequest> Lines, Guid? BranchId);
+
 public record CloseFiscalPeriodRequest(DateTime PeriodEnd);
 public record ReopenClosingRequest(string Reason);
 
@@ -413,6 +419,103 @@ public class AccountingController : ControllerBase
             equity, totalEquity,
             retained,
             totalAssets - (totalLiabilities + totalEquity + retained));
+    }
+
+    /// <summary>
+    /// قيد يدوي — ما لا مسار آلياً له.
+    ///
+    /// <para><b>لماذا يلزم رغم الترحيل الآلي:</b> الدفتر يعرف البيع والشراء
+    /// والمصروف والسداد، ولا يعرف إهلاكاً ولا مخصّصاً ولا تسوية جرد نقدية
+    /// ولا تصحيح تبويب. وبلا هذا الباب يخرج المحاسب من النظام إلى ملفٍ
+    /// جانبي — فيصير الدفتر ناقصاً وهو يبدو كاملاً.</para>
+    ///
+    /// <para><b>والوصف إلزامي:</b> قيدٌ يدوي بلا شرح يترك من يراجعه بعد
+    /// سنة أمام أرقام لا يعرف لماذا كُتبت. والآلي يشرح نفسه بمصدره، واليدوي
+    /// لا يشرحه إلا كاتبه.</para>
+    ///
+    /// <para>ويمرّ بكل حرّاس الدفتر: التوازن، والحساب الورقي، والمدّة
+    /// المُقفَلة، وترقيم القيود — لأنه يمرّ من الطريق الواحد نفسه.</para>
+    /// </summary>
+    [HttpPost("journal")]
+    [Authorize(Roles = "super_admin")]
+    public async Task<ActionResult<JournalEntryDto>> CreateManualEntry(CreateManualEntryRequest request)
+    {
+        var description = (request.Description ?? "").Trim();
+        if (description.Length == 0)
+        {
+            return BadRequest(new { message = "وصف القيد إلزامي — قيدٌ بلا شرح لا يُفهَم بعد سنة" });
+        }
+
+        var lines = (request.Lines ?? new List<ManualEntryLineRequest>())
+            .Where(l => l.Debit != 0 || l.Credit != 0)
+            .ToList();
+
+        if (lines.Count < 2)
+        {
+            // سطرٌ واحد لا يكون قيداً: لكل مدين دائن.
+            return BadRequest(new { message = "القيد يحتاج سطرين على الأقل" });
+        }
+
+        foreach (var line in lines)
+        {
+            if (line.Debit < 0 || line.Credit < 0)
+            {
+                return BadRequest(new { message = "المبالغ لا تكون سالبة — اعكس الجانب بدل ذلك" });
+            }
+            if (line.Debit > 0 && line.Credit > 0)
+            {
+                return BadRequest(new { message = "السطر إمّا مدين وإمّا دائن، لا الاثنين" });
+            }
+        }
+
+        var accountIds = lines.Select(l => l.AccountId).Distinct().ToList();
+        var accounts = await _db.Accounts
+            .Where(a => accountIds.Contains(a.Id))
+            .ToDictionaryAsync(a => a.Id, a => a);
+
+        foreach (var id in accountIds)
+        {
+            if (!accounts.TryGetValue(id, out var account))
+            {
+                return BadRequest(new { message = "حساب غير موجود" });
+            }
+            if (!account.IsPostable)
+            {
+                // الوسيط لا يُرحَّل إليه: رصيدُه يجب أن يبقى مجموع أبنائه.
+                return BadRequest(new
+                {
+                    message = $"«{account.Code} — {account.Name}» حساب تجميعي، اختر حساباً فرعياً تحته",
+                });
+            }
+            if (!account.IsActive)
+            {
+                return BadRequest(new { message = $"«{account.Code} — {account.Name}» حساب موقوف" });
+            }
+        }
+
+        var orgId = Guid.Parse(User.FindFirstValue("organization_id")!);
+
+        JournalEntry entry;
+        try
+        {
+            entry = await Ledger.PostToAccountsAsync(_db, orgId, request.BranchId,
+                JournalSources.Manual, null, description,
+                lines.Select(l => (l.AccountId, l.Debit, l.Credit,
+                    string.IsNullOrWhiteSpace(l.Note) ? null : l.Note!.Trim())),
+                Array.Empty<PostingLine>(),
+                CurrentUserId(),
+                request.EntryDate.Date);
+        }
+        catch (LedgerRuleException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+
+        _db.LogAudit(orgId, CurrentUserId(), "journal.manual_created", "journal_entries", entry.Id,
+            newValues: new { entry.EntryDate, Description = description, Lines = lines.Count });
+        await _db.SaveChangesAsync();
+
+        return (await ToDtosAsync(new List<JournalEntry> { entry })).First();
     }
 
     /// <summary>

@@ -1136,6 +1136,88 @@ if ($bs.Status -eq 200) {
     }
 }
 
+# ── القيود اليدوية ───────────────────────────────────────────────────────
+#
+# الدفتر يعرف البيع والشراء والمصروف والسداد، ولا يعرف إهلاكاً ولا مخصّصاً
+# ولا تصحيح تبويب. وبلا هذا الباب يخرج المحاسب إلى ملفٍ جانبي — فيصير
+# الدفتر ناقصاً وهو يبدو كاملاً.
+#
+# والسؤال: هل يمرّ اليدوي بكل حرّاس الدفتر، أم يلتفّ عليها؟
+
+$chartNow = Api GET "/accounting/accounts" -Token $token
+$postable = @($chartNow.Body) | Where-Object { $_.isPostable -eq $true }
+$cashAcc = $postable | Where-Object { $_.code -eq '1101' } | Select-Object -First 1
+$genExp  = $postable | Where-Object { $_.code -eq '3201' } | Select-Object -First 1
+$rootAcc = @($chartNow.Body) | Where-Object { $_.code -eq '1' } | Select-Object -First 1
+
+if (-not $cashAcc -or -not $genExp) {
+    Skipped "القيود اليدوية" "لم يُعثر على حسابَي الصندوق والمصروفات العمومية"
+} else {
+    # الوصف إلزامي: قيدٌ بلا شرح يترك من يراجعه بعد سنة أمام أرقام لا يعرف
+    # لماذا كُتبت.
+    $noDesc = Api POST "/accounting/journal" -Token $token -Body @{
+        entryDate = [DateTime]::UtcNow.Date.ToString('yyyy-MM-dd'); description = ""
+        lines = @(
+            @{ accountId = $genExp.id; debit = 50; credit = 0 },
+            @{ accountId = $cashAcc.id; debit = 0; credit = 50 }
+        )
+    }
+    Check "قيد يدوي بلا وصف يُرفض" ($noDesc.Status -eq 400) "حالة $($noDesc.Status)"
+
+    # غير المتوازن: هو ما يُفسد ميزان المراجعة إلى الأبد.
+    $unbalanced = Api POST "/accounting/journal" -Token $token -Body @{
+        entryDate = [DateTime]::UtcNow.Date.ToString('yyyy-MM-dd'); description = "غير متوازن"
+        lines = @(
+            @{ accountId = $genExp.id; debit = 50; credit = 0 },
+            @{ accountId = $cashAcc.id; debit = 0; credit = 30 }
+        )
+    }
+    Check "قيد يدوي غير متوازن يُرفض" ($unbalanced.Status -eq 400) `
+        "حالة $($unbalanced.Status) — قبولُه يُفسد ميزان المراجعة إلى الأبد"
+
+    # سطرٌ واحد ليس قيداً.
+    $single = Api POST "/accounting/journal" -Token $token -Body @{
+        entryDate = [DateTime]::UtcNow.Date.ToString('yyyy-MM-dd'); description = "سطر واحد"
+        lines = @(@{ accountId = $genExp.id; debit = 50; credit = 0 })
+    }
+    Check "قيد بسطر واحد يُرفض" ($single.Status -eq 400) "حالة $($single.Status)"
+
+    # الحساب التجميعي: رصيدُه يجب أن يبقى مجموع أبنائه.
+    if ($rootAcc) {
+        $onRoot = Api POST "/accounting/journal" -Token $token -Body @{
+            entryDate = [DateTime]::UtcNow.Date.ToString('yyyy-MM-dd'); description = "على تجميعي"
+            lines = @(
+                @{ accountId = $rootAcc.id; debit = 50; credit = 0 },
+                @{ accountId = $cashAcc.id; debit = 0; credit = 50 }
+            )
+        }
+        Check "الترحيل إلى حساب تجميعي يُرفض" ($onRoot.Status -eq 400) `
+            "حالة $($onRoot.Status) — قبولُه يجعل رصيد الأب لا يساوي مجموع أبنائه"
+    }
+
+    # والقيد السليم يمرّ ويظهر في الدفتر.
+    $ok = Api POST "/accounting/journal" -Token $token -Body @{
+        entryDate = [DateTime]::UtcNow.Date.ToString('yyyy-MM-dd')
+        description = "تسوية يدوية $stamp"
+        lines = @(
+            @{ accountId = $genExp.id; debit = 50; credit = 0 },
+            @{ accountId = $cashAcc.id; debit = 0; credit = 50 }
+        )
+    }
+    Check "القيد اليدوي السليم يمرّ" ($ok.Status -in 200,201) `
+        "حالة $($ok.Status) — $($ok.Body.message)"
+
+    if ($ok.Status -in 200,201) {
+        Check "مصدره manual" ($ok.Body.source -eq 'manual') "المصدر $($ok.Body.source)"
+        Check "له رقم في تسلسل الدفتر" ([int]$ok.Body.number -gt 0) "الرقم $($ok.Body.number)"
+
+        $tbAfter = Api GET "/accounting/trial-balance" -Token $token
+        Check "الميزان يبقى متوازناً بعد القيد اليدوي" `
+            ([Math]::Abs([decimal]$tbAfter.Body.totalDebit - [decimal]$tbAfter.Body.totalCredit) -lt 0.01) `
+            "مدين $($tbAfter.Body.totalDebit) ودائن $($tbAfter.Body.totalCredit)"
+    }
+}
+
 # ── الإقفال السنوي ───────────────────────────────────────────────────────
 #
 # الإقفال شيئان لا واحد: قيدٌ يُصفّر الإيرادات والاستخدامات ويُرحّل نتيجتها

@@ -318,8 +318,22 @@ class _JournalTab extends ConsumerWidget {
     final entriesAsync = ref.watch(journalProvider);
     final filter = ref.watch(journalAccountFilterProvider);
 
+    final canWrite = ref.watch(myPermissionsProvider).valueOrNull?.isSuperAdmin ?? false;
+
     return Column(
       children: [
+        if (canWrite)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+            child: SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: () => _addManual(context, ref),
+                icon: const Icon(Icons.post_add_outlined, size: 18),
+                label: const Text('قيد يدوي'),
+              ),
+            ),
+          ),
         if (filter != null)
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
@@ -360,6 +374,255 @@ class _JournalTab extends ConsumerWidget {
         ),
       ],
     );
+  }
+}
+
+/// يفتح حوار القيد اليدوي ويُبطل ما تأثّر به.
+Future<void> _addManual(BuildContext context, WidgetRef ref) async {
+  final saved = await showDialog<bool>(
+    context: context,
+    builder: (_) => const _ManualEntryDialog(),
+  );
+  if (saved == true) {
+    ref.invalidate(journalProvider);
+    ref.invalidate(chartOfAccountsProvider);
+    ref.invalidate(trialBalanceProvider);
+    ref.invalidate(incomeStatementProvider);
+    ref.invalidate(balanceSheetProvider);
+  }
+}
+
+/// قيد يدوي — ما لا مسار آلياً له: إهلاك، مخصّص، تسوية، تصحيح تبويب.
+///
+/// <para><b>والفرق يُعرَض وهو يكتب لا بعد الإرسال:</b> قيدٌ غير متوازن يرفضه
+/// الخادم برسالة، لكن المحاسب حينها يكون قد ملأ عشرة سطور ولا يعرف أيّها
+/// الخطأ. فيظهر المجموعان والفرق بينهما حيّاً.</para>
+class _ManualEntryDialog extends ConsumerStatefulWidget {
+  const _ManualEntryDialog();
+
+  @override
+  ConsumerState<_ManualEntryDialog> createState() => _ManualEntryDialogState();
+}
+
+class _ManualLineDraft {
+  String? accountId;
+  final debit = TextEditingController();
+  final credit = TextEditingController();
+
+  void dispose() {
+    debit.dispose();
+    credit.dispose();
+  }
+
+  double get debitValue => double.tryParse(debit.text.trim()) ?? 0;
+  double get creditValue => double.tryParse(credit.text.trim()) ?? 0;
+}
+
+class _ManualEntryDialogState extends ConsumerState<_ManualEntryDialog> {
+  final _descriptionController = TextEditingController();
+  final _lines = <_ManualLineDraft>[_ManualLineDraft(), _ManualLineDraft()];
+  DateTime _entryDate = DateTime.now();
+  bool _saving = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _descriptionController.dispose();
+    for (final l in _lines) {
+      l.dispose();
+    }
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final accountsAsync = ref.watch(chartOfAccountsProvider);
+
+    // الحسابات الورقية النشطة وحدها: التجميعي لا يُرحَّل إليه، والموقوف
+    // يرفضه الخادم — وعرضُهما يجعل المحاسب يختار ثم يُرفَض بلا سبب ظاهر.
+    final postable = accountsAsync.valueOrNull
+            ?.where((a) => (a['isPostable'] as bool? ?? false) && (a['isActive'] as bool? ?? true))
+            .toList() ??
+        const <Map<String, dynamic>>[];
+
+    final totalDebit = _lines.fold<double>(0, (sum, l) => sum + l.debitValue);
+    final totalCredit = _lines.fold<double>(0, (sum, l) => sum + l.creditValue);
+    final diff = totalDebit - totalCredit;
+    final balanced = diff.abs() < 0.01 && totalDebit > 0;
+
+    return AlertDialog(
+      title: const Text('قيد يدوي'),
+      content: SizedBox(
+        width: 620,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              TextField(
+                controller: _descriptionController,
+                autofocus: true,
+                decoration: const InputDecoration(
+                  labelText: 'وصف القيد',
+                  helperText: 'قيدٌ بلا شرح لا يُفهَم بعد سنة — الآلي يشرحه مصدرُه واليدوي لا يشرحه إلا كاتبه',
+                ),
+              ),
+              const SizedBox(height: 12),
+              InkWell(
+                onTap: () async {
+                  final picked = await showDatePicker(
+                    context: context,
+                    initialDate: _entryDate,
+                    firstDate: DateTime(2020),
+                    lastDate: DateTime.now(),
+                  );
+                  if (picked != null) setState(() => _entryDate = picked);
+                },
+                child: InputDecorator(
+                  decoration: const InputDecoration(labelText: 'تاريخ القيد'),
+                  child: Text(_date.format(_entryDate), style: AppTextStyles.bodyMd()),
+                ),
+              ),
+              const SizedBox(height: 16),
+              for (var i = 0; i < _lines.length; i++)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        flex: 3,
+                        child: DropdownButtonFormField<String>(
+                          initialValue: _lines[i].accountId,
+                          isExpanded: true,
+                          decoration: const InputDecoration(labelText: 'الحساب', isDense: true),
+                          items: postable
+                              .map((a) => DropdownMenuItem(
+                                    value: a['id'] as String,
+                                    child: Text('${a['code']} — ${a['name']}',
+                                        overflow: TextOverflow.ellipsis),
+                                  ))
+                              .toList(),
+                          onChanged: (v) => setState(() => _lines[i].accountId = v),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: TextField(
+                          controller: _lines[i].debit,
+                          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                          decoration: const InputDecoration(labelText: 'مدين', isDense: true),
+                          onChanged: (_) => setState(() {}),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: TextField(
+                          controller: _lines[i].credit,
+                          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                          decoration: const InputDecoration(labelText: 'دائن', isDense: true),
+                          onChanged: (_) => setState(() {}),
+                        ),
+                      ),
+                      IconButton(
+                        tooltip: 'حذف السطر',
+                        icon: const Icon(Icons.remove_circle_outline, size: 18),
+                        // سطران حدٌّ أدنى: لكل مدين دائن.
+                        onPressed: _lines.length <= 2
+                            ? null
+                            : () => setState(() => _lines.removeAt(i).dispose()),
+                      ),
+                    ],
+                  ),
+                ),
+              Align(
+                alignment: AlignmentDirectional.centerStart,
+                child: TextButton.icon(
+                  onPressed: () => setState(() => _lines.add(_ManualLineDraft())),
+                  icon: const Icon(Icons.add, size: 16),
+                  label: const Text('سطر'),
+                ),
+              ),
+              const Divider(),
+              // الفرق حيّاً وهو يكتب: الرفض بعد ملء عشرة سطور لا يقول أيّها
+              // الخطأ.
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: balanced ? AppColors.successBg : AppColors.warningBg,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        balanced
+                            ? 'متوازن'
+                            : diff == 0
+                                ? 'أدخل المبالغ'
+                                : 'فرق ${_money.format(diff.abs())} '
+                                    '${diff > 0 ? '(المدين أكبر)' : '(الدائن أكبر)'}',
+                        style: AppTextStyles.bodyMd(
+                            color: balanced ? AppColors.success : AppColors.warning),
+                      ),
+                    ),
+                    Text('${_money.format(totalDebit)}  |  ${_money.format(totalCredit)}',
+                        style: AppTextStyles.currency()),
+                  ],
+                ),
+              ),
+              if (_error != null) ...[
+                const SizedBox(height: 10),
+                Text(_error!, style: AppTextStyles.bodyMd(color: AppColors.danger)),
+              ],
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('إلغاء')),
+        FilledButton(
+          onPressed: _saving || !balanced ? null : _submit,
+          child: _saving
+              ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+              : const Text('ترحيل'),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _submit() async {
+    if (_descriptionController.text.trim().isEmpty) {
+      setState(() => _error = 'وصف القيد إلزامي');
+      return;
+    }
+    final rows = _lines.where((l) => l.debitValue != 0 || l.creditValue != 0).toList();
+    if (rows.any((l) => l.accountId == null)) {
+      setState(() => _error = 'اختر حساباً لكل سطر فيه مبلغ');
+      return;
+    }
+
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
+    try {
+      await ApiClient.instance.dio.post('/accounting/journal', data: {
+        'entryDate': _entryDate.toIso8601String(),
+        'description': _descriptionController.text.trim(),
+        'lines': rows
+            .map((l) => {
+                  'accountId': l.accountId,
+                  'debit': l.debitValue,
+                  'credit': l.creditValue,
+                })
+            .toList(),
+      });
+      if (mounted) Navigator.pop(context, true);
+    } catch (e) {
+      setState(() => _error = _errorText(e, 'تعذّر ترحيل القيد'));
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
   }
 }
 
