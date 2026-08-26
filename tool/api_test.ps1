@@ -1096,6 +1096,46 @@ if ($sup.Status -notin 200,201) {
     }
 }
 
+# ── قائمة الدخل والميزانية ───────────────────────────────────────────────
+#
+# السؤال الحاسم: هل تتوازن الميزانية بعد دورة كاملة — شراء واستلام وسداد
+# وبيع ومرتجع ومصروف؟ الأصول يجب أن تساوي الالتزامات + حقوق الملكية +
+# نتيجة الفترة. واختلالها يعني قيداً دخل من خارج النظام.
+
+$inc = Api GET "/accounting/income-statement" -Token $token
+Check "قائمة الدخل تُقرأ" ($inc.Status -eq 200) "حالة $($inc.Status)"
+if ($inc.Status -eq 200) {
+    $r = [decimal]$inc.Body.totalRevenue
+    $e = [decimal]$inc.Body.totalExpense
+    $n = [decimal]$inc.Body.netIncome
+    Check "صافي الدخل = الإيرادات − الاستخدامات" ([Math]::Abs(($r - $e) - $n) -lt 0.01) `
+        "إيراد $r واستخدام $e وصافٍ $n"
+
+    # مردودات المبيعات حسابٌ من نوع الإيراد برصيد مدين، فيُنقص الإيراد
+    # تلقائياً بلا طرح يدوي.
+    $ret = @($inc.Body.revenues) | Where-Object { $_.code -eq '4102' }
+    if ($ret) {
+        Check "المرتجع يُنقص الإيراد لا يُضاف إليه" ([decimal]$ret.amount -le 0) `
+            "المعروض $($ret.amount) — الموجب يعني أن المرتجع يُقرأ إيراداً"
+    }
+}
+
+$bs = Api GET "/accounting/balance-sheet" -Token $token
+Check "الميزانية تُقرأ" ($bs.Status -eq 200) "حالة $($bs.Status)"
+if ($bs.Status -eq 200) {
+    Check "الميزانية متوازنة" ([Math]::Abs([decimal]$bs.Body.difference) -lt 0.01) `
+        "الفرق $($bs.Body.difference) — الأصول $($bs.Body.totalAssets) مقابل التزامات $($bs.Body.totalLiabilities) وملكية $($bs.Body.totalEquity) ونتيجة $($bs.Body.retainedResult)"
+
+    # النتيجة الجارية تُعرَض صراحةً لا تُخفى في الفرق: الإقفال السنوي غير
+    # مبنيّ، فأرباح المدّة تبقى في حسابات الإيراد والاستخدام. ولولا إضافتها
+    # لما توازنت الميزانية أبداً.
+    if ($inc.Status -eq 200) {
+        Check "نتيجة الميزانية توافق قائمة الدخل" `
+            ([Math]::Abs([decimal]$bs.Body.retainedResult - [decimal]$inc.Body.netIncome) -lt 0.01) `
+            "الميزانية $($bs.Body.retainedResult) والقائمة $($inc.Body.netIncome) — اختلافهما يعني مصدرَي حقيقة"
+    }
+}
+
 # ── ميزان المراجعة ───────────────────────────────────────────────────────
 $tb = Api GET "/accounting/trial-balance" -Token $token
 Check "ميزان المراجعة يُقرأ" ($tb.Status -eq 200) "حالة $($tb.Status)"

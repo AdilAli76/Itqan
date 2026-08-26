@@ -46,7 +46,7 @@ class AccountingScreen extends ConsumerStatefulWidget {
 
 class _AccountingScreenState extends ConsumerState<AccountingScreen>
     with SingleTickerProviderStateMixin {
-  late final _tabs = TabController(length: 3, vsync: this);
+  late final _tabs = TabController(length: 5, vsync: this);
 
   @override
   void dispose() {
@@ -67,10 +67,16 @@ class _AccountingScreenState extends ConsumerState<AccountingScreen>
         children: [
           TabBar(
             controller: _tabs,
+            // قابل للتمرير: خمسة تبويبات لا تسع عرض هاتف، والثابت يضغطها
+            // حتى تُقصّ نصوصها.
+            isScrollable: true,
+            tabAlignment: TabAlignment.start,
             tabs: const [
               Tab(text: 'دليل الحسابات'),
               Tab(text: 'دفتر اليومية'),
               Tab(text: 'ميزان المراجعة'),
+              Tab(text: 'قائمة الدخل'),
+              Tab(text: 'الميزانية'),
             ],
           ),
           Expanded(
@@ -83,6 +89,8 @@ class _AccountingScreenState extends ConsumerState<AccountingScreen>
                 }),
                 const _JournalTab(),
                 const _TrialBalanceTab(),
+                const _IncomeStatementTab(),
+                const _BalanceSheetTab(),
               ],
             ),
           ),
@@ -614,6 +622,247 @@ class _TrialBalanceTab extends ConsumerWidget {
     );
   }
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  قائمة الدخل
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// «كم ربحتُ في هذه المدّة» — أوّل ما يسأله صاحب المحلّ.
+class _IncomeStatementTab extends ConsumerWidget {
+  const _IncomeStatementTab();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final async = ref.watch(incomeStatementProvider);
+
+    return async.when(
+      loading: () => const Center(child: CircularProgressIndicator()),
+      error: (err, _) => _ErrorView(
+        error: err,
+        onRetry: () => ref.invalidate(incomeStatementProvider),
+      ),
+      data: (data) {
+        final revenues = (data['revenues'] as List?)?.cast<Map<String, dynamic>>() ?? const [];
+        final expenses = (data['expenses'] as List?)?.cast<Map<String, dynamic>>() ?? const [];
+        final totalRevenue = (data['totalRevenue'] as num?)?.toDouble() ?? 0;
+        final totalExpense = (data['totalExpense'] as num?)?.toDouble() ?? 0;
+        final net = (data['netIncome'] as num?)?.toDouble() ?? 0;
+        final profit = net >= 0;
+
+        return ListView(
+          padding: const EdgeInsets.all(16),
+          children: [
+            // النتيجة أولاً: من يفتح قائمة الدخل يسأل سؤالاً واحداً، ووضعُها
+            // في الأسفل يعني تمريراً لمعرفته.
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: profit ? AppColors.successBg : AppColors.dangerBg,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Row(
+                children: [
+                  Icon(profit ? Icons.trending_up : Icons.trending_down,
+                      color: profit ? AppColors.success : AppColors.danger),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(profit ? 'صافي الربح' : 'صافي الخسارة',
+                        style: AppTextStyles.headlineMd(
+                            color: profit ? AppColors.success : AppColors.danger)),
+                  ),
+                  Text(_money.format(net.abs()),
+                      style: AppTextStyles.displayLg(
+                          color: profit ? AppColors.success : AppColors.danger)),
+                ],
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'من ${_date.format(DateTime.tryParse('${data['from']}') ?? DateTime.now())} '
+              'إلى ${_date.format(DateTime.tryParse('${data['to']}') ?? DateTime.now())}',
+              style: AppTextStyles.labelMd(),
+            ),
+            const SizedBox(height: 20),
+            _section('الإيرادات', revenues, totalRevenue),
+            const SizedBox(height: 20),
+            // «الاستخدامات» لا «المصروفات»: هي تسمية القسم الثالث في الدليل
+            // الموحّد، وتشمل تكلفة البضاعة المباعة لا المصروفات وحدها.
+            _section('الاستخدامات', expenses, totalExpense),
+            if (revenues.isEmpty && expenses.isEmpty) ...[
+              const SizedBox(height: 24),
+              Center(
+                child: Text('لا حركة في هذه المدّة.',
+                    style: AppTextStyles.bodyMd(color: AppColors.textSecondary)),
+              ),
+            ],
+          ],
+        );
+      },
+    );
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  الميزانية
+// ═══════════════════════════════════════════════════════════════════════════
+
+class _BalanceSheetTab extends ConsumerWidget {
+  const _BalanceSheetTab();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final async = ref.watch(balanceSheetProvider);
+
+    return async.when(
+      loading: () => const Center(child: CircularProgressIndicator()),
+      error: (err, _) => _ErrorView(
+        error: err,
+        onRetry: () => ref.invalidate(balanceSheetProvider),
+      ),
+      data: (data) {
+        final assets = (data['assets'] as List?)?.cast<Map<String, dynamic>>() ?? const [];
+        final liabilities = (data['liabilities'] as List?)?.cast<Map<String, dynamic>>() ?? const [];
+        final equity = (data['equity'] as List?)?.cast<Map<String, dynamic>>() ?? const [];
+        final totalAssets = (data['totalAssets'] as num?)?.toDouble() ?? 0;
+        final totalLiabilities = (data['totalLiabilities'] as num?)?.toDouble() ?? 0;
+        final totalEquity = (data['totalEquity'] as num?)?.toDouble() ?? 0;
+        final retained = (data['retainedResult'] as num?)?.toDouble() ?? 0;
+        final diff = (data['difference'] as num?)?.toDouble() ?? 0;
+        final balanced = diff.abs() < 0.01;
+
+        return ListView(
+          padding: const EdgeInsets.all(16),
+          children: [
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: balanced ? AppColors.successBg : AppColors.dangerBg,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Row(
+                children: [
+                  Icon(balanced ? Icons.check_circle_outline : Icons.error_outline,
+                      color: balanced ? AppColors.success : AppColors.danger),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      balanced
+                          ? 'الميزانية متوازنة'
+                          : 'الميزانية مختلّة — فرق ${_money.format(diff)}',
+                      style: AppTextStyles.headlineMd(
+                          color: balanced ? AppColors.success : AppColors.danger),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text('حتى ${_date.format(DateTime.tryParse('${data['asOf']}') ?? DateTime.now())}',
+                style: AppTextStyles.labelMd()),
+            const SizedBox(height: 20),
+            _section('الأصول', assets, totalAssets),
+            const SizedBox(height: 20),
+            _section('الالتزامات', liabilities, totalLiabilities),
+            const SizedBox(height: 20),
+            _section('حقوق الملكية', equity, totalEquity),
+            const SizedBox(height: 12),
+            // النتيجة الجارية تُعرَض صراحةً لا تُخفى في الفرق.
+            //
+            // الإقفال السنوي غير مبنيّ، فأرباح المدّة تبقى في حسابات الإيراد
+            // والاستخدام ولا تُرحَّل إلى «الأرباح المحتجزة». ولولا إضافتها هنا
+            // لما توازنت الميزانية أبداً — والفرق هو الربح بالضبط.
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: AppColors.infoBg,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text('نتيجة الفترة (غير مُقفَلة)',
+                            style: AppTextStyles.bodyMd(color: AppColors.info)),
+                      ),
+                      Text(_money.format(retained),
+                          style: AppTextStyles.currency(color: AppColors.info)),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'الإقفال السنوي غير مبنيّ بعد، فأرباح المدّة تبقى في حسابات '
+                    'الإيراد والاستخدام. تُضاف هنا إلى حقوق الملكية لتتوازن الميزانية.',
+                    style: AppTextStyles.caption(),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(thickness: 2, height: 28),
+            Row(
+              children: [
+                Expanded(child: Text('إجمالي الأصول', style: AppTextStyles.headlineMd())),
+                Text(_money.format(totalAssets),
+                    style: AppTextStyles.currency(color: AppColors.textPrimary)),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Row(
+              children: [
+                Expanded(
+                  child: Text('الالتزامات + حقوق الملكية + النتيجة',
+                      style: AppTextStyles.headlineMd()),
+                ),
+                Text(_money.format(totalLiabilities + totalEquity + retained),
+                    style: AppTextStyles.currency(color: AppColors.textPrimary)),
+              ],
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+/// قسمٌ في قائمة مالية: سطوره ومجموعه.
+Widget _section(String title, List<Map<String, dynamic>> lines, double total) => Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(title, style: AppTextStyles.headlineMd()),
+        const Divider(),
+        if (lines.isEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 6),
+            child: Text('—', style: AppTextStyles.labelMd()),
+          )
+        else
+          for (final l in lines)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: Row(
+                children: [
+                  SizedBox(
+                    width: 60,
+                    child: Text(l['code'] as String? ?? '',
+                        style: AppTextStyles.currency(color: AppColors.textSecondary)),
+                  ),
+                  Expanded(child: Text(l['name'] as String? ?? '', style: AppTextStyles.bodyMd())),
+                  Text(_money.format(l['amount']), style: AppTextStyles.currency()),
+                ],
+              ),
+            ),
+        const Divider(),
+        Row(
+          children: [
+            const SizedBox(width: 60),
+            Expanded(child: Text('المجموع', style: AppTextStyles.labelMd())),
+            Text(_money.format(total),
+                style: AppTextStyles.currency(color: AppColors.textPrimary)),
+          ],
+        ),
+      ],
+    );
 
 // ═══════════════════════════════════════════════════════════════════════════
 

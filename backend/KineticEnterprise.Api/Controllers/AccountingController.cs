@@ -32,6 +32,27 @@ public record TrialBalanceDto(DateTime From, DateTime To, List<TrialBalanceRow> 
 
 public record ReverseEntryRequest(string Reason);
 
+public record StatementLine(string Code, string Name, decimal Amount);
+
+/// قائمة الدخل عن مدّة.
+public record IncomeStatementDto(
+    DateTime From, DateTime To,
+    List<StatementLine> Revenues, decimal TotalRevenue,
+    List<StatementLine> Expenses, decimal TotalExpense,
+    /// الإيرادات ناقص الاستخدامات. سالب = خسارة.
+    decimal NetIncome);
+
+/// الميزانية في تاريخ.
+public record BalanceSheetDto(
+    DateTime AsOf,
+    List<StatementLine> Assets, decimal TotalAssets,
+    List<StatementLine> Liabilities, decimal TotalLiabilities,
+    List<StatementLine> Equity, decimal TotalEquity,
+    /// صافي الدخل منذ بداية التشغيل حتى التاريخ — يدخل حقوق الملكية.
+    decimal RetainedResult,
+    /// الأصول − (الالتزامات + حقوق الملكية + النتيجة). صفرٌ يعني التوازن.
+    decimal Difference);
+
 /// <summary>
 /// دليل الحسابات ودفتر اليومية.
 ///
@@ -247,27 +268,19 @@ public class AccountingController : ControllerBase
 
         var accounts = await _db.Accounts.ToDictionaryAsync(a => a.Id, a => a);
 
-        var sums = await _db.JournalEntryLines
-            .Where(l => _db.JournalEntries.Any(e =>
-                e.Id == l.JournalEntryId && e.EntryDate >= fromDate && e.EntryDate <= toDate))
-            .GroupBy(l => l.AccountId)
-            .Select(g => new
-            {
-                AccountId = g.Key,
-                Debit = g.Sum(l => l.Debit),
-                Credit = g.Sum(l => l.Credit),
-            })
-            .ToListAsync();
+        // نفس الدالة التي تقرأ منها قائمة الدخل والميزانية — راجع
+        // [BalancesAsync]. ثلاثة تقارير تقرأ الشيء نفسه، وحسابُه ثلاث مرّات
+        // يعني ثلاثة أماكن تنحرف.
+        var balances = await BalancesAsync(fromDate, toDate);
 
         var rows = new List<TrialBalanceRow>();
-        foreach (var s in sums)
+        foreach (var (accountId, net) in balances)
         {
-            if (!accounts.TryGetValue(s.AccountId, out var account)) continue;
+            if (!accounts.TryGetValue(accountId, out var account)) continue;
 
             // الصافي في عموده الطبيعي: حسابٌ رصيده مدين يُعرض في عمود المدين
             // وحده لا في العمودين معاً. عرض المجموعين الخامين يجعل كل حساب
             // يظهر في العمودين فيصير الميزان غير قابل للقراءة.
-            var net = s.Debit - s.Credit;
             rows.Add(new TrialBalanceRow(
                 account.Code, account.Name, account.Type,
                 net > 0 ? net : 0,
@@ -277,6 +290,144 @@ public class AccountingController : ControllerBase
         rows = rows.OrderBy(r => r.Code).ToList();
         return new TrialBalanceDto(fromDate, toDate, rows,
             rows.Sum(r => r.Debit), rows.Sum(r => r.Credit));
+    }
+
+    /// <summary>
+    /// قائمة الدخل — «كم ربحتُ في هذه المدّة».
+    ///
+    /// <para>الإيرادات ناقص الاستخدامات. و«مردودات المبيعات» حسابٌ من نوع
+    /// الإيراد برصيد مدين، فيُنقص الإيراد تلقائياً؛ و«مردودات المشتريات»
+    /// حسابٌ من نوع الاستخدام برصيد دائن، فيُنقص التكلفة. لا طرح يدوي.</para>
+    ///
+    /// <para><b>والحسابات الورقية وحدها:</b> إدراج الآباء يحسب كل مبلغ
+    /// مرّتين.</para>
+    /// </summary>
+    [HttpGet("income-statement")]
+    public async Task<ActionResult<IncomeStatementDto>> GetIncomeStatement(
+        [FromQuery] DateTime? from, [FromQuery] DateTime? to)
+    {
+        var fromDate = from?.Date ?? new DateTime(DateTime.UtcNow.Year, 1, 1);
+        var toDate = to?.Date ?? DateTime.UtcNow.Date;
+
+        var balances = await BalancesAsync(fromDate, toDate);
+        var accounts = await _db.Accounts.ToDictionaryAsync(a => a.Id, a => a);
+
+        var revenues = new List<StatementLine>();
+        var expenses = new List<StatementLine>();
+
+        foreach (var (accountId, net) in balances)
+        {
+            if (!accounts.TryGetValue(accountId, out var account)) continue;
+
+            // net = مدين − دائن. والإيراد طبيعته دائنة فيُقلب.
+            if (account.Type == AccountTypes.Revenue)
+            {
+                revenues.Add(new StatementLine(account.Code, account.Name, -net));
+            }
+            else if (account.Type == AccountTypes.Expense)
+            {
+                expenses.Add(new StatementLine(account.Code, account.Name, net));
+            }
+        }
+
+        revenues = revenues.Where(r => r.Amount != 0).OrderBy(r => r.Code).ToList();
+        expenses = expenses.Where(e => e.Amount != 0).OrderBy(e => e.Code).ToList();
+
+        var totalRevenue = revenues.Sum(r => r.Amount);
+        var totalExpense = expenses.Sum(e => e.Amount);
+
+        return new IncomeStatementDto(fromDate, toDate,
+            revenues, totalRevenue, expenses, totalExpense, totalRevenue - totalExpense);
+    }
+
+    /// <summary>
+    /// الميزانية — «ماذا أملك وماذا عليّ» في تاريخ.
+    ///
+    /// <para><b>ولماذا تدخل النتيجة في حقوق الملكية:</b> الإقفال السنوي غير
+    /// مبنيّ بعد، فأرباح المدّة تبقى في حسابات الإيراد والاستخدام ولا تُرحَّل
+    /// إلى «الأرباح المحتجزة». فلو عُرضت الميزانية بأرصدة حقوق الملكية وحدها
+    /// **لما توازنت أبداً** — والفرق هو الربح بالضبط. فيُحسَب ويُعرَض صراحةً
+    /// بدل أن يُترك فرقاً غامضاً يظنّه القارئ عطباً.</para>
+    ///
+    /// <para>ومنذ بداية التشغيل لا منذ أول السنة: الميزانية لقطةٌ تراكمية لا
+    /// تقريرُ مدّة.</para>
+    /// </summary>
+    [HttpGet("balance-sheet")]
+    public async Task<ActionResult<BalanceSheetDto>> GetBalanceSheet([FromQuery] DateTime? asOf)
+    {
+        var date = asOf?.Date ?? DateTime.UtcNow.Date;
+
+        // من بداية التشغيل: DateTime.MinValue يغطّي كل قيد مكتوب.
+        var balances = await BalancesAsync(DateTime.MinValue, date);
+        var accounts = await _db.Accounts.ToDictionaryAsync(a => a.Id, a => a);
+
+        var assets = new List<StatementLine>();
+        var liabilities = new List<StatementLine>();
+        var equity = new List<StatementLine>();
+        decimal revenue = 0, expense = 0;
+
+        foreach (var (accountId, net) in balances)
+        {
+            if (!accounts.TryGetValue(accountId, out var account)) continue;
+
+            switch (account.Type)
+            {
+                case AccountTypes.Asset:
+                    assets.Add(new StatementLine(account.Code, account.Name, net));
+                    break;
+                case AccountTypes.Liability:
+                    liabilities.Add(new StatementLine(account.Code, account.Name, -net));
+                    break;
+                case AccountTypes.Equity:
+                    equity.Add(new StatementLine(account.Code, account.Name, -net));
+                    break;
+                case AccountTypes.Revenue:
+                    revenue += -net;
+                    break;
+                case AccountTypes.Expense:
+                    expense += net;
+                    break;
+            }
+        }
+
+        assets = assets.Where(a => a.Amount != 0).OrderBy(a => a.Code).ToList();
+        liabilities = liabilities.Where(l => l.Amount != 0).OrderBy(l => l.Code).ToList();
+        equity = equity.Where(e => e.Amount != 0).OrderBy(e => e.Code).ToList();
+
+        var totalAssets = assets.Sum(a => a.Amount);
+        var totalLiabilities = liabilities.Sum(l => l.Amount);
+        var totalEquity = equity.Sum(e => e.Amount);
+        var retained = revenue - expense;
+
+        return new BalanceSheetDto(date,
+            assets, totalAssets,
+            liabilities, totalLiabilities,
+            equity, totalEquity,
+            retained,
+            totalAssets - (totalLiabilities + totalEquity + retained));
+    }
+
+    /// <summary>
+    /// صافي (مدين − دائن) لكل حساب في مدّة.
+    ///
+    /// <para>مشتركة بين ميزان المراجعة وقائمة الدخل والميزانية: ثلاثة
+    /// تقارير تقرأ الشيء نفسه، وحسابُه ثلاث مرّات يعني ثلاثة أماكن تنحرف.
+    /// </para>
+    /// </summary>
+    private async Task<Dictionary<Guid, decimal>> BalancesAsync(DateTime from, DateTime to)
+    {
+        var rows = await _db.JournalEntryLines
+            .Where(l => _db.JournalEntries.Any(e =>
+                e.Id == l.JournalEntryId && e.EntryDate >= from && e.EntryDate <= to))
+            .GroupBy(l => l.AccountId)
+            .Select(g => new
+            {
+                AccountId = g.Key,
+                Net = g.Sum(l => l.Debit) - g.Sum(l => l.Credit),
+            })
+            .ToListAsync();
+
+        return rows.ToDictionary(r => r.AccountId, r => r.Net);
     }
 
     /// <summary>

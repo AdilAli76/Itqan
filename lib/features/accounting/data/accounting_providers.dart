@@ -24,3 +24,15 @@ final trialBalanceProvider =
   final response = await ApiClient.instance.dio.get('/accounting/trial-balance');
   return response.data as Map<String, dynamic>;
 });
+
+final incomeStatementProvider =
+    FutureProvider.autoDispose<Map<String, dynamic>>((ref) async {
+  final response = await ApiClient.instance.dio.get('/accounting/income-statement');
+  return response.data as Map<String, dynamic>;
+});
+
+final balanceSheetProvider =
+    FutureProvider.autoDispose<Map<String, dynamic>>((ref) async {
+  final response = await ApiClient.instance.dio.get('/accounting/balance-sheet');
+  return response.data as Map<String, dynamic>;
+});

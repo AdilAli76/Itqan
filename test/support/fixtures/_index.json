@@ -36,5 +36,7 @@
   "/expenses": "expenses.json",
   "/accounting/accounts": "accounting_accounts.json",
   "/accounting/journal": "accounting_journal.json",
-  "/accounting/trial-balance": "accounting_trial_balance.json"
+  "/accounting/trial-balance": "accounting_trial_balance.json",
+  "/accounting/income-statement": "accounting_income.json",
+  "/accounting/balance-sheet": "accounting_balance_sheet.json"
 }
