@@ -78,8 +78,25 @@ Write-Host "    عنوان الـ API: $(if ($ApiUrl) { $ApiUrl } else { 'يُش
 
 # ── 1. تنظيف ────────────────────────────────────────────────────────────
 Step 1 'تنظيف مجلد الإخراج'
-if (Test-Path $Output) { Remove-Item -LiteralPath $Output -Recurse -Force }
-New-Item -ItemType Directory -Path $Output | Out-Null
+# المحتوى أولاً ثم المجلد نفسه — وفشل الأخير لا يوقف البناء.
+#
+# مجلد الإخراج يبقى مفتوحاً في المستكشف أو تحت فحص المضاد أو المفهرس، فيُقفل
+# **المجلد** بينما محتواه قابل للحذف. وRemove-Item -Recurse يفشل حينها فيسقط
+# البناء كلّه عند خطوته الأولى — لسبب لا علاقة له بالشيفرة، ولا يفهمه من
+# يقرأ الرسالة. وقع فعلاً.
+if (Test-Path $Output) {
+    Get-ChildItem -LiteralPath $Output -Force -ErrorAction SilentlyContinue |
+        Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+
+    # المتبقّي بعد المحاولة يعني قفلاً على ملف بعينه — وهذا يوقف البناء
+    # فعلاً، لأن حزمةً تخلط ملفات نسختين أسوأ من بناء يفشل.
+    $left = @(Get-ChildItem -LiteralPath $Output -Force -Recurse -ErrorAction SilentlyContinue)
+    if ($left.Count -gt 0) {
+        throw "تعذّر تفريغ $Output — $($left.Count) عنصراً ما زال مقفولاً. أغلق ما يفتحه ثم أعد المحاولة، أو مرّر -Output بمسار آخر."
+    }
+} else {
+    New-Item -ItemType Directory -Path $Output | Out-Null
+}
 Ok $Output
 
 # ── 2. اختبارات قبل البناء ──────────────────────────────────────────────

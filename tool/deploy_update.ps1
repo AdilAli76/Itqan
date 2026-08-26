@@ -99,6 +99,22 @@ Ok "فُكّت في $staging"
 # التوقّف شرط لا احتياط: ملفات .dll مقفولة ما دام التطبيق يعمل، والنسخ
 # فوقها يفشل ملفاً ملفاً — فتبقى نسخة مختلطة تعمل وتُخطئ بلا رسالة.
 Step 3 'إيقاف الموقع'
+
+# وجود الموقع والمجمّع يُفحَص **قبل أي كتابة**.
+#
+# **العطب الذي يصلحه:** كان يمضي إن لم يجدهما (ErrorAction SilentlyContinue
+# لا يكتم خطأ مزوّد IIS أصلاً، فيُطبع ويُربك) ثم ينسخ الملفات ويُنهي
+# بـ«الموقع يعمل» — بينما **لا موقع أصلاً**. فيظنّ من نشر أن النشر تمّ، ولا
+# شيء يُخدَم. وقع فعلاً على بيئة التجربة: المجلد موجود والموقع لم يُنشأ قطّ.
+#
+# ويُفحَص هنا لا في البداية لأن الفكّ يسبقه: حزمة تالفة تُكتشف أولاً.
+if (-not (Get-Website -Name $SiteName -ErrorAction SilentlyContinue)) {
+    throw "لا موقع باسم «$SiteName» في IIS. هذه ترقية لا تثبيت أول — أنشئ الموقع بـ server_setup.ps1 -Stage iis (أو setup_staging.ps1 للتجربة) ثم أعد المحاولة."
+}
+if (-not (Test-Path "IIS:\AppPools\$PoolName")) {
+    throw "لا مجمّع تطبيقات باسم «$PoolName» في IIS. راجع اسم المجمّع، أو أنشئه بـ server_setup.ps1 -Stage iis."
+}
+
 Stop-Website -Name $SiteName -ErrorAction SilentlyContinue
 Stop-WebAppPool -Name $PoolName -ErrorAction SilentlyContinue
 # تحرير المقابض يستغرق لحظة بعد إيقاف المجمّع.
