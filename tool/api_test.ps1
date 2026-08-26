@@ -1136,6 +1136,102 @@ if ($bs.Status -eq 200) {
     }
 }
 
+# ── الإقفال السنوي ───────────────────────────────────────────────────────
+#
+# الإقفال شيئان لا واحد: قيدٌ يُصفّر الإيرادات والاستخدامات ويُرحّل نتيجتها
+# إلى «الأرباح المحتجزة»، **وقفلٌ يمنع أي قيد بتاريخ داخل المدّة**. وبلا
+# القفل لا معنى للإقفال: فاتورةٌ بتاريخ العام الماضي تُغيّر أرقاماً صدرت عنها
+# تقارير ووُقّعت عليها ميزانية.
+
+# بتوقيت UTC كالخادم: حسابُه بالتوقيت المحلّي يجعل الفحص يفشل في الساعات
+# التي يختلف فيها اليومان — ويبدو الفشل عطباً في المنتج وهو فرق توقيت.
+$closeDate = [DateTime]::UtcNow.Date.AddDays(-1).ToString('yyyy-MM-dd')
+
+# مدّة لم تنتهِ لا تُقفَل — إقفال اليوم يمنع بيع اليوم نفسه.
+$future = Api POST "/accounting/closings" -Token $token -Body @{
+    periodEnd = [DateTime]::UtcNow.Date.AddDays(5).ToString('yyyy-MM-dd')
+}
+Check "إقفال مدّة لم تنتهِ يُرفض" ($future.Status -eq 400) "حالة $($future.Status)"
+
+# مصروفٌ بتاريخ داخل المدّة — بلا حركةٍ فيها لا شيء يُقفَل.
+# وهو أيضاً إثباتٌ لـExpense.SpentOn: كان المصروف يُقيَّد بتاريخ إدخاله
+# دائماً، ففاتورة الأسبوع الماضي تقع في أرقام اليوم.
+$past = Api POST "/expenses" -Token $token -Body @{
+    branchId = $branchId; category = "مصروف مدّة سابقة"; amount = 25
+    spentOn = $closeDate
+}
+Check "مصروف بتاريخ سابق يُقبَل" ($past.Status -in 200,201) `
+    "حالة $($past.Status) — بلا تاريخ صرف مستقلّ تقع فاتورة الأسبوع الماضي في أرقام اليوم"
+if ($past.Status -in 200,201) {
+    Check "تاريخ الصرف محفوظ كما أُدخل" ("$($past.Body.spentOn)" -like "$closeDate*") `
+        "المحفوظ $($past.Body.spentOn) والمُدخَل $closeDate"
+}
+
+# على المدّة المُقفَلة نفسها لا على السنة كلّها: القائمة الافتراضية تشمل
+# اليوم أيضاً، والإقفال يقف عند $closeDate — فمقارنتهما تقارن مدّتين.
+$incBefore = Api GET "/accounting/income-statement?to=$closeDate" -Token $token
+$netBefore = if ($incBefore.Status -eq 200) { [decimal]$incBefore.Body.netIncome } else { 0 }
+
+$close = Api POST "/accounting/closings" -Token $token -Body @{ periodEnd = $closeDate }
+Check "إقفال المدّة يمرّ" ($close.Status -in 200,201) "حالة $($close.Status) — $($close.Body.message)"
+
+if ($close.Status -in 200,201) {
+    Check "نتيجة الإقفال توافق قائمة الدخل" `
+        ([Math]::Abs([decimal]$close.Body.netResult - $netBefore) -lt 0.01) `
+        "الإقفال $($close.Body.netResult) والقائمة $netBefore"
+
+    # القفل: لا قيد بتاريخ داخل المدّة المُقفَلة.
+    $inClosed = Api POST "/expenses" -Token $token -Body @{
+        branchId = $branchId; category = "مصروف داخل مدّة مُقفَلة"; amount = 10
+        spentOn = $closeDate
+    }
+    Check "قيدٌ بتاريخ داخل المدّة المُقفَلة يُرفَض" ($inClosed.Status -eq 400) `
+        "حالة $($inClosed.Status) — قبولُه يعني أن الإقفال بلا قفل، فتتغيّر أرقامٌ صدرت عنها تقارير"
+
+    # وقفلُ الماضي يجب ألّا يمنع عمل اليوم.
+    $today = Api POST "/expenses" -Token $token -Body @{
+        branchId = $branchId; category = "مصروف اليوم"; amount = 10
+    }
+    Check "المصروف بتاريخ اليوم يمرّ رغم الإقفال" ($today.Status -in 200,201) `
+        "حالة $($today.Status) — $($today.Body.message)"
+
+    # إقفال المدّة نفسها مرّتين.
+    $again = Api POST "/accounting/closings" -Token $token -Body @{ periodEnd = $closeDate }
+    Check "إقفال مدّة مُقفَلة يُرفض" ($again.Status -eq 400) "حالة $($again.Status)"
+
+    # الإيرادات والاستخدامات صفرت — قائمة الدخل بعد الإقفال لا ترى ما أُقفل.
+    $sheet = Api GET "/accounting/balance-sheet" -Token $token
+    Check "الميزانية تبقى متوازنة بعد الإقفال" `
+        ([Math]::Abs([decimal]$sheet.Body.difference) -lt 0.01) `
+        "الفرق $($sheet.Body.difference) — اختلالها بعد الإقفال يعني قيد إقفال غير متوازن"
+
+    $list = Api GET "/accounting/closings" -Token $token
+    Check "الإقفال يظهر في القائمة" (@($list.Body).Count -ge 1) "العدد $(@($list.Body).Count)"
+
+    # الفتح بقرار صريح مسجَّل.
+    $noReason = Api POST "/accounting/closings/$($close.Body.id)/reopen" -Token $token -Body @{ reason = "" }
+    Check "فتح بلا سبب يُرفض" ($noReason.Status -eq 400) "حالة $($noReason.Status)"
+
+    $reopen = Api POST "/accounting/closings/$($close.Body.id)/reopen" -Token $token -Body @{
+        reason = "تصحيح فاتورة"
+    }
+    Check "فتح الإقفال بسبب مكتوب يمرّ" ($reopen.Status -in 200,204) `
+        "حالة $($reopen.Status) — $($reopen.Body.message)"
+
+    if ($reopen.Status -in 200,204) {
+        $after = Api GET "/accounting/closings" -Token $token
+        $row = @($after.Body) | Where-Object { $_.id -eq $close.Body.id } | Select-Object -First 1
+        Check "الصفّ يبقى موسوماً بأنه فُتح" ($row -and $row.isReopened -eq $true) `
+            "حذفُه يجعل السنة تبدو كأنها لم تُقفَل قطّ"
+        Check "سبب الفتح محفوظ" ("$($row.reopenReason)" -like "*تصحيح*") "السبب: $($row.reopenReason)"
+
+        $sheet2 = Api GET "/accounting/balance-sheet" -Token $token
+        Check "الميزانية تبقى متوازنة بعد الفتح" `
+            ([Math]::Abs([decimal]$sheet2.Body.difference) -lt 0.01) `
+            "الفرق $($sheet2.Body.difference) — عكس قيد الإقفال يجب أن يُعيد الأرصدة كما كانت"
+    }
+}
+
 # ── ميزان المراجعة ───────────────────────────────────────────────────────
 $tb = Api GET "/accounting/trial-balance" -Token $token
 Check "ميزان المراجعة يُقرأ" ($tb.Status -eq 200) "حالة $($tb.Status)"

@@ -36,3 +36,9 @@ final balanceSheetProvider =
   final response = await ApiClient.instance.dio.get('/accounting/balance-sheet');
   return response.data as Map<String, dynamic>;
 });
+
+final fiscalClosingsProvider =
+    FutureProvider.autoDispose<List<Map<String, dynamic>>>((ref) async {
+  final response = await ApiClient.instance.dio.get('/accounting/closings');
+  return (response.data as List).map((e) => Map<String, dynamic>.from(e as Map)).toList();
+});

@@ -2011,6 +2011,95 @@ PRINT N'سداد الموردين جاهز';
 GO
 
 -- ----------------------------------------------------------------------------
+--  الإقفال السنوي
+--
+--  ⚠ يجب أن يلي كتلة المحاسبة: المفتاح الخارجي يشير إلى journal_entries.
+-- ----------------------------------------------------------------------------
+IF OBJECT_ID('dbo.fiscal_closings', 'U') IS NULL
+   AND OBJECT_ID('dbo.journal_entries', 'U') IS NOT NULL
+BEGIN
+    CREATE TABLE dbo.fiscal_closings (
+      id UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
+      organization_id UNIQUEIDENTIFIER NOT NULL REFERENCES dbo.organizations(id) ON DELETE CASCADE,
+      period_end DATETIME2 NOT NULL,
+      net_result DECIMAL(18,3) NOT NULL DEFAULT 0,
+      journal_entry_id UNIQUEIDENTIFIER NULL REFERENCES dbo.journal_entries(id),
+      closed_by UNIQUEIDENTIFIER NULL REFERENCES dbo.app_users(id),
+      closed_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+      is_reopened BIT NOT NULL DEFAULT 0,
+      reopen_reason NVARCHAR(300) NULL,
+      reopened_by UNIQUEIDENTIFIER NULL REFERENCES dbo.app_users(id),
+      reopened_at DATETIME2 NULL
+    );
+    CREATE INDEX ix_fiscal_closings_period ON dbo.fiscal_closings (organization_id, period_end);
+    PRINT N'أُنشئ جدول fiscal_closings';
+END
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.security_policies WHERE name = 'FiscalClosingsPolicy')
+   AND OBJECT_ID('dbo.fiscal_closings', 'U') IS NOT NULL
+EXEC('
+CREATE SECURITY POLICY Security.FiscalClosingsPolicy
+  ADD FILTER PREDICATE Security.fn_OrgOnlyPredicate(organization_id) ON dbo.fiscal_closings,
+  ADD BLOCK PREDICATE Security.fn_OrgOnlyPredicate(organization_id) ON dbo.fiscal_closings AFTER INSERT
+  WITH (STATE = ON);');
+GO
+
+PRINT N'الإقفال السنوي جاهز';
+GO
+
+-- ----------------------------------------------------------------------------
+--  تاريخ صرف المصروف
+--
+--  كان يُقيَّد بتاريخ إدخاله دائماً، ففاتورة كهرباء الأسبوع الماضي تقع في
+--  أرقام اليوم — يُقفَل شهرٌ ناقصاً مصروفاته وتُحمَّل بها مدّةٌ لا تخصّها.
+--  والمصروف كان الوحيد بلا تاريخ خاصّ بعد ReceivedOn وPaidOn.
+--
+--  والقديم يأخذ تاريخ إدخاله: هو أقرب ما نعرفه عنه، وتركُه فارغاً يُخرجه من
+--  كل تقرير بمدّة.
+-- ----------------------------------------------------------------------------
+IF NOT EXISTS (SELECT 1 FROM sys.columns
+               WHERE object_id = OBJECT_ID('dbo.expenses') AND name = 'spent_on')
+BEGIN
+    ALTER TABLE dbo.expenses ADD spent_on DATETIME2 NULL;
+    PRINT N'أُضيف عمود expenses.spent_on';
+END
+GO
+
+IF EXISTS (SELECT 1 FROM sys.columns
+           WHERE object_id = OBJECT_ID('dbo.expenses') AND name = 'spent_on')
+BEGIN
+    -- عبر مؤشّر لكل منظمة: RLS تحجب صفوف غيرها، فتحديثٌ بلا سياق يُصيب صفر
+    -- صفوف صامتاً. ومعرّفات المنظمات من app_users — organizations محمي.
+    DECLARE @orgId UNIQUEIDENTIFIER;
+    DECLARE org_cursor CURSOR LOCAL FAST_FORWARD FOR
+        SELECT DISTINCT organization_id FROM dbo.app_users;
+    OPEN org_cursor;
+    FETCH NEXT FROM org_cursor INTO @orgId;
+    WHILE @@FETCH_STATUS = 0
+    BEGIN
+        EXEC sp_set_session_context @key = N'organization_id', @value = @orgId;
+        UPDATE dbo.expenses SET spent_on = created_at WHERE spent_on IS NULL;
+        FETCH NEXT FROM org_cursor INTO @orgId;
+    END
+    CLOSE org_cursor;
+    DEALLOCATE org_cursor;
+    EXEC sp_set_session_context @key = N'organization_id', @value = NULL;
+END
+GO
+
+IF EXISTS (SELECT 1 FROM sys.columns
+           WHERE object_id = OBJECT_ID('dbo.expenses') AND name = 'spent_on'
+             AND is_nullable = 1)
+BEGIN
+    ALTER TABLE dbo.expenses ADD CONSTRAINT df_expenses_spent_on
+        DEFAULT SYSUTCDATETIME() FOR spent_on;
+    ALTER TABLE dbo.expenses ALTER COLUMN spent_on DATETIME2 NOT NULL;
+    PRINT N'ضُبط expenses.spent_on غير قابل للإفراغ';
+END
+GO
+
+-- ----------------------------------------------------------------------------
 --  فهارس الأداء — ملف منفصل لأنه يُنفَّذ ويُعاد بلا خطر
 -- ----------------------------------------------------------------------------
 PRINT N'لا تنسَ تنفيذ docs\INDEXES.sql على هذه القاعدة أيضاً.';

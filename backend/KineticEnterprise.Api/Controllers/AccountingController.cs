@@ -32,6 +32,14 @@ public record TrialBalanceDto(DateTime From, DateTime To, List<TrialBalanceRow> 
 
 public record ReverseEntryRequest(string Reason);
 
+public record CloseFiscalPeriodRequest(DateTime PeriodEnd);
+public record ReopenClosingRequest(string Reason);
+
+public record FiscalClosingDto(
+    Guid Id, DateTime PeriodEnd, decimal NetResult, Guid? JournalEntryId,
+    string? ClosedByName, DateTime ClosedAt,
+    bool IsReopened, string? ReopenReason, string? ReopenedByName, DateTime? ReopenedAt);
+
 public record StatementLine(string Code, string Name, decimal Amount);
 
 /// قائمة الدخل عن مدّة.
@@ -405,6 +413,224 @@ public class AccountingController : ControllerBase
             equity, totalEquity,
             retained,
             totalAssets - (totalLiabilities + totalEquity + retained));
+    }
+
+    /// <summary>
+    /// الإقفالات — وتاريخ آخر مدّة مُقفَلة.
+    /// </summary>
+    [HttpGet("closings")]
+    public async Task<ActionResult<List<FiscalClosingDto>>> GetClosings()
+    {
+        var closings = await _db.FiscalClosings.OrderByDescending(c => c.PeriodEnd).ToListAsync();
+        return await ToClosingDtosAsync(closings);
+    }
+
+    /// <summary>
+    /// إقفال مدّة مالية.
+    ///
+    /// <para><b>ما يفعله شيئان لا واحد:</b></para>
+    /// <code>
+    ///   من ح/ الإيرادات        (بأرصدتها الدائنة، فتصفر)
+    ///       إلى ح/ الاستخدامات (بأرصدتها المدينة، فتصفر)
+    ///       إلى ح/ الأرباح المحتجزة  (الفرق — أو منه إن كانت خسارة)
+    /// </code>
+    /// <para>ثم **قفلُ المدّة**: لا قيد بتاريخها أو قبله (راجع
+    /// <c>Ledger.ClosedThroughAsync</c>). وبلا القفل لا معنى للإقفال.</para>
+    ///
+    /// <para><b>ولا يُقفَل ما لا حركة فيه:</b> إقفالٌ بقيدٍ فارغ يُنشئ قفلاً
+    /// بلا سبب، ويُوهم بأن سنةً روجعت وأُغلقت وهي لم تكن.</para>
+    /// </summary>
+    [HttpPost("closings")]
+    [Authorize(Roles = "super_admin")]
+    public async Task<ActionResult<FiscalClosingDto>> Close(CloseFiscalPeriodRequest request)
+    {
+        var periodEnd = request.PeriodEnd.Date;
+
+        // الحدّ بتوقيت UTC كبقية تواريخ النظام (CreatedAt وEntryDate).
+        //
+        // <para><b>وأثره المعلوم:</b> منظمةٌ شرق غرينتش تُنهي يومها قبل أن
+        // ينتهي يوم UTC، فمحاولةُ إقفال «أمسها» في الساعات الأولى تُرفض حتى
+        // يمرّ منتصف ليل غرينتش. ولذلك تُسمّى الرسالةُ التاريخَ المسموح
+        // صراحةً بدل «قبل اليوم» الغامضة — فيعرف من قرأها ما يكتب.</para>
+        //
+        // <para>ومنطقة زمنية لكل منظمة إصلاحٌ أوسع من هذا الموضع: كل تاريخ
+        // في النظام يُقاس بـUTC، وتغييرُ واحدٍ منها يُنتج تقريرين بحدّين
+        // مختلفين.</para>
+        var latestAllowed = DateTime.UtcNow.Date.AddDays(-1);
+        if (periodEnd > latestAllowed)
+        {
+            // إقفال اليوم أو المستقبل يمنع بيع اليوم نفسه.
+            return BadRequest(new
+            {
+                message = $"لا تُقفَل مدّة لم تنتهِ بعد — أقصى تاريخ مسموح {latestAllowed:yyyy-MM-dd}.",
+            });
+        }
+
+        var already = await _db.FiscalClosings
+            .Where(c => !c.IsReopened)
+            .Select(c => (DateTime?)c.PeriodEnd)
+            .ToListAsync();
+        if (already.Count > 0 && already.Max() >= periodEnd)
+        {
+            return BadRequest(new
+            {
+                message = $"المدّة حتى {already.Max():yyyy-MM-dd} مُقفَلة أصلاً — اختر تاريخاً بعدها.",
+            });
+        }
+
+        var orgId = Guid.Parse(User.FindFirstValue("organization_id")!);
+
+        // من بعد آخر إقفال إلى نهاية المدّة: ما أُقفل لا يُقفَل مرّتين.
+        var from = already.Count > 0 ? already.Max()!.Value.AddDays(1) : DateTime.MinValue;
+        var balances = await BalancesAsync(from, periodEnd);
+        var accounts = await _db.Accounts.ToDictionaryAsync(a => a.Id, a => a);
+
+        var lines = new List<(Guid AccountId, decimal Debit, decimal Credit, string? Note)>();
+        decimal revenue = 0, expense = 0;
+
+        foreach (var (accountId, net) in balances)
+        {
+            if (!accounts.TryGetValue(accountId, out var account)) continue;
+            if (net == 0) continue;
+
+            // الرصيد يُقفَل بعكسه: حسابٌ رصيده دائن يُقفَل بمدين ومكسه.
+            if (account.Type == AccountTypes.Revenue)
+            {
+                revenue += -net;
+                lines.Add((accountId, net < 0 ? -net : 0, net > 0 ? net : 0, "إقفال"));
+            }
+            else if (account.Type == AccountTypes.Expense)
+            {
+                expense += net;
+                lines.Add((accountId, net < 0 ? -net : 0, net > 0 ? net : 0, "إقفال"));
+            }
+        }
+
+        if (lines.Count == 0)
+        {
+            return BadRequest(new
+            {
+                message = "لا حركة في هذه المدّة — لا شيء يُقفَل.",
+            });
+        }
+
+        var net_ = revenue - expense;
+
+        await using var transaction = await _db.Database.BeginTransactionAsync();
+
+        // الأرباح المحتجزة تأخذ الفرق: دائنةً بالربح، مدينةً بالخسارة.
+        var closing = new FiscalClosing
+        {
+            OrganizationId = orgId,
+            PeriodEnd = periodEnd,
+            NetResult = net_,
+            ClosedBy = CurrentUserId(),
+        };
+
+        JournalEntry entry;
+        try
+        {
+            entry = await Ledger.PostToAccountsAsync(_db, orgId, null,
+                JournalSources.Closing, closing.Id,
+                $"إقفال المدّة حتى {periodEnd:yyyy-MM-dd}",
+                lines,
+                new[]
+                {
+                    new PostingLine(AccountRoles.RetainedEarnings,
+                        net_ < 0 ? -net_ : 0, net_ > 0 ? net_ : 0, "نتيجة المدّة"),
+                },
+                CurrentUserId(), periodEnd);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+
+        await _db.SaveChangesAsync();
+
+        closing.JournalEntryId = entry.Id;
+        _db.FiscalClosings.Add(closing);
+        _db.LogAudit(orgId, CurrentUserId(), "fiscal.closed", "fiscal_closings", closing.Id,
+            newValues: new { PeriodEnd = periodEnd, NetResult = net_, Lines = lines.Count });
+        await _db.SaveChangesAsync();
+
+        await transaction.CommitAsync();
+
+        return (await ToClosingDtosAsync(new List<FiscalClosing> { closing })).First();
+    }
+
+    /// <summary>
+    /// فتح إقفال — بقرار صريح مسجَّل.
+    ///
+    /// <para>خطأٌ يُكتشف بعد الإقفال حالة واقعية، ومنعُ الفتح إلى الأبد يدفع
+    /// المحاسب إلى تصحيحه في سنةٍ لا يخصّها — فيفسد الاثنتان.</para>
+    ///
+    /// <para><b>ولا يُحذف الصفّ:</b> من راجع الدفتر يجب أن يرى أن السنة
+    /// أُقفلت ثم فُتحت ولماذا، لا أن يجدها مفتوحة كأن شيئاً لم يكن. وقيد
+    /// الإقفال يُعكَس فتعود الأرصدة كما كانت.</para>
+    /// </summary>
+    [HttpPost("closings/{id:guid}/reopen")]
+    [Authorize(Roles = "super_admin")]
+    public async Task<IActionResult> Reopen(Guid id, ReopenClosingRequest request)
+    {
+        var reason = (request.Reason ?? "").Trim();
+        if (reason.Length == 0)
+        {
+            return BadRequest(new { message = "سبب الفتح إلزامي" });
+        }
+
+        var closing = await _db.FiscalClosings.FirstOrDefaultAsync(c => c.Id == id);
+        if (closing is null) return NotFound();
+        if (closing.IsReopened) return BadRequest(new { message = "هذا الإقفال مفتوح أصلاً" });
+
+        await using var transaction = await _db.Database.BeginTransactionAsync();
+
+        // العلم أولاً ثم عكس القيد: العكس يمرّ بحارس المدّة المُقفَلة، ولو
+        // بقي القفل قائماً لرفض عكس قيدٍ داخله — فيستحيل الفتح إلى الأبد.
+        closing.IsReopened = true;
+        closing.ReopenReason = reason;
+        closing.ReopenedBy = CurrentUserId();
+        closing.ReopenedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync();
+
+        if (closing.JournalEntryId is { } entryId)
+        {
+            try
+            {
+                await Ledger.ReverseAsync(_db, entryId, $"فتح إقفال {closing.PeriodEnd:yyyy-MM-dd} — {reason}",
+                    CurrentUserId());
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
+
+        _db.LogAudit(closing.OrganizationId, CurrentUserId(), "fiscal.reopened",
+            "fiscal_closings", closing.Id, newValues: new { closing.PeriodEnd, Reason = reason });
+        await _db.SaveChangesAsync();
+
+        await transaction.CommitAsync();
+        return NoContent();
+    }
+
+    private async Task<List<FiscalClosingDto>> ToClosingDtosAsync(List<FiscalClosing> closings)
+    {
+        if (closings.Count == 0) return new List<FiscalClosingDto>();
+
+        var userIds = closings
+            .SelectMany(c => new[] { c.ClosedBy, c.ReopenedBy })
+            .Where(u => u.HasValue).Select(u => u!.Value).Distinct().ToList();
+        var users = userIds.Count == 0
+            ? new Dictionary<Guid, string>()
+            : await _db.AppUsers.Where(u => userIds.Contains(u.Id)).ToDictionaryAsync(u => u.Id, u => u.FullName);
+
+        return closings.Select(c => new FiscalClosingDto(
+            c.Id, c.PeriodEnd, c.NetResult, c.JournalEntryId,
+            c.ClosedBy is null ? null : users.GetValueOrDefault(c.ClosedBy.Value),
+            c.ClosedAt, c.IsReopened, c.ReopenReason,
+            c.ReopenedBy is null ? null : users.GetValueOrDefault(c.ReopenedBy.Value),
+            c.ReopenedAt)).ToList();
     }
 
     /// <summary>

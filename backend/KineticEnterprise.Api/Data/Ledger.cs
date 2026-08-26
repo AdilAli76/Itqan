@@ -4,6 +4,25 @@ using KineticEnterprise.Api.Models;
 
 namespace KineticEnterprise.Api.Data;
 
+/// <summary>
+/// قاعدة عمل محاسبية مُنعت العملية — لا عطبٌ في النظام.
+///
+/// <para><b>العطب الذي يصلحه:</b> الدفتر كان يرمي
+/// <see cref="InvalidOperationException"/> عاديّاً لقواعده (مدّة مُقفَلة،
+/// قيد غير متوازن، دورٌ بلا حساب). ومن لم يلتقطه من المستدعين — وهم
+/// الأكثر — يُنتج **500 برمز مرجعي** عند المستخدم: رسالةٌ تقول «أبلغ الدعم»
+/// عن قاعدة كان يكفي أن تُقال له.</para>
+///
+/// <para>ونوعٌ مستقلّ يُترجَم مركزياً في
+/// <c>DbConstraintMessageMiddleware</c> إلى 400 برسالته — فيصحّ لكل مسار
+/// قائم أو يُكتب غداً، بلا أن يتذكّر أحد التقاطه. وتعميمُ الترجمة على كل
+/// <c>InvalidOperationException</c> كان سيُخفي أعطاباً حقيقية خلف 400.</para>
+/// </summary>
+public class LedgerRuleException : InvalidOperationException
+{
+    public LedgerRuleException(string message) : base(message) { }
+}
+
 /// <summary>سطرُ قيدٍ قبل حفظه — دورٌ ومبلغ، لا معرّف حساب.</summary>
 /// <param name="Role">دور من [AccountRoles] — يُحلّ إلى حساب عبر الربط.</param>
 public record PostingLine(string Role, decimal Debit, decimal Credit, string? Note = null);
@@ -58,7 +77,7 @@ public static class Ledger
         {
             // الرسالة تحمل مصدرها ووصفها: «قيد بلا سطور» وحدها لا تقول عن أي
             // مستند، فيبقى من يقرأ السجلّ يبحث في كل فواتير الدقيقة.
-            throw new InvalidOperationException(
+            throw new LedgerRuleException(
                 $"قيد بلا سطور — لا شيء يُرحَّل. المصدر {source}، الوصف «{description}».");
         }
 
@@ -73,9 +92,17 @@ public static class Ledger
         // لأن decimal مضروبة في نسب (ضريبة، خصم) تُقرَّب.
         if (Math.Abs(debit - credit) > 0.01m)
         {
-            throw new InvalidOperationException(
+            throw new LedgerRuleException(
                 $"قيد غير متوازن: مدين {debit:0.##} ودائن {credit:0.##} — لم يُكتب شيء. " +
                 $"المصدر {source}، الوصف «{description}».");
+        }
+
+        var date = entryDate ?? DateTime.UtcNow.Date;
+        if (await ClosedThroughAsync(db) is { } closedThrough && date <= closedThrough)
+        {
+            throw new LedgerRuleException(
+                $"المدّة حتى {closedThrough:yyyy-MM-dd} مُقفَلة — لا يُقيَّد فيها شيء. "
+                + "افتح الإقفال صراحةً إن لزم التصحيح.");
         }
 
         var mappings = await EnsureChartAsync(db, organizationId);
@@ -85,7 +112,7 @@ public static class Ledger
             OrganizationId = organizationId,
             BranchId = branchId,
             Number = await NextNumberAsync(db),
-            EntryDate = entryDate ?? DateTime.UtcNow.Date,
+            EntryDate = date,
             Source = source,
             SourceId = sourceId,
             Description = description,
@@ -96,7 +123,7 @@ public static class Ledger
         {
             if (!mappings.TryGetValue(line.Role, out var accountId))
             {
-                throw new InvalidOperationException(
+                throw new LedgerRuleException(
                     $"لا حساب مربوط بالدور «{line.Role}» — راجع ربط الحسابات.");
             }
             entry.Lines.Add(new JournalEntryLine
@@ -143,16 +170,24 @@ public static class Ledger
 
         if (directLines.Count + roleLines.Count == 0)
         {
-            throw new InvalidOperationException("قيد بلا سطور — لا شيء يُرحَّل.");
+            throw new LedgerRuleException("قيد بلا سطور — لا شيء يُرحَّل.");
         }
 
         var debit = directLines.Sum(l => l.Debit) + roleLines.Sum(l => l.Debit);
         var credit = directLines.Sum(l => l.Credit) + roleLines.Sum(l => l.Credit);
         if (Math.Abs(debit - credit) > 0.01m)
         {
-            throw new InvalidOperationException(
+            throw new LedgerRuleException(
                 $"قيد غير متوازن: مدين {debit:0.##} ودائن {credit:0.##} — لم يُكتب شيء. " +
                 $"المصدر {source}، الوصف «{description}».");
+        }
+
+        var date = entryDate ?? DateTime.UtcNow.Date;
+        if (await ClosedThroughAsync(db) is { } closedThrough && date <= closedThrough)
+        {
+            throw new LedgerRuleException(
+                $"المدّة حتى {closedThrough:yyyy-MM-dd} مُقفَلة — لا يُقيَّد فيها شيء. "
+                + "افتح الإقفال صراحةً إن لزم التصحيح.");
         }
 
         var mappings = await EnsureChartAsync(db, organizationId);
@@ -162,7 +197,7 @@ public static class Ledger
             OrganizationId = organizationId,
             BranchId = branchId,
             Number = await NextNumberAsync(db),
-            EntryDate = entryDate ?? DateTime.UtcNow.Date,
+            EntryDate = date,
             Source = source,
             SourceId = sourceId,
             Description = description,
@@ -178,7 +213,7 @@ public static class Ledger
         {
             if (!mappings.TryGetValue(line.Role, out var accountId))
             {
-                throw new InvalidOperationException(
+                throw new LedgerRuleException(
                     $"لا حساب مربوط بالدور «{line.Role}» — راجع ربط الحسابات.");
             }
             entry.Lines.Add(new JournalEntryLine
@@ -207,14 +242,14 @@ public static class Ledger
         var original = await db.JournalEntries
             .Include(e => e.Lines)
             .FirstOrDefaultAsync(e => e.Id == entryId)
-            ?? throw new InvalidOperationException("القيد غير موجود.");
+            ?? throw new LedgerRuleException("القيد غير موجود.");
 
         // عكسُ العكس يُنتج دورةً لا نهاية لها من التصحيحات المتقابلة، ولا
         // يزيد الدفتر إلا ضجيجاً — الحساب عاد إلى ما كان بعد أول عكس.
         var alreadyReversed = await db.JournalEntries.AnyAsync(e => e.ReversesEntryId == entryId);
         if (alreadyReversed)
         {
-            throw new InvalidOperationException("هذا القيد معكوس أصلاً.");
+            throw new LedgerRuleException("هذا القيد معكوس أصلاً.");
         }
 
         var reversal = new JournalEntry
@@ -247,6 +282,26 @@ public static class Ledger
     }
 
     /// <summary>
+    /// آخر تاريخ مُقفَل — لا قيد بتاريخه أو قبله.
+    ///
+    /// <para><b>لماذا هنا لا في نقاط النهاية:</b> الإقفال بلا قفلٍ ليس
+    /// إقفالاً. وفاتورةٌ تُسجَّل بتاريخ العام الماضي تُغيّر أرقاماً صدرت عنها
+    /// تقارير ووُقّعت عليها ميزانية — بلا أن ينتبه أحد. والحارس في الطريق
+    /// الواحد يشمل كل مسار: بيعاً ومرتجعاً ومصروفاً وسداداً وقيداً يدوياً،
+    /// وأي مسار يُكتب غداً.</para>
+    /// </summary>
+    private static async Task<DateTime?> ClosedThroughAsync(AppDbContext db)
+    {
+        // سياسة العزل تحصر الصفوف في منظمة الطالب.
+        var closings = await db.FiscalClosings
+            .Where(c => !c.IsReopened)
+            .Select(c => (DateTime?)c.PeriodEnd)
+            .ToListAsync();
+
+        return closings.Count == 0 ? null : closings.Max();
+    }
+
+    /// <summary>
     /// يضمن وجود دليل حسابات مربوط قبل أي ترحيل.
     ///
     /// <para><b>الفخّ الذي يُغلقه:</b> منظمةٌ بإصدار المؤسسات تُنشأ ووحدة
@@ -264,7 +319,14 @@ public static class Ledger
         AppDbContext db, Guid organizationId)
     {
         var mappings = await db.AccountMappings.ToDictionaryAsync(m => m.Role, m => m.AccountId);
-        if (mappings.Count > 0) return mappings;
+
+        // **كل** الأدوار المطلوبة، لا مجرّد وجود ربطٍ ما.
+        //
+        // <para>كان يكفيه أن يجد ربطاً واحداً فيمضي. والأدوار تنمو مع كل نوع
+        // حركة جديد (الموردون مع ترحيل المشتريات، الأرباح المحتجزة مع
+        // الإقفال) — فدليلٌ بُذر قبل الإضافة يمرّ من هنا ثم يفشل عند
+        // <c>PostAsync</c> بـ«لا حساب مربوط بالدور». وقعت مرّتين.</para>
+        if (AccountRoles.Required.All(mappings.ContainsKey)) return mappings;
 
         // بذرٌ كامل إن لم يكن ثمّة دليل، وإكمالُ ربطٍ ناقص إن كان.
         if (!await ChartOfAccounts.SeedAsync(db, organizationId))

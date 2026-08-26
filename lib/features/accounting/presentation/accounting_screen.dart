@@ -46,7 +46,7 @@ class AccountingScreen extends ConsumerStatefulWidget {
 
 class _AccountingScreenState extends ConsumerState<AccountingScreen>
     with SingleTickerProviderStateMixin {
-  late final _tabs = TabController(length: 5, vsync: this);
+  late final _tabs = TabController(length: 6, vsync: this);
 
   @override
   void dispose() {
@@ -77,6 +77,7 @@ class _AccountingScreenState extends ConsumerState<AccountingScreen>
               Tab(text: 'ميزان المراجعة'),
               Tab(text: 'قائمة الدخل'),
               Tab(text: 'الميزانية'),
+              Tab(text: 'الإقفال'),
             ],
           ),
           Expanded(
@@ -91,6 +92,7 @@ class _AccountingScreenState extends ConsumerState<AccountingScreen>
                 const _TrialBalanceTab(),
                 const _IncomeStatementTab(),
                 const _BalanceSheetTab(),
+                const _ClosingTab(),
               ],
             ),
           ),
@@ -863,6 +865,292 @@ Widget _section(String title, List<Map<String, dynamic>> lines, double total) =>
         ),
       ],
     );
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  الإقفال السنوي
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// الإقفال شيئان لا واحد: قيدٌ يُصفّر الإيرادات والاستخدامات، **وقفلٌ** يمنع
+/// أي قيد بتاريخ داخل المدّة. وبلا القفل لا معنى للإقفال.
+class _ClosingTab extends ConsumerWidget {
+  const _ClosingTab();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final async = ref.watch(fiscalClosingsProvider);
+    final canClose = ref.watch(myPermissionsProvider).valueOrNull?.isSuperAdmin ?? false;
+
+    return async.when(
+      loading: () => const Center(child: CircularProgressIndicator()),
+      error: (err, _) => _ErrorView(
+        error: err,
+        onRetry: () => ref.invalidate(fiscalClosingsProvider),
+      ),
+      data: (closings) {
+        final open = closings.where((c) => c['isReopened'] != true).toList();
+        final lastEnd = open.isEmpty
+            ? null
+            : DateTime.tryParse('${open.first['periodEnd']}');
+
+        return ListView(
+          padding: const EdgeInsets.all(16),
+          children: [
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: AppColors.surfaceAlt,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    lastEnd == null
+                        ? 'لا مدّة مُقفَلة'
+                        : 'مُقفَل حتى ${_date.format(lastEnd)}',
+                    style: AppTextStyles.headlineMd(),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'الإقفال يُصفّر الإيرادات والاستخدامات ويُرحّل نتيجتها إلى '
+                    '«الأرباح المحتجزة»، **ويمنع أي قيد بتاريخ داخل المدّة**. '
+                    'فلا تُغيَّر أرقامٌ صدرت عنها تقارير.',
+                    style: AppTextStyles.labelMd(),
+                  ),
+                ],
+              ),
+            ),
+            if (canClose) ...[
+              const SizedBox(height: 14),
+              SizedBox(
+                height: 48,
+                child: FilledButton.icon(
+                  onPressed: () => _close(context, ref),
+                  icon: const Icon(Icons.lock_outline, size: 18),
+                  label: const Text('إقفال مدّة'),
+                ),
+              ),
+            ],
+            const SizedBox(height: 22),
+            Text('السجلّ', style: AppTextStyles.headlineMd()),
+            const Divider(),
+            if (closings.isEmpty)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                child: Text('لا إقفالات بعد.', style: AppTextStyles.labelMd()),
+              )
+            else
+              for (final c in closings) _ClosingRow(closing: c, canReopen: canClose),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> _close(BuildContext context, WidgetRef ref) async {
+    final done = await showDialog<bool>(
+      context: context,
+      builder: (_) => const _CloseDialog(),
+    );
+    if (done == true) {
+      ref.invalidate(fiscalClosingsProvider);
+      ref.invalidate(chartOfAccountsProvider);
+      ref.invalidate(trialBalanceProvider);
+      ref.invalidate(journalProvider);
+      ref.invalidate(incomeStatementProvider);
+      ref.invalidate(balanceSheetProvider);
+    }
+  }
+}
+
+class _ClosingRow extends ConsumerWidget {
+  const _ClosingRow({required this.closing, required this.canReopen});
+  final Map<String, dynamic> closing;
+  final bool canReopen;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final reopened = closing['isReopened'] == true;
+    final periodEnd = DateTime.tryParse('${closing['periodEnd']}') ?? DateTime.now();
+    final net = (closing['netResult'] as num?)?.toDouble() ?? 0;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text('حتى ${_date.format(periodEnd)}', style: AppTextStyles.bodyMd()),
+              const SizedBox(width: 8),
+              if (reopened)
+                _Chip(text: 'مفتوح', color: AppColors.warning, background: AppColors.warningBg)
+              else
+                _Chip(text: 'مُقفَل', color: AppColors.success, background: AppColors.successBg),
+              const Spacer(),
+              Text(_money.format(net), style: AppTextStyles.currency()),
+            ],
+          ),
+          const SizedBox(height: 3),
+          Text(
+            [
+              if (closing['closedByName'] != null) 'أقفلها ${closing['closedByName']}',
+              if (reopened && closing['reopenedByName'] != null)
+                'فتحها ${closing['reopenedByName']}',
+            ].join(' · '),
+            style: AppTextStyles.caption(),
+          ),
+          // السبب يبقى ظاهراً: من راجع الدفتر يجب أن يرى أن السنة أُقفلت ثم
+          // فُتحت **ولماذا** — لا أن يجدها مفتوحة كأن شيئاً لم يكن.
+          if (reopened && closing['reopenReason'] != null)
+            Text('السبب: ${closing['reopenReason']}',
+                style: AppTextStyles.caption(color: AppColors.warning)),
+          if (canReopen && !reopened)
+            Align(
+              alignment: AlignmentDirectional.centerStart,
+              child: TextButton.icon(
+                onPressed: () => _reopen(context, ref),
+                icon: const Icon(Icons.lock_open_outlined, size: 16),
+                label: const Text('فتح'),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _reopen(BuildContext context, WidgetRef ref) async {
+    final controller = TextEditingController();
+    final reason = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('فتح الإقفال'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              'يُعكَس قيد الإقفال فتعود الأرصدة كما كانت، ويُرفع القفل عن المدّة. '
+              'ويبقى الصفّ في السجلّ موسوماً بأنه فُتح — لا يُحذف.',
+              style: AppTextStyles.bodyMd(color: AppColors.textSecondary),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: controller,
+              autofocus: true,
+              decoration: const InputDecoration(labelText: 'سبب الفتح'),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('إلغاء')),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, controller.text.trim()),
+            child: const Text('فتح'),
+          ),
+        ],
+      ),
+    );
+    if (reason == null || reason.isEmpty) return;
+
+    try {
+      await ApiClient.instance.dio
+          .post('/accounting/closings/${closing['id']}/reopen', data: {'reason': reason});
+      ref.invalidate(fiscalClosingsProvider);
+      ref.invalidate(trialBalanceProvider);
+      ref.invalidate(incomeStatementProvider);
+      ref.invalidate(balanceSheetProvider);
+      ref.invalidate(journalProvider);
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(_errorText(e, 'تعذّر فتح الإقفال'))),
+        );
+      }
+    }
+  }
+}
+
+class _CloseDialog extends StatefulWidget {
+  const _CloseDialog();
+
+  @override
+  State<_CloseDialog> createState() => _CloseDialogState();
+}
+
+class _CloseDialogState extends State<_CloseDialog> {
+  // أمس افتراضاً: إقفال اليوم يمنع بيع اليوم نفسه.
+  DateTime _periodEnd = DateTime.now().subtract(const Duration(days: 1));
+  bool _saving = false;
+  String? _error;
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('إقفال مدّة'),
+      content: SizedBox(
+        width: 400,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              'كل قيد بتاريخ هذا اليوم أو قبله سيُمنع بعد الإقفال. '
+              'وأرصدة الإيرادات والاستخدامات تُصفَّر وتُرحَّل نتيجتها إلى '
+              '«الأرباح المحتجزة».',
+              style: AppTextStyles.bodyMd(color: AppColors.textSecondary),
+            ),
+            const SizedBox(height: 16),
+            InkWell(
+              onTap: () async {
+                final picked = await showDatePicker(
+                  context: context,
+                  initialDate: _periodEnd,
+                  firstDate: DateTime(2020),
+                  lastDate: DateTime.now().subtract(const Duration(days: 1)),
+                );
+                if (picked != null) setState(() => _periodEnd = picked);
+              },
+              child: InputDecorator(
+                decoration: const InputDecoration(labelText: 'آخر يوم في المدّة'),
+                child: Text(_date.format(_periodEnd), style: AppTextStyles.bodyMd()),
+              ),
+            ),
+            if (_error != null) ...[
+              const SizedBox(height: 12),
+              Text(_error!, style: AppTextStyles.bodyMd(color: AppColors.danger)),
+            ],
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('إلغاء')),
+        FilledButton(
+          onPressed: _saving ? null : _submit,
+          child: _saving
+              ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+              : const Text('إقفال'),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _submit() async {
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
+    try {
+      await ApiClient.instance.dio.post('/accounting/closings', data: {
+        'periodEnd': _periodEnd.toIso8601String(),
+      });
+      if (mounted) Navigator.pop(context, true);
+    } catch (e) {
+      setState(() => _error = _errorText(e, 'تعذّر الإقفال'));
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 

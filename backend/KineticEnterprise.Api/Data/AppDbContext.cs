@@ -47,6 +47,7 @@ public class AppDbContext : DbContext
     public DbSet<JournalEntry> JournalEntries => Set<JournalEntry>();
     public DbSet<JournalEntryLine> JournalEntryLines => Set<JournalEntryLine>();
     public DbSet<AccountMapping> AccountMappings => Set<AccountMapping>();
+    public DbSet<FiscalClosing> FiscalClosings => Set<FiscalClosing>();
     public DbSet<Permission> Permissions => Set<Permission>();
     public DbSet<RolePermission> RolePermissions => Set<RolePermission>();
     public DbSet<PurchaseOrder> PurchaseOrders => Set<PurchaseOrder>();
@@ -113,6 +114,7 @@ public class AppDbContext : DbContext
         modelBuilder.Entity<JournalEntry>().ToTable("journal_entries");
         modelBuilder.Entity<JournalEntryLine>().ToTable("journal_entry_lines");
         modelBuilder.Entity<AccountMapping>().ToTable("account_mappings");
+        modelBuilder.Entity<FiscalClosing>().ToTable("fiscal_closings");
         modelBuilder.Entity<Permission>().ToTable("permissions").HasKey(p => p.Code);
         modelBuilder.Entity<RolePermission>().ToTable("role_permissions")
             .HasKey(rp => new { rp.OrganizationId, rp.Role, rp.PermissionCode });

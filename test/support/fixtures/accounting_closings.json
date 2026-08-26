@@ -1,0 +1,14 @@
+[
+  {
+    "id": "c1",
+    "periodEnd": "2025-12-31T00:00:00",
+    "netResult": 14500.0,
+    "journalEntryId": "j9",
+    "closedByName": "مدير النظام",
+    "closedAt": "2026-01-05T09:00:00",
+    "isReopened": false,
+    "reopenReason": null,
+    "reopenedByName": null,
+    "reopenedAt": null
+  }
+]

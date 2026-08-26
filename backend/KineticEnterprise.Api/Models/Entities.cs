@@ -1542,6 +1542,9 @@ public static class JournalSources
 
     /// <summary>قيد عكسي يُصحّح قيداً سابقاً.</summary>
     public const string Reversal = "reversal";
+
+    /// <summary>قيد إقفال مدّة مالية.</summary>
+    public const string Closing = "closing";
 }
 
 /// <summary>
@@ -1632,6 +1635,14 @@ public static class AccountRoles
 
     /// <summary>مردودات المشتريات — بضاعة أُعيدت إلى المورّد.</summary>
     public const string PurchaseReturns = "purchase_returns";
+
+    /// <summary>
+    /// الأرباح المحتجزة — وعاء نتيجة السنوات المُقفَلة.
+    ///
+    /// <para>إليه تُرحَّل أرصدة الإيرادات والاستخدامات عند الإقفال، فتصفر
+    /// وتبدأ السنة الجديدة من الصفر بينما تبقى النتيجة في حقوق الملكية.</para>
+    /// </summary>
+    public const string RetainedEarnings = "retained_earnings";
     public const string SalesRevenue = "sales_revenue";
     public const string SalesTax = "sales_tax";
     public const string Inventory = "inventory";
@@ -1648,6 +1659,7 @@ public static class AccountRoles
     {
         Cash, Receivables, Payables, SalesRevenue, SalesTax, Inventory,
         CostOfGoodsSold, CustomerWallet, SalesReturns, PurchaseReturns, GeneralExpense,
+        RetainedEarnings,
     };
 }
 
@@ -1679,6 +1691,20 @@ public class Expense
     /// ويُفسد التبويب. الحساب الافتراضي يقول الحقيقة: «مصروف لم يُبوَّب».</para>
     /// </summary>
     public Guid? AccountId { get; set; }
+
+    /// <summary>
+    /// تاريخ الصرف الفعلي — منفصل عن <see cref="CreatedAt"/>.
+    ///
+    /// <para><b>النقص الذي يسدّه:</b> كان المصروف يُقيَّد بتاريخ إدخاله
+    /// دائماً. ففاتورة كهرباء الأسبوع الماضي تُدخَل اليوم فتقع في أرقام
+    /// اليوم — ويُقفَل شهرٌ ناقصاً مصروفاته، وتُحمَّل بها مدّةٌ لا تخصّها.
+    /// </para>
+    ///
+    /// <para>وهو نفس ما فُصل في <c>PurchaseReceipt.ReceivedOn</c> و
+    /// <c>SupplierPayment.PaidOn</c> — والمصروف كان الوحيد بلا تاريخ خاصّ.
+    /// </para>
+    /// </summary>
+    public DateTime SpentOn { get; set; } = DateTime.UtcNow.Date;
 
     public Guid? CreatedBy { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
@@ -1735,4 +1761,51 @@ public static class SupplierPaymentMethods
     public const string Bank = "bank";
 
     public static readonly string[] All = { Cash, Bank };
+}
+
+
+/// <summary>
+/// إقفال سنة مالية.
+///
+/// <para><b>ما يعنيه الإقفال فعلاً شيئان لا واحد:</b></para>
+/// <list type="number">
+/// <item>قيدٌ يُصفّر الإيرادات والاستخدامات ويُرحّل نتيجتها إلى «الأرباح
+/// المحتجزة» — فتبدأ السنة الجديدة من الصفر وتبقى النتيجة في حقوق
+/// الملكية.</item>
+/// <item>**قفلٌ يمنع أي قيد بتاريخ داخل المدّة المُقفَلة.** وبلا هذا القفل
+/// لا معنى للإقفال أصلاً: فاتورةٌ تُسجَّل بتاريخ العام الماضي تُغيّر أرقاماً
+/// صدرت عنها تقارير ووُقّعت عليها ميزانية.</item>
+/// </list>
+///
+/// <para><b>ويُفتح بقرار صريح مسجَّل:</b> خطأٌ يُكتشف بعد الإقفال حالة
+/// واقعية، ومنعُ الفتح إلى الأبد يدفع المحاسب إلى تصحيحه في سنةٍ لا يخصّها.
+/// لكن الفتح حدثٌ يُسجَّل باسمه وسببه.</para>
+/// </summary>
+public class FiscalClosing
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid OrganizationId { get; set; }
+
+    /// <summary>آخر يوم في المدّة المُقفَلة — لا قيد بتاريخه أو قبله.</summary>
+    public DateTime PeriodEnd { get; set; }
+
+    /// <summary>صافي نتيجة المدّة المُرحَّلة إلى الأرباح المحتجزة.</summary>
+    public decimal NetResult { get; set; }
+
+    /// <summary>قيد الإقفال — منه يُعرَف ما رُحّل بالضبط.</summary>
+    public Guid? JournalEntryId { get; set; }
+
+    public Guid? ClosedBy { get; set; }
+    public DateTime ClosedAt { get; set; } = DateTime.UtcNow;
+
+    /// <summary>
+    /// أُعيد فتحه.
+    ///
+    /// <para>لا يُحذف الصفّ: من راجع الدفتر يجب أن يرى أن السنة أُقفلت ثم
+    /// فُتحت ولماذا — لا أن يجدها مفتوحة كأن شيئاً لم يكن.</para>
+    /// </summary>
+    public bool IsReopened { get; set; }
+    public string? ReopenReason { get; set; }
+    public Guid? ReopenedBy { get; set; }
+    public DateTime? ReopenedAt { get; set; }
 }

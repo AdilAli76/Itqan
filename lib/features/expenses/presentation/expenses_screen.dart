@@ -13,7 +13,6 @@ import '../../accounting/data/accounting_providers.dart';
 import '../../branches/data/branches_providers.dart';
 
 final _money = NumberFormat('#,##0.00', 'en');
-final _dateTime = DateFormat('yyyy-MM-dd HH:mm');
 
 final expensesProvider = FutureProvider.autoDispose<Map<String, dynamic>>((ref) async {
   final response = await ApiClient.instance.dio.get('/expenses');
@@ -144,8 +143,9 @@ class _ExpenseRow extends StatelessWidget {
                 Text(
                   [
                     expense['branchName'],
-                    _dateTime.format(
-                        DateTime.tryParse('${expense['createdAt']}')?.toLocal() ?? DateTime.now()),
+                    // تاريخ الصرف لا الإدخال: هو ما يخصّ المصروف.
+                    DateFormat('yyyy-MM-dd').format(
+                        DateTime.tryParse('${expense['spentOn']}') ?? DateTime.now()),
                     if (expense['createdByName'] != null) expense['createdByName'],
                   ].join(' · '),
                   style: AppTextStyles.labelMd(),
@@ -182,6 +182,7 @@ class _AddExpenseDialogState extends ConsumerState<_AddExpenseDialog> {
 
   String? _branchId;
   String? _accountId;
+  DateTime _spentOn = DateTime.now();
   bool _saving = false;
   String? _error;
 
@@ -266,6 +267,29 @@ class _AddExpenseDialogState extends ConsumerState<_AddExpenseDialog> {
                 ),
               ],
               const SizedBox(height: 12),
+              InkWell(
+                onTap: () async {
+                  final picked = await showDatePicker(
+                    context: context,
+                    initialDate: _spentOn,
+                    firstDate: DateTime(2020),
+                    lastDate: DateTime.now(),
+                  );
+                  if (picked != null) setState(() => _spentOn = picked);
+                },
+                child: InputDecorator(
+                  decoration: const InputDecoration(
+                    labelText: 'تاريخ الصرف',
+                    // كان يُقيَّد بتاريخ الإدخال دائماً، ففاتورة كهرباء
+                    // الأسبوع الماضي تقع في أرقام اليوم — ويُقفَل شهرٌ ناقصاً
+                    // مصروفاته وتُحمَّل بها مدّةٌ لا تخصّها.
+                    helperText: 'تاريخ الدفع الفعلي لا تاريخ الإدخال',
+                  ),
+                  child: Text(DateFormat('yyyy-MM-dd').format(_spentOn),
+                      style: AppTextStyles.bodyMd()),
+                ),
+              ),
+              const SizedBox(height: 12),
               TextField(
                 controller: _noteController,
                 decoration: const InputDecoration(labelText: 'ملاحظة (اختياري)'),
@@ -322,6 +346,7 @@ class _AddExpenseDialogState extends ConsumerState<_AddExpenseDialog> {
         'amount': amount,
         'note': _noteController.text.trim().isEmpty ? null : _noteController.text.trim(),
         'accountId': _accountId,
+        'spentOn': _spentOn.toIso8601String(),
       });
       if (mounted) Navigator.pop(context, true);
     } catch (e) {

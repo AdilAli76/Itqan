@@ -155,6 +155,24 @@ public class DbConstraintMessageMiddleware
             context.Response.ContentType = "application/json; charset=utf-8";
             await context.Response.WriteAsync(JsonSerializer.Serialize(new { message }));
         }
+        catch (KineticEnterprise.Api.Data.LedgerRuleException ex)
+        {
+            // ── قاعدة محاسبية مُنعت العملية ─────────────────────────────
+            //
+            // ليست عطباً بل قاعدة: مدّة مُقفَلة، قيد غير متوازن، دورٌ بلا
+            // حساب. وكانت تعود **500 برمز مرجعي** لأن أكثر المستدعين لا
+            // يلتقطونها — فيُقال للمستخدم «أبلغ الدعم» عن شيء كان يكفي أن
+            // يُقال له. والترجمة هنا تصحّ لكل مسار، قائمٍ أو يُكتب غداً.
+            _logger.LogInformation("قاعدة محاسبية منعت {Path}: {Message}",
+                context.Request.Path, ex.Message);
+
+            if (context.Response.HasStarted) throw;
+
+            context.Response.Clear();
+            context.Response.StatusCode = StatusCodes.Status400BadRequest;
+            context.Response.ContentType = "application/json; charset=utf-8";
+            await context.Response.WriteAsync(JsonSerializer.Serialize(new { message = ex.Message }));
+        }
         catch (Exception ex)
         {
             // ── أي عطب آخر ──────────────────────────────────────────────

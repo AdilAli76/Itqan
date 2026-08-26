@@ -51,7 +51,7 @@ public static class ChartOfAccounts
         new("2103", "ضريبة المبيعات المستحقّة", AccountTypes.Liability, AccountRoles.SalesTax),
         new("22", "حقوق الملكية", AccountTypes.Equity),
         new("2201", "رأس المال", AccountTypes.Equity),
-        new("2202", "الأرباح المحتجزة", AccountTypes.Equity),
+        new("2202", "الأرباح المحتجزة", AccountTypes.Equity, AccountRoles.RetainedEarnings),
 
         // ── 3 الاستخدامات ───────────────────────────────────────────────
         new("3", "الاستخدامات", AccountTypes.Expense),

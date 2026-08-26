@@ -1050,6 +1050,40 @@ CREATE TABLE account_mappings (
 GO
 
 -- ----------------------------------------------------------------------------
+--  الإقفال السنوي
+--
+--  ⚠ **بعد كتلة المحاسبة عمداً:** journal_entry_id يشير إلى journal_entries،
+--  وSQL Server ينفّذ الملف بالترتيب فيرفض مفتاحاً خارجياً إلى جدول لم
+--  يُنشأ بعد. رابع إشارة أمامية في هذا الملف — راجع §2.23.
+--
+--  الإقفال شيئان لا واحد: قيدٌ يُصفّر الإيرادات والاستخدامات ويُرحّل نتيجتها
+--  إلى «الأرباح المحتجزة»، **وقفلٌ يمنع أي قيد بتاريخ داخل المدّة**. وبلا
+--  القفل لا معنى للإقفال: فاتورةٌ تُسجَّل بتاريخ العام الماضي تُغيّر أرقاماً
+--  صدرت عنها تقارير ووُقّعت عليها ميزانية.
+--
+--  ويُفتح بقرار صريح مسجَّل — لا يُحذف الصفّ: من راجع الدفتر يجب أن يرى أن
+--  السنة أُقفلت ثم فُتحت ولماذا، لا أن يجدها مفتوحة كأن شيئاً لم يكن.
+-- ----------------------------------------------------------------------------
+CREATE TABLE fiscal_closings (
+  id UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
+  organization_id UNIQUEIDENTIFIER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  -- آخر يوم في المدّة المُقفَلة.
+  period_end DATETIME2 NOT NULL,
+  net_result DECIMAL(18,3) NOT NULL DEFAULT 0,
+  journal_entry_id UNIQUEIDENTIFIER NULL REFERENCES journal_entries(id),
+  closed_by UNIQUEIDENTIFIER NULL REFERENCES app_users(id),
+  closed_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+  is_reopened BIT NOT NULL DEFAULT 0,
+  reopen_reason NVARCHAR(300) NULL,
+  reopened_by UNIQUEIDENTIFIER NULL REFERENCES app_users(id),
+  reopened_at DATETIME2 NULL
+);
+GO
+
+CREATE INDEX ix_fiscal_closings_period ON fiscal_closings (organization_id, period_end);
+GO
+
+-- ----------------------------------------------------------------------------
 -- 7. المالية المبسّطة
 -- ----------------------------------------------------------------------------
 CREATE TABLE expenses (
@@ -1067,6 +1101,9 @@ CREATE TABLE expenses (
   -- مُنشأة من المخطّط في أسماء قيودها — ولا تُترجَم رسالتها إلى العربية.
   account_id UNIQUEIDENTIFIER NULL
     CONSTRAINT FK_expenses_account REFERENCES accounts(id),
+  -- تاريخ الصرف الفعلي، منفصل عن تاريخ الإدخال: فاتورة الأسبوع الماضي
+  -- تُدخَل اليوم ويجب أن تقع في مدّتها هي.
+  spent_on DATETIME2 NOT NULL CONSTRAINT df_expenses_spent_on DEFAULT SYSUTCDATETIME(),
   created_by UNIQUEIDENTIFIER NULL REFERENCES app_users(id),
   created_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
 );
@@ -1329,6 +1366,12 @@ GO
 CREATE SECURITY POLICY Security.StockTransferItemsPolicy
   ADD FILTER PREDICATE Security.fn_StockTransferChild(transfer_id) ON dbo.stock_transfer_items,
   ADD BLOCK PREDICATE Security.fn_StockTransferChild(transfer_id) ON dbo.stock_transfer_items AFTER INSERT
+  WITH (STATE = ON);
+GO
+
+CREATE SECURITY POLICY Security.FiscalClosingsPolicy
+  ADD FILTER PREDICATE Security.fn_OrgOnlyPredicate(organization_id) ON dbo.fiscal_closings,
+  ADD BLOCK PREDICATE Security.fn_OrgOnlyPredicate(organization_id) ON dbo.fiscal_closings AFTER INSERT
   WITH (STATE = ON);
 GO
 

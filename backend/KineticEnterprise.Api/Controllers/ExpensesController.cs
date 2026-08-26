@@ -12,10 +12,13 @@ namespace KineticEnterprise.Api.Controllers;
 public record ExpenseDto(
     Guid Id, Guid BranchId, string BranchName, string Category, decimal Amount,
     string? Note, Guid? AccountId, string? AccountName,
+    DateTime SpentOn,
     string? CreatedByName, DateTime CreatedAt);
 
 public record CreateExpenseRequest(
-    Guid BranchId, string Category, decimal Amount, string? Note, Guid? AccountId);
+    Guid BranchId, string Category, decimal Amount, string? Note, Guid? AccountId,
+    /// تاريخ الصرف الفعلي. NULL = اليوم. راجع Expense.SpentOn.
+    DateTime? SpentOn = null);
 
 public record ExpensePageDto(List<ExpenseDto> Items, decimal Total, int TotalCount, int Page, int PageSize);
 
@@ -51,8 +54,10 @@ public class ExpensesController : ControllerBase
 
         // سياسة العزل تحصر الصفوف في منظمة الطالب وفرعه.
         var query = _db.Expenses.AsQueryable();
-        if (from is { } f) query = query.Where(e => e.CreatedAt >= f.Date);
-        if (to is { } t) query = query.Where(e => e.CreatedAt < t.Date.AddDays(1));
+        // بتاريخ الصرف لا الإدخال: من يفلتر بشهرٍ يريد مصروف ذلك الشهر،
+        // لا ما أُدخل فيه من مصروفات شهور أخرى.
+        if (from is { } f) query = query.Where(e => e.SpentOn >= f.Date);
+        if (to is { } t) query = query.Where(e => e.SpentOn < t.Date.AddDays(1));
         if (branchId is { } b) query = query.Where(e => e.BranchId == b);
 
         var totalCount = await query.CountAsync();
@@ -61,7 +66,8 @@ public class ExpensesController : ControllerBase
         var total = await query.SumAsync(e => (decimal?)e.Amount) ?? 0;
 
         var items = await query
-            .OrderByDescending(e => e.CreatedAt)
+            .OrderByDescending(e => e.SpentOn)
+            .ThenByDescending(e => e.CreatedAt)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
             .ToListAsync();
@@ -86,6 +92,7 @@ public class ExpensesController : ControllerBase
                 e.Id, e.BranchId, branches.GetValueOrDefault(e.BranchId, "-"),
                 e.Category, e.Amount, e.Note, e.AccountId,
                 e.AccountId is null ? null : accounts.GetValueOrDefault(e.AccountId.Value),
+                e.SpentOn,
                 e.CreatedBy is null ? null : users.GetValueOrDefault(e.CreatedBy.Value),
                 e.CreatedAt)).ToList(),
             total, totalCount, page, pageSize);
@@ -154,6 +161,7 @@ public class ExpensesController : ControllerBase
             Amount = request.Amount,
             Note = string.IsNullOrWhiteSpace(request.Note) ? null : request.Note.Trim(),
             AccountId = account?.Id,
+            SpentOn = request.SpentOn?.Date ?? DateTime.UtcNow.Date,
             CreatedBy = CurrentUserId(),
         };
         _db.Expenses.Add(expense);
@@ -168,7 +176,7 @@ public class ExpensesController : ControllerBase
         return new ExpenseDto(expense.Id, branch.Id, branch.Name, expense.Category, expense.Amount,
             expense.Note, expense.AccountId,
             account is null ? null : $"{account.Code} — {account.Name}",
-            null, expense.CreatedAt);
+            expense.SpentOn, null, expense.CreatedAt);
     }
 
     /// <summary>
@@ -193,7 +201,7 @@ public class ExpensesController : ControllerBase
                 JournalSources.Expense, expense.Id,
                 $"مصروف: {expense.Category}",
                 cashSide.Prepend(new PostingLine(AccountRoles.GeneralExpense, expense.Amount, 0, expense.Category)),
-                CurrentUserId());
+                CurrentUserId(), expense.SpentOn);
         }
         else
         {
@@ -204,7 +212,7 @@ public class ExpensesController : ControllerBase
                 $"مصروف: {expense.Category}",
                 new[] { (account.Id, expense.Amount, 0m, (string?)expense.Category) },
                 cashSide,
-                CurrentUserId());
+                CurrentUserId(), expense.SpentOn);
         }
 
         await _db.SaveChangesAsync();
