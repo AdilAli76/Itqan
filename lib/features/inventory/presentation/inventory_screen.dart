@@ -11,6 +11,7 @@ import '../../../core/time/app_clock.dart';
 import '../../../core/theme/branding_provider.dart';
 import '../../../core/theme/app_text_styles.dart';
 import '../../../shared/widgets/currency_badge.dart';
+import 'supplier_statement_dialog.dart';
 import '../../../shared/widgets/data_table_widget.dart';
 import '../data/inventory_providers.dart';
 import '../../pharmacy/data/medicine_reference_providers.dart';
@@ -1222,7 +1223,10 @@ class _SuppliersSectionState extends ConsumerState<_SuppliersSection> {
         columns: const [
           AppColumn('اسم المورد'),
           AppColumn('الهاتف'),
-          AppColumn('الرصيد'),
+          // «افتتاحي» لا «الرصيد»: هذا رقمٌ يكتبه المستخدم ولا يحدّثه شيء.
+          // تسميته «الرصيد» تجعله يُقرأ كحقيقة حالية وهو ليس كذلك — الرصيد
+          // الحالي في كشف الحساب، مُشتقّاً من الحركات.
+          AppColumn('رصيد افتتاحي'),
           AppColumn(''),
         ],
         rows: suppliers.map((s) {
@@ -1234,6 +1238,14 @@ class _SuppliersSectionState extends ConsumerState<_SuppliersSection> {
             Row(
               mainAxisSize: MainAxisSize.min,
               children: [
+                IconButton(
+                  tooltip: 'كشف الحساب والسداد',
+                  icon: const Icon(Icons.receipt_long_outlined, size: 18),
+                  onPressed: () => showDialog(
+                    context: context,
+                    builder: (_) => SupplierStatementDialog(supplier: s),
+                  ),
+                ),
                 IconButton(
                   tooltip: 'تعديل',
                   icon: const Icon(Icons.edit_outlined, size: 18),

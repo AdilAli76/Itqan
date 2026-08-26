@@ -1971,6 +1971,46 @@ END
 GO
 
 -- ----------------------------------------------------------------------------
+--  سداد الموردين
+--
+--  حساب «الموردون» كان يتراكم بلا طرف مقابل: كل استلام يزيد الدَّين ولا شيء
+--  يُنقصه.
+-- ----------------------------------------------------------------------------
+IF OBJECT_ID('dbo.supplier_payments', 'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.supplier_payments (
+      id UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
+      organization_id UNIQUEIDENTIFIER NOT NULL REFERENCES dbo.organizations(id) ON DELETE CASCADE,
+      branch_id UNIQUEIDENTIFIER NOT NULL REFERENCES dbo.branches(id),
+      supplier_id UNIQUEIDENTIFIER NOT NULL REFERENCES dbo.suppliers(id),
+      amount DECIMAL(18,3) NOT NULL,
+      method NVARCHAR(20) NOT NULL
+        CONSTRAINT CK_supplier_payments_method CHECK (method IN ('cash','bank')),
+      reference NVARCHAR(80) NULL,
+      note NVARCHAR(300) NULL,
+      paid_on DATETIME2 NOT NULL,
+      created_by UNIQUEIDENTIFIER NULL REFERENCES dbo.app_users(id),
+      created_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+      CONSTRAINT CK_supplier_payments_amount CHECK (amount > 0)
+    );
+    CREATE INDEX ix_supplier_payments_supplier
+        ON dbo.supplier_payments (organization_id, supplier_id, paid_on);
+    PRINT N'أُنشئ جدول supplier_payments';
+END
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.security_policies WHERE name = 'SupplierPaymentsPolicy')
+EXEC('
+CREATE SECURITY POLICY Security.SupplierPaymentsPolicy
+  ADD FILTER PREDICATE Security.fn_TenantPredicate(organization_id, branch_id) ON dbo.supplier_payments,
+  ADD BLOCK PREDICATE Security.fn_TenantPredicate(organization_id, branch_id) ON dbo.supplier_payments AFTER INSERT
+  WITH (STATE = ON);');
+GO
+
+PRINT N'سداد الموردين جاهز';
+GO
+
+-- ----------------------------------------------------------------------------
 --  فهارس الأداء — ملف منفصل لأنه يُنفَّذ ويُعاد بلا خطر
 -- ----------------------------------------------------------------------------
 PRINT N'لا تنسَ تنفيذ docs\INDEXES.sql على هذه القاعدة أيضاً.';

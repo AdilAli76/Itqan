@@ -1046,6 +1046,56 @@ if ($canManageInventory -and $accProduct -and $accProduct.Status -in 200,201) {
     }
 }
 
+# ── سداد الموردين ────────────────────────────────────────────────────────
+#
+# الثقب: حساب «الموردون» كان يتراكم بلا طرف مقابل — كل استلام يزيد الدَّين
+# ولا شيء يُنقصه. فالميزان يقول إنك مدينٌ بكل ما اشتريتَه منذ أول يوم، ولو
+# سدّدتَ كلّه نقداً.
+
+$sup = Api POST "/suppliers" -Token $token -Body @{ name = "مورّد الفحص $stamp"; balance = 100 }
+if ($sup.Status -notin 200,201) {
+    Skipped "سداد الموردين" "تعذّر إنشاء المورّد (حالة $($sup.Status))"
+} else {
+    $supId = $sup.Body.id
+
+    $st0 = Api GET "/suppliers/$supId/statement" -Token $token
+    Check "كشف حساب المورّد يُقرأ" ($st0.Status -eq 200) "حالة $($st0.Status)"
+    Check "الرصيد الافتتاحي يُقرأ كما أُدخل" ([decimal]$st0.Body.openingBalance -eq 100) `
+        "المعروض $($st0.Body.openingBalance) — الرقم المُدخَل يدوياً رصيدٌ افتتاحي لا رصيد حالي"
+
+    $pay = Api POST "/suppliers/$supId/payments" -Token $token -Body @{
+        branchId = $branchId; amount = 40; method = "cash"; reference = "REC-$stamp"
+    }
+    Check "تسجيل سداد لمورّد" ($pay.Status -in 200,201) "حالة $($pay.Status) — $($pay.Body.message)"
+
+    $bad = Api POST "/suppliers/$supId/payments" -Token $token -Body @{
+        branchId = $branchId; amount = 0; method = "cash"
+    }
+    Check "سداد بصفر يُرفض" ($bad.Status -eq 400) "حالة $($bad.Status)"
+
+    $st1 = Api GET "/suppliers/$supId/statement" -Token $token
+    Check "الرصيد يُشتقّ ويَنقص بالسداد" ([decimal]$st1.Body.balance -eq 60) `
+        "المعروض $($st1.Body.balance) والمتوقَّع 60 (افتتاحي 100 − سداد 40)"
+    Check "الدفعة تظهر في الكشف" (@($st1.Body.payments).Count -eq 1) `
+        "عدد الدفعات $(@($st1.Body.payments).Count)"
+
+    # القيد: من ح/ الموردون إلى ح/ الصندوق.
+    $jp = Api GET "/accounting/journal" -Token $token
+    if ($jp.Status -eq 200) {
+        $payEntry = @($jp.Body) | Where-Object { $_.source -eq 'payment' } | Select-Object -First 1
+        Check "السداد ولّد قيداً آلياً" ($null -ne $payEntry) `
+            "سدادٌ بلا قيد يترك «الموردون» متراكماً بلا طرف مقابل"
+        if ($payEntry) {
+            $d = ($payEntry.lines | Measure-Object -Property debit -Sum).Sum
+            $c = ($payEntry.lines | Measure-Object -Property credit -Sum).Sum
+            Check "قيد السداد متوازن" ([Math]::Abs($d - $c) -lt 0.01) "مدين $d ودائن $c"
+            $hitsPayables = $payEntry.lines | Where-Object { $_.accountCode -eq '2101' -and $_.debit -gt 0 }
+            Check "السداد يُنقص «الموردون» بالمدين" ($null -ne $hitsPayables) `
+                "بلا ذلك يبقى الدَّين كما هو في الميزان"
+        }
+    }
+}
+
 # ── ميزان المراجعة ───────────────────────────────────────────────────────
 $tb = Api GET "/accounting/trial-balance" -Token $token
 Check "ميزان المراجعة يُقرأ" ($tb.Status -eq 200) "حالة $($tb.Status)"

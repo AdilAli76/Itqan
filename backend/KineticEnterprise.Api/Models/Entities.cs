@@ -1683,3 +1683,56 @@ public class Expense
     public Guid? CreatedBy { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }
+
+/// <summary>
+/// سداد لمورّد — دفعةٌ تُنقص ما عليك له.
+///
+/// <para><b>الثقب الذي يسدّه:</b> حساب «الموردون» كان يتراكم بلا طرف مقابل:
+/// كل استلام بضاعة يزيد الدَّين، ولا شيء يُنقصه. فالميزان يقول إنك مدينٌ
+/// بكل ما اشتريتَه منذ أول يوم — ولو سدّدتَ كلّه نقداً.</para>
+///
+/// <para><b>ولا يُعدَّل ولا يُحذف:</b> حركة مالية وقعت. التصحيح بدفعة عكسية
+/// لا بمحوها — نفس حرمة القيد في الدفاتر الأخرى.</para>
+/// </summary>
+public class SupplierPayment
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid OrganizationId { get; set; }
+    public Guid BranchId { get; set; }
+    public Guid SupplierId { get; set; }
+    public decimal Amount { get; set; }
+
+    /// <summary>نقداً أو حوالة — راجع [SupplierPaymentMethods].</summary>
+    public string Method { get; set; } = SupplierPaymentMethods.Cash;
+
+    /// <summary>رقم الإيصال أو الحوالة كما كتبه المورّد.</summary>
+    public string? Reference { get; set; }
+    public string? Note { get; set; }
+
+    /// <summary>
+    /// تاريخ السداد الفعلي — منفصل عن <see cref="CreatedAt"/> عمداً:
+    /// الحوالة تُرسَل الخميس ويُدخلها المحاسب الأحد، وتأريخها بالإدخال يضع
+    /// سداد شهرٍ في الشهر التالي.
+    /// </summary>
+    public DateTime PaidOn { get; set; } = DateTime.UtcNow.Date;
+
+    public Guid? CreatedBy { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+}
+
+public static class SupplierPaymentMethods
+{
+    public const string Cash = "cash";
+
+    /// <summary>
+    /// حوالة مصرفية.
+    ///
+    /// <para>تُقيَّد على «الصندوق» اليوم كالنقد: لا حسابات بنكية مربوطة في
+    /// النظام بعد. **نقصٌ معلوم لا خطأ** — المبلغ صحيح، وينقصه أن يُنسب إلى
+    /// المصرف حين يُبنى. ويبقى مسجَّلاً هنا فيُعرَف لاحقاً أيّها كان حوالة.
+    /// </para>
+    /// </summary>
+    public const string Bank = "bank";
+
+    public static readonly string[] All = { Cash, Bank };
+}

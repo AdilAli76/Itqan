@@ -41,6 +41,7 @@ public class AppDbContext : DbContext
 
     // ── المحاسبة ────────────────────────────────────────────────────────
     public DbSet<Expense> Expenses => Set<Expense>();
+    public DbSet<SupplierPayment> SupplierPayments => Set<SupplierPayment>();
 
     public DbSet<Account> Accounts => Set<Account>();
     public DbSet<JournalEntry> JournalEntries => Set<JournalEntry>();
@@ -107,6 +108,7 @@ public class AppDbContext : DbContext
         // الترحيل وحده. الثقب في الفحص هو ما أخفى الثقب في المخطّط.
         modelBuilder.Entity<Attachment>().ToTable("attachments");
         modelBuilder.Entity<Expense>().ToTable("expenses");
+        modelBuilder.Entity<SupplierPayment>().ToTable("supplier_payments");
         modelBuilder.Entity<Account>().ToTable("accounts");
         modelBuilder.Entity<JournalEntry>().ToTable("journal_entries");
         modelBuilder.Entity<JournalEntryLine>().ToTable("journal_entry_lines");

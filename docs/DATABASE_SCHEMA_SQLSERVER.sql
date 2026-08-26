@@ -727,6 +727,38 @@ GO
 -- سجل محاولات الرقم السري — أساس القفل (5 محاولات فاشلة خلال 15 دقيقة)
 -- ودليل تدقيق على أي محاولة اختراق. معفى من RLS لنفس سبب الفهرس أعلاه.
 -- ----------------------------------------------------------------------------
+--  سداد الموردين
+--
+--  الثقب الذي يسدّه: حساب «الموردون» كان يتراكم بلا طرف مقابل — كل استلام
+--  يزيد الدَّين ولا شيء يُنقصه. فالميزان يقول إنك مدينٌ بكل ما اشتريتَه منذ
+--  أول يوم، ولو سدّدتَ كلّه نقداً.
+--
+--  ولا رصيد مخزَّن للمورّد: يُشتقّ من الافتتاحي + المستلَم − المُعاد − المسدَّد.
+--  عمودٌ مخزَّن يتعارض مع مجموع حركاته عند أول مسار ينسى تحديثه — نفس درس
+--  رصيد المحفظة ودفتر المخزون.
+-- ----------------------------------------------------------------------------
+CREATE TABLE supplier_payments (
+  id UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
+  organization_id UNIQUEIDENTIFIER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  branch_id UNIQUEIDENTIFIER NOT NULL REFERENCES branches(id),
+  supplier_id UNIQUEIDENTIFIER NOT NULL REFERENCES suppliers(id),
+  amount DECIMAL(18,3) NOT NULL,
+  method NVARCHAR(20) NOT NULL
+    CONSTRAINT CK_supplier_payments_method CHECK (method IN ('cash','bank')),
+  reference NVARCHAR(80) NULL,
+  note NVARCHAR(300) NULL,
+  -- تاريخ السداد الفعلي، منفصل عن تاريخ الإدخال.
+  paid_on DATETIME2 NOT NULL,
+  created_by UNIQUEIDENTIFIER NULL REFERENCES app_users(id),
+  created_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+  CONSTRAINT CK_supplier_payments_amount CHECK (amount > 0)
+);
+GO
+
+CREATE INDEX ix_supplier_payments_supplier ON supplier_payments (organization_id, supplier_id, paid_on);
+GO
+
+-- ----------------------------------------------------------------------------
 --  المرفقات — شعار المنظمة، فواتير الموردين، مستندات الاستلام
 --
 --  اسم الملف على القرص فقط لا مسار كامل: نقل مجلد التخزين أو تغيير حرف
@@ -1297,6 +1329,12 @@ GO
 CREATE SECURITY POLICY Security.StockTransferItemsPolicy
   ADD FILTER PREDICATE Security.fn_StockTransferChild(transfer_id) ON dbo.stock_transfer_items,
   ADD BLOCK PREDICATE Security.fn_StockTransferChild(transfer_id) ON dbo.stock_transfer_items AFTER INSERT
+  WITH (STATE = ON);
+GO
+
+CREATE SECURITY POLICY Security.SupplierPaymentsPolicy
+  ADD FILTER PREDICATE Security.fn_TenantPredicate(organization_id, branch_id) ON dbo.supplier_payments,
+  ADD BLOCK PREDICATE Security.fn_TenantPredicate(organization_id, branch_id) ON dbo.supplier_payments AFTER INSERT
   WITH (STATE = ON);
 GO
 
