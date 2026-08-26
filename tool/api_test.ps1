@@ -591,13 +591,18 @@ if ($fefoProduct.Status -notin 200,201) {
     Check "بيع كمية تمتدّ على أكثر من دفعة ينجح" ($spanSale.Status -in 200,201) `
         "حالة $($spanSale.Status) — الرفض يعني أن الفحص ما زال على دفعة واحدة"
 
-    # قراءة رصيد كل دفعة بتعديل صفري: يُرجِع صفّ الرصيد بلا تغييره.
+    # رصيد كل دفعة من نقطة قراءة حقيقية.
+    #
+    # كانت تُقرأ بـ«تعديل مخزون بصفر» — حيلةٌ توقّفت حين صار التعديل الصفري
+    # يُرفض صراحةً («لا تغيير في الكمية»)، وهو رفضٌ صحيح: صفٌّ في الدفتر بلا
+    # حركة ضجيج. فبقيت أربعة فحوص تقارن قيماً فارغة وتفشل بلا أن يكون في
+    # المنتج عطب — وفحصٌ يفشل بلا سبب حقيقي يُدرَّب على تجاهله.
     function Get-BatchQty([string]$name) {
-        $r = Api POST "/products/$fefoId/stock-adjustments" -Token $token -Body @{
-            branchId = $branchId; quantityDelta = 0; batchNumber = $name
-        }
-        if ($r.Status -in 200,201) { return [decimal]$r.Body.quantity }
-        return $null
+        $r = Api GET "/products/$fefoId/batches?branchId=$branchId&includeEmpty=true" -Token $token
+        if ($r.Status -ne 200) { return $null }
+        $row = @($r.Body) | Where-Object { $_.batchNumber -eq $name } | Select-Object -First 1
+        if ($null -eq $row) { return 0 }
+        return [decimal]$row.quantity
     }
 
     $qSoon = Get-BatchQty "B-SOON-$stamp"

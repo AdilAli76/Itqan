@@ -37,6 +37,15 @@ public record ProductInventoryDto(
 
 public record StockAdjustmentRequest(Guid? BranchId, decimal QuantityDelta, string? BatchNumber, DateTime? ExpiryDate);
 
+/// رصيد دفعة واحدة من صنف في فرع.
+public record ProductBatchDto(
+    Guid BranchId, string BranchName, string BatchNumber, DateTime? ExpiryDate,
+    decimal Quantity,
+    /// تاريخ الاستراتيجية: الصلاحية إن وُجدت، وإلا تاريخ الدخول. هو ما
+    /// يُرتَّب به الصرف — راجع StockLedger.
+    DateTime? StrategyDate,
+    bool IsLocked);
+
 /// <summary>دفعة واحدة في تقرير الصلاحية — بما يكفي لعرضها وتحديدها على الرفّ.</summary>
 public record ExpiringBatchDto(
     Guid ProductId, string ProductName, string Sku, string BatchNumber,
@@ -347,6 +356,49 @@ public class ProductsController : ControllerBase
     {
         var product = await _db.Products.FindAsync(id);
         return product is null ? NotFound() : product;
+    }
+
+    /// <summary>
+    /// أرصدة دفعات صنف — «كم بقي من كل شحنة».
+    ///
+    /// <para><b>النقص الذي تسدّه:</b> لم يكن في النظام أي طريق لقراءة رصيد
+    /// دفعة بعينها. شاشة المخزون تعرض المجموع، و<c>expiry-alerts</c> تعرض
+    /// المقترب انتهاؤه وحده. فالصيدلي الذي يسأل «كم بقي من الشحنة التي
+    /// تنتهي في مارس» لا يجد جواباً، ومن يراجع صرفاً بـFEFO لا يستطيع
+    /// التحقّق من أنه صُرف من الدفعة الصحيحة.</para>
+    ///
+    /// <para>مرتَّبة بترتيب الصرف نفسه: الأقرب انتهاءً أولاً. فما يظهر في
+    /// أعلى القائمة هو ما سيخرج في البيع التالي.</para>
+    /// </summary>
+    [RequireModule("inventory")]
+    [HttpGet("{id:guid}/batches")]
+    public async Task<ActionResult<List<ProductBatchDto>>> GetBatches(
+        Guid id, [FromQuery] Guid? branchId, [FromQuery] bool includeEmpty = false)
+    {
+        // سياسة العزل تحصر الصفوف في منظمة الطالب وفرعه.
+        var query = _db.StockLevels.Where(s => s.ProductId == id);
+        if (branchId is { } b) query = query.Where(s => s.BranchId == b);
+
+        // الدفعات المستنفدة تُخفى افتراضاً: صفٌّ بصفر ليس مخزوناً، وإظهاره
+        // يُطيل القائمة بما لا يُصرف. ويبقى متاحاً لمن يراجع صرفاً ماضياً.
+        if (!includeEmpty) query = query.Where(s => s.Quantity > 0);
+
+        var levels = await query.ToListAsync();
+        if (levels.Count == 0) return new List<ProductBatchDto>();
+
+        var branchIds = levels.Select(l => l.BranchId).Distinct().ToList();
+        var branches = await _db.Branches.Where(br => branchIds.Contains(br.Id))
+            .ToDictionaryAsync(br => br.Id, br => br.Name);
+
+        return levels
+            // نفس ترتيب الصرف: تاريخ الاستراتيجية صاعداً، والمقفلة أخيراً.
+            .OrderBy(l => l.IsLocked)
+            .ThenBy(l => l.StrategyDate ?? DateTime.MaxValue)
+            .ThenBy(l => l.BatchNumber)
+            .Select(l => new ProductBatchDto(
+                l.BranchId, branches.GetValueOrDefault(l.BranchId, "-"),
+                l.BatchNumber, l.ExpiryDate, l.Quantity, l.StrategyDate, l.IsLocked))
+            .ToList();
     }
 
     [RequireModule("inventory")]

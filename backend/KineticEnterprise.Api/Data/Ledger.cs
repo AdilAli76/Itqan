@@ -78,7 +78,7 @@ public static class Ledger
                 $"المصدر {source}، الوصف «{description}».");
         }
 
-        var mappings = await db.AccountMappings.ToDictionaryAsync(m => m.Role, m => m.AccountId);
+        var mappings = await EnsureChartAsync(db, organizationId);
 
         var entry = new JournalEntry
         {
@@ -155,7 +155,7 @@ public static class Ledger
                 $"المصدر {source}، الوصف «{description}».");
         }
 
-        var mappings = await db.AccountMappings.ToDictionaryAsync(m => m.Role, m => m.AccountId);
+        var mappings = await EnsureChartAsync(db, organizationId);
 
         var entry = new JournalEntry
         {
@@ -244,6 +244,35 @@ public static class Ledger
 
         db.JournalEntries.Add(reversal);
         return reversal;
+    }
+
+    /// <summary>
+    /// يضمن وجود دليل حسابات مربوط قبل أي ترحيل.
+    ///
+    /// <para><b>الفخّ الذي يُغلقه:</b> منظمةٌ بإصدار المؤسسات تُنشأ ووحدة
+    /// المحاسبة مفعَّلة، لكن الدليل لا يُبذَر إلا بطلب صريح من الشاشة. وبين
+    /// الأمرين **لا تستطيع المنظمة أن تبيع إطلاقاً**: كل فاتورة تصطدم بـ«لا
+    /// حساب مربوط بالدور cash» وتعود 500 غامضاً عند الكاشير.</para>
+    ///
+    /// <para>وهذا أسوأ ما يمكن أن تفعله وحدة محاسبة: أن تُعطّل البيع.</para>
+    ///
+    /// <para><b>ولماذا البذر هنا لا تخطّي الترحيل:</b> التخطّي يعني فاتورة
+    /// بلا قيدها — وهو الثقب الصامت الذي بُني هذا الدفتر لمنعه. والبذر
+    /// حتميّ وآمن للتكرار: لا يلمس دليلاً موجوداً، ولا ربطاً قائماً.</para>
+    /// </summary>
+    private static async Task<Dictionary<string, Guid>> EnsureChartAsync(
+        AppDbContext db, Guid organizationId)
+    {
+        var mappings = await db.AccountMappings.ToDictionaryAsync(m => m.Role, m => m.AccountId);
+        if (mappings.Count > 0) return mappings;
+
+        // بذرٌ كامل إن لم يكن ثمّة دليل، وإكمالُ ربطٍ ناقص إن كان.
+        if (!await ChartOfAccounts.SeedAsync(db, organizationId))
+        {
+            await ChartOfAccounts.RepairMappingsAsync(db, organizationId);
+        }
+
+        return await db.AccountMappings.ToDictionaryAsync(m => m.Role, m => m.AccountId);
     }
 
     /// <summary>
