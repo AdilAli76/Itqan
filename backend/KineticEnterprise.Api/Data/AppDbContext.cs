@@ -102,6 +102,10 @@ public class AppDbContext : DbContext
         modelBuilder.Entity<DebtReminder>().ToTable("debt_reminders");
         modelBuilder.Entity<NotificationItem>().ToTable("notifications");
         modelBuilder.Entity<AuditLog>().ToTable("audit_logs");
+        // بلا ToTable كان الكيان **خارج فحص المخطّط تماماً** — ولهذا لم
+        // يكتشف أحد أن جدول attachments غائب من ملف المخطّط وموجود في
+        // الترحيل وحده. الثقب في الفحص هو ما أخفى الثقب في المخطّط.
+        modelBuilder.Entity<Attachment>().ToTable("attachments");
         modelBuilder.Entity<Expense>().ToTable("expenses");
         modelBuilder.Entity<Account>().ToTable("accounts");
         modelBuilder.Entity<JournalEntry>().ToTable("journal_entries");

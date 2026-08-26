@@ -87,6 +87,11 @@ CREATE TABLE licenses (
   -- سبب التجميد أو الإنهاء — يُعرض للعميل نفسه لا لنا وحدنا.
   status_reason NVARCHAR(300) NULL,
   status_changed_at DATETIME2 NULL,
+  -- شروط العقد المالية — على licenses لا على organizations: هي شروط الاشتراك
+  -- لا هوية الشركة، وتتغيّر مع كل تجديد بينما الهوية ثابتة.
+  monthly_fee DECIMAL(18,3) NOT NULL CONSTRAINT df_licenses_monthly_fee DEFAULT 0,
+  storage_fee DECIMAL(18,3) NOT NULL CONSTRAINT df_licenses_storage_fee DEFAULT 0,
+  maintenance_rate DECIMAL(9,3) NOT NULL CONSTRAINT df_licenses_maintenance_rate DEFAULT 0,
   CONSTRAINT CK_licenses_modules_json CHECK (ISJSON(enabled_modules) = 1)
 );
 GO
@@ -504,7 +509,11 @@ CREATE TABLE purchase_order_items (
   unit_cost DECIMAL(14,2) NOT NULL,
   -- سعر بيع اختياري جديد لهذه الدفعة — عند الاستلام يُحدَّث سعر بيع الصنف
   -- به إن حُدِّد (NULL = يبقى سعر البيع الحالي كما هو).
-  sale_price DECIMAL(14,2) NULL
+  sale_price DECIMAL(14,2) NULL,
+  -- الكمية المستلَمة فعلياً. كان الاستلام كلّه-أو-لا-شيء، فأي توريد ناقص لا
+  -- يمكن تسجيله كما وقع: إمّا يُستلَم الأمر كاملاً (فيدخل المخزون بضاعة لم
+  -- تصل) أو يبقى معلَّقاً (فلا تدخل بضاعة وصلت). كلاهما رصيد خاطئ.
+  received_quantity DECIMAL(18,3) NOT NULL CONSTRAINT df_po_items_received DEFAULT 0
 );
 GO
 
@@ -717,6 +726,30 @@ GO
 
 -- سجل محاولات الرقم السري — أساس القفل (5 محاولات فاشلة خلال 15 دقيقة)
 -- ودليل تدقيق على أي محاولة اختراق. معفى من RLS لنفس سبب الفهرس أعلاه.
+-- ----------------------------------------------------------------------------
+--  المرفقات — شعار المنظمة، فواتير الموردين، مستندات الاستلام
+--
+--  اسم الملف على القرص فقط لا مسار كامل: نقل مجلد التخزين أو تغيير حرف
+--  القرص لا يُبطل الصفوف.
+-- ----------------------------------------------------------------------------
+CREATE TABLE attachments (
+  id               UNIQUEIDENTIFIER NOT NULL DEFAULT NEWID() PRIMARY KEY,
+  organization_id  UNIQUEIDENTIFIER NOT NULL,
+  -- الكيان المرتبط: 'organization_logo' أو 'purchase_order' …
+  entity_type      NVARCHAR(40)  NOT NULL,
+  entity_id        UNIQUEIDENTIFIER NULL,
+  file_name        NVARCHAR(260) NOT NULL,
+  content_type     NVARCHAR(120) NOT NULL,
+  size_bytes       BIGINT        NOT NULL,
+  stored_name      NVARCHAR(120) NOT NULL,
+  uploaded_by      UNIQUEIDENTIFIER NULL,
+  created_at       DATETIME2     NOT NULL DEFAULT SYSUTCDATETIME()
+);
+GO
+
+CREATE INDEX ix_attachments_entity ON attachments (organization_id, entity_type, entity_id);
+GO
+
 CREATE TABLE customer_pin_attempts (
   id UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
   organization_id UNIQUEIDENTIFIER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
@@ -767,10 +800,31 @@ CREATE TABLE invoices (
   -- استحقاق فواتير مضت، وإلا أمكن إخفاء تأخّر بتعديل حقل في شاشة العملاء.
   due_date DATETIME2 NULL,
   status NVARCHAR(15) NOT NULL DEFAULT 'completed' CHECK (status IN ('completed','pending','cancelled','refunded')),
+  -- مفتاح يولّده العميل مرّة لكل عملية بيع ويُعيد إرساله مع كل مزامنة. هو ما
+  -- يجعل إعادة الإرسال آمنة: انقطاع الشبكة بعد وصول الطلب وقبل وصول الرد
+  -- حالة شائعة في متجر، وبدونه تُنشأ الفاتورة مرّتين ويُخصَم المخزون مرّتين.
+  client_request_id NVARCHAR(64) NULL,
+  -- المدفوع فعلاً من الإجمالي. NULL أو مساوٍ للإجمالي = مدفوعة بالكامل،
+  -- وأقلّ منه = دفع جزئي والفرق دَينٌ مقيَّد على محفظة العميل. لا جدول ديون
+  -- منفصل: دفتر المحفظة هو دفتر العميل، ورصيده السالب هو دَينه.
+  paid_amount DECIMAL(18,3) NULL,
+  -- النقد المستلَم والباقي. كانت حاسبة النقد تحسبهما وتعرضهما ثم تنساهما:
+  -- لا يُطبَعان على الإيصال ولا يُراجَعان في تسوية الدرج آخر اليوم. ورقمٌ لا
+  -- يُحفَظ لا يُدقَّق — والدرج الناقص حينها لا يُعرف أهو خطأ صرف أم سرقة.
+  tendered_amount DECIMAL(18,3) NULL,
+  change_due DECIMAL(18,3) NULL,
   created_by UNIQUEIDENTIFIER NULL REFERENCES app_users(id),
   created_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
   CONSTRAINT UQ_invoices_number UNIQUE (organization_id, branch_id, invoice_number)
 );
+GO
+
+-- فهرس فريد مُرشَّح: NULL مسموح ومتكرّر (فواتير ما قبل العمل دون اتصال)،
+-- والقيمة الموجودة لا تتكرّر. وهو ما يجعل إعادة الإرسال تُعيد الفاتورة
+-- نفسها بدل إنشاء ثانية.
+CREATE UNIQUE INDEX UX_invoices_client_request_id
+  ON invoices (client_request_id)
+  WHERE client_request_id IS NOT NULL;
 GO
 
 
@@ -1116,6 +1170,162 @@ CREATE SECURITY POLICY Security.ProductsPolicy
 GO
 
 -- ── المحاسبة ────────────────────────────────────────────────────────────
+-- ============================================================================
+--  سياسات الجداول الأبناء
+--
+--  **جدولٌ بلا organization_id ليس محميّاً بحماية أبيه.** ما دام يُقرأ فعلياً
+--  عبر استعلام يمرّ بالأب فهي حماية بالمصادفة لا بالتصميم، وأول استعلام
+--  مباشر يكسرها. والقياس أثبت ذلك: purchase_order_items كان يُظهر الصفوف
+--  الخمسة نفسها من سياق كل منظمة.
+-- ============================================================================
+
+-- ── الأبناء: يصلون إلى المنظمة عبر الأب ─────────────────────────────────
+CREATE FUNCTION Security.fn_InvoiceChild(@InvoiceId UNIQUEIDENTIFIER)
+RETURNS TABLE
+WITH SCHEMABINDING
+AS
+RETURN SELECT 1 AS fn_result
+WHERE EXISTS (
+    SELECT 1 FROM dbo.invoices i
+    WHERE i.id = @InvoiceId
+      AND i.organization_id = CAST(SESSION_CONTEXT(N'organization_id') AS UNIQUEIDENTIFIER)
+);
+GO
+
+-- ── الحفيد: سطر الدفعة يصل عبر قفزتين ───────────────────────────────────
+--
+-- invoice_item_batches لا يحمل invoice_id ولا organization_id، بل
+-- invoice_item_id وحده. وليس جدولاً هامشياً: منه يُبنى المرتجع، ومنه يُعرف
+-- ما بيع من أي شحنة.
+CREATE FUNCTION Security.fn_InvoiceGrandChild(@InvoiceItemId UNIQUEIDENTIFIER)
+RETURNS TABLE
+WITH SCHEMABINDING
+AS
+RETURN SELECT 1 AS fn_result
+WHERE EXISTS (
+    SELECT 1 FROM dbo.invoice_items ii
+    JOIN dbo.invoices i ON i.id = ii.invoice_id
+    WHERE ii.id = @InvoiceItemId
+      AND i.organization_id = CAST(SESSION_CONTEXT(N'organization_id') AS UNIQUEIDENTIFIER)
+);
+GO
+
+CREATE FUNCTION Security.fn_PurchaseOrderChild(@PurchaseOrderId UNIQUEIDENTIFIER)
+RETURNS TABLE
+WITH SCHEMABINDING
+AS
+RETURN SELECT 1 AS fn_result
+WHERE EXISTS (
+    SELECT 1 FROM dbo.purchase_orders p
+    WHERE p.id = @PurchaseOrderId
+      AND p.organization_id = CAST(SESSION_CONTEXT(N'organization_id') AS UNIQUEIDENTIFIER)
+);
+GO
+
+CREATE FUNCTION Security.fn_PurchaseReceiptChild(@PurchaseReceiptId UNIQUEIDENTIFIER)
+RETURNS TABLE
+WITH SCHEMABINDING
+AS
+RETURN SELECT 1 AS fn_result
+WHERE EXISTS (
+    SELECT 1 FROM dbo.purchase_receipts r
+    WHERE r.id = @PurchaseReceiptId
+      AND r.organization_id = CAST(SESSION_CONTEXT(N'organization_id') AS UNIQUEIDENTIFIER)
+);
+GO
+
+CREATE FUNCTION Security.fn_StockCountChild(@StockCountId UNIQUEIDENTIFIER)
+RETURNS TABLE
+WITH SCHEMABINDING
+AS
+RETURN SELECT 1 AS fn_result
+WHERE EXISTS (
+    SELECT 1 FROM dbo.stock_counts c
+    WHERE c.id = @StockCountId
+      AND c.organization_id = CAST(SESSION_CONTEXT(N'organization_id') AS UNIQUEIDENTIFIER)
+);
+GO
+
+CREATE FUNCTION Security.fn_StockTransferChild(@TransferId UNIQUEIDENTIFIER)
+RETURNS TABLE
+WITH SCHEMABINDING
+AS
+RETURN SELECT 1 AS fn_result
+WHERE EXISTS (
+    SELECT 1 FROM dbo.stock_transfers t
+    WHERE t.id = @TransferId
+      AND t.organization_id = CAST(SESSION_CONTEXT(N'organization_id') AS UNIQUEIDENTIFIER)
+);
+GO
+
+CREATE SECURITY POLICY Security.InvoiceItemsPolicy
+  ADD FILTER PREDICATE Security.fn_InvoiceChild(invoice_id) ON dbo.invoice_items,
+  ADD BLOCK PREDICATE Security.fn_InvoiceChild(invoice_id) ON dbo.invoice_items AFTER INSERT
+  WITH (STATE = ON);
+GO
+
+CREATE SECURITY POLICY Security.InvoicePaymentsPolicy
+  ADD FILTER PREDICATE Security.fn_InvoiceChild(invoice_id) ON dbo.invoice_payments,
+  ADD BLOCK PREDICATE Security.fn_InvoiceChild(invoice_id) ON dbo.invoice_payments AFTER INSERT
+  WITH (STATE = ON);
+GO
+
+CREATE SECURITY POLICY Security.InvoiceItemBatchesPolicy
+  ADD FILTER PREDICATE Security.fn_InvoiceGrandChild(invoice_item_id) ON dbo.invoice_item_batches,
+  ADD BLOCK PREDICATE Security.fn_InvoiceGrandChild(invoice_item_id) ON dbo.invoice_item_batches AFTER INSERT
+  WITH (STATE = ON);
+GO
+
+CREATE SECURITY POLICY Security.PurchaseOrderItemsPolicy
+  ADD FILTER PREDICATE Security.fn_PurchaseOrderChild(purchase_order_id) ON dbo.purchase_order_items,
+  ADD BLOCK PREDICATE Security.fn_PurchaseOrderChild(purchase_order_id) ON dbo.purchase_order_items AFTER INSERT
+  WITH (STATE = ON);
+GO
+
+CREATE SECURITY POLICY Security.PurchaseReceiptItemsPolicy
+  ADD FILTER PREDICATE Security.fn_PurchaseReceiptChild(purchase_receipt_id) ON dbo.purchase_receipt_items,
+  ADD BLOCK PREDICATE Security.fn_PurchaseReceiptChild(purchase_receipt_id) ON dbo.purchase_receipt_items AFTER INSERT
+  WITH (STATE = ON);
+GO
+
+CREATE SECURITY POLICY Security.StockCountItemsPolicy
+  ADD FILTER PREDICATE Security.fn_StockCountChild(stock_count_id) ON dbo.stock_count_items,
+  ADD BLOCK PREDICATE Security.fn_StockCountChild(stock_count_id) ON dbo.stock_count_items AFTER INSERT
+  WITH (STATE = ON);
+GO
+
+CREATE SECURITY POLICY Security.StockTransferItemsPolicy
+  ADD FILTER PREDICATE Security.fn_StockTransferChild(transfer_id) ON dbo.stock_transfer_items,
+  ADD BLOCK PREDICATE Security.fn_StockTransferChild(transfer_id) ON dbo.stock_transfer_items AFTER INSERT
+  WITH (STATE = ON);
+GO
+
+CREATE SECURITY POLICY Security.AttachmentsPolicy
+  ADD FILTER PREDICATE Security.fn_OrgOnlyPredicate(organization_id) ON dbo.attachments,
+  ADD BLOCK PREDICATE Security.fn_OrgOnlyPredicate(organization_id) ON dbo.attachments AFTER INSERT
+  WITH (STATE = ON);
+GO
+
+CREATE SECURITY POLICY Security.CustomerPinAttemptsPolicy
+  ADD FILTER PREDICATE Security.fn_OrgOnlyPredicate(organization_id) ON dbo.customer_pin_attempts,
+  ADD BLOCK PREDICATE Security.fn_OrgOnlyPredicate(organization_id) ON dbo.customer_pin_attempts AFTER INSERT
+  WITH (STATE = ON);
+GO
+
+CREATE SECURITY POLICY Security.PosShiftsPolicy
+  ADD FILTER PREDICATE Security.fn_OrgOnlyPredicate(organization_id) ON dbo.pos_shifts,
+  ADD BLOCK PREDICATE Security.fn_OrgOnlyPredicate(organization_id) ON dbo.pos_shifts AFTER INSERT
+  WITH (STATE = ON);
+GO
+
+-- FILTER بلا BLOCK: سجلّ الدخول يُكتب **قبل** وجود أي سياق — المستخدم لم
+-- يُصادَق عليه بعد. فمنعُ الإدراج يمنع تسجيل المحاولات الفاشلة، وهي أهمّ ما
+-- في هذا الجدول.
+CREATE SECURITY POLICY Security.LoginHistoryPolicy
+  ADD FILTER PREDICATE Security.fn_OrgOnlyPredicate(organization_id) ON dbo.login_history
+  WITH (STATE = ON);
+GO
+
 CREATE SECURITY POLICY Security.AccountsPolicy
   ADD FILTER PREDICATE Security.fn_OrgOnlyPredicate(organization_id) ON dbo.accounts,
   ADD BLOCK PREDICATE Security.fn_OrgOnlyPredicate(organization_id) ON dbo.accounts AFTER INSERT
