@@ -7,6 +7,7 @@ import 'package:intl/intl.dart';
 import '../../../core/network/api_client.dart';
 import '../../../core/responsive/adaptive_scaffold.dart';
 import '../../../core/theme/app_colors.dart';
+import '../../../core/time/app_clock.dart';
 import '../../../core/theme/branding_provider.dart';
 import '../../../core/theme/app_text_styles.dart';
 import '../../../shared/widgets/currency_badge.dart';
@@ -328,7 +329,7 @@ class _ProductsSectionState extends ConsumerState<_ProductsSection> {
       return _tag('نفاد المخزون', AppColors.danger, AppColors.dangerBg);
     }
     if (trackExpiry && expiry != null) {
-      final daysLeft = expiry.difference(DateTime.now()).inDays;
+      final daysLeft = expiry.difference(AppClock.now()).inDays;
       if (daysLeft < 0) return _tag('منتهي الصلاحية', AppColors.danger, AppColors.dangerBg);
       if (daysLeft <= 7) return _tag('ينتهي خلال $daysLeft أيام', AppColors.warning, AppColors.warningBg);
     }
@@ -1160,7 +1161,7 @@ class _LockedStockSection extends ConsumerWidget {
 
   List<Widget> _row(BuildContext context, Map<String, dynamic> r) {
     final lockedAt = r['lockedAt'] != null ? DateTime.tryParse(r['lockedAt'] as String) : null;
-    final days = lockedAt == null ? null : DateTime.now().difference(lockedAt).inDays;
+    final days = lockedAt == null ? null : AppClock.now().difference(lockedAt).inDays;
     final batchNumber = r['batchNumber'] as String? ?? '';
 
     return [

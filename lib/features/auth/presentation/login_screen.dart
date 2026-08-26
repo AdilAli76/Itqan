@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/network/api_client.dart';
+import '../../../core/network/offline_queue.dart';
 import '../../../core/responsive/breakpoints.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_text_styles.dart';
@@ -42,6 +43,12 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       AppColors.applyBranchPalette(response.data['branchPalette'] as String?);
 
       ref.invalidate(brandingProvider);
+
+      // طابور البيع المؤجَّل يخصّ منظمةً بعينها: بلا إعادة تحميله هنا يبقى
+      // طابور من دخل قبله معروضاً لمن دخل الآن — وهو ما كان يُظهر عدّاد
+      // مزامنة لمنظمة أخرى على الجهاز نفسه.
+      await ref.read(offlineQueueProvider.notifier).reloadForCurrentUser();
+
       if (mounted) context.go('/app');
     } catch (_) {
       setState(() => _error = 'بيانات الدخول غير صحيحة، أو تعذّر الاتصال بالسيرفر');

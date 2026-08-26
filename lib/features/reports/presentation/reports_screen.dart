@@ -7,6 +7,7 @@ import '../../../core/network/api_client.dart';
 import '../../../core/responsive/adaptive_scaffold.dart';
 import '../../../core/responsive/breakpoints.dart';
 import '../../../core/theme/app_colors.dart';
+import '../../../core/time/app_clock.dart';
 import '../../../core/theme/app_text_styles.dart';
 import '../../../shared/widgets/currency_badge.dart';
 import '../../../shared/widgets/data_table_widget.dart';
@@ -267,7 +268,26 @@ class _RevenueChart extends StatelessWidget {
       byDate[_dayFormat.format(date)] = (point['revenue'] as num?)?.toDouble() ?? 0;
     }
 
-    final dayCount = DateTime.now().difference(from).inDays + 1;
+    // تاريخ بداية بعد اليوم يُنتج عدداً سالباً، وList.generate بعدد سالب
+    // يرمي RangeError **فتسقط شاشة التقارير كلّها** — لا رسماً فارغاً بل
+    // شاشة بيضاء. ويقع فعلاً بمن يختار تاريخاً في المستقبل من منتقي المدى.
+    //
+    // (كشفته جولة اللقطات حين ثُبِّت وقتها قبل تواريخ العيّنات.)
+    final dayCount = AppClock.now().difference(from).inDays + 1;
+    if (dayCount <= 0) {
+      return Container(
+        height: 240,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AppColors.border),
+        ),
+        child: Text('تاريخ البداية بعد اليوم — اختر مدى منتهياً.',
+            style: AppTextStyles.bodyMd(color: AppColors.textSecondary)),
+      );
+    }
+
     final spots = List.generate(dayCount, (i) {
       final day = from.add(Duration(days: i));
       return FlSpot(i.toDouble(), byDate[_dayFormat.format(day)] ?? 0);

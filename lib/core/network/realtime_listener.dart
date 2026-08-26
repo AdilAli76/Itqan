@@ -36,6 +36,22 @@ class _RealtimeListenerState extends ConsumerState<RealtimeListener> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) ref.read(realtimeServiceProvider).connect();
     });
+
+    // تفريغ الطابور عند الإقلاع أيضاً، لا عند انتقال الحالة وحده.
+    //
+    // **العطب الذي يصلحه:** المزامنة كانت تقع فقط عند الانتقال من «غير
+    // متصل» إلى «متصل». والحالة الغالبة أن يُفتح التطبيق **وهو متصل
+    // أصلاً** — فلا انتقال يقع ولا تُستدعى المزامنة أبداً، فيبقى الطابور
+    // المستعاد من التخزين معروضاً إلى الأبد رغم وجود الإنترنت. وهو ما
+    // يظهر للمستخدم كعدّاد «يحتاج مزامنة» لا يتحدّث مهما فعل.
+    //
+    // ويُعاد تحميل الطابور أولاً: التوكن قد يكون قُرئ بعد إنشاء المزوّد،
+    // ومنظمة الطابور تُعرَف منه.
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      await ref.read(offlineQueueProvider.notifier).reloadForCurrentUser();
+      if (mounted) await _drainQueue();
+    });
   }
 
   /// ما الذي يبطُل عند كل حدث. الإبطال ضيّق عمداً: إبطال كل شيء عند أي حدث
@@ -103,6 +119,7 @@ class _RealtimeListenerState extends ConsumerState<RealtimeListener> {
 
     return widget.child;
   }
+
 
   Future<void> _drainQueue() async {
     final queue = ref.read(offlineQueueProvider);

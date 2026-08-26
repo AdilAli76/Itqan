@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import 'api_client.dart';
+import '../auth/current_user.dart';
 
 /// طابور البيع دون اتصال — يُبقي نقطة البيع عاملة أثناء انقطاع الشبكة.
 ///
@@ -97,8 +98,27 @@ class OfflineQueueNotifier extends StateNotifier<QueueState> {
     _restore();
   }
 
-  static const _key = 'kinetic_offline_sales';
+  /// مفتاح الطابور — **بمعرّف المنظمة**.
+  ///
+  /// <para><b>العطب الذي يصلحه:</b> كان مفتاحاً عالمياً واحداً
+  /// (<c>kinetic_offline_sales</c>) لكل من يستعمل الجهاز. فمنظمةٌ باعت بلا
+  /// إنترنت تترك طابورها، ثم يدخل مستخدم منظمة أخرى على الجهاز نفسه فيرى
+  /// **عدّاد المزامنة قائماً** لعمليات ليست له. وأسوأ من العرض: المزامنة
+  /// تحاول إرسالها بتوكنه هو، فيرفضها الخادم (معرّفات أصناف وفروع من منظمة
+  /// أخرى) — فتبقى معلّقة بلا تفسير.</para>
+  ///
+  /// <para>ولا يُمحى المفتاح القديم: قد يحمل مبيعات حقيقية لم تصل بعد.
+  /// يُهاجَر مرّةً إلى مفتاح المنظمة الحالية — راجع [_restore].</para>
+  static const _legacyKey = 'kinetic_offline_sales';
+  static String _keyFor(String? organizationId) =>
+      organizationId == null || organizationId.isEmpty
+          ? _legacyKey
+          : 'kinetic_offline_sales_$organizationId';
+
   static const _storage = FlutterSecureStorage();
+
+  /// المنظمة التي يخصّها الطابور المُحمَّل الآن.
+  String? _organizationId;
 
   /// سقف الطابور. انقطاع يتجاوز مئتَي فاتورة يعني عطلاً ممتداً يحتاج تدخّلاً
   /// لا تكديساً صامتاً — وامتلاء الطابور يجب أن يُبلَّغ به لا أن يُبتلع.
@@ -106,8 +126,38 @@ class OfflineQueueNotifier extends StateNotifier<QueueState> {
 
   Future<void> _restore() async {
     try {
-      final raw = await _storage.read(key: _key);
-      if (raw == null || raw.isEmpty) return;
+      final claims = await readJwtClaims();
+      _organizationId = claims?['organization_id'] as String?;
+
+      // بلا توكن لا طابور يُعرَض: عدّادٌ يظهر قبل الدخول لا يخصّ أحداً بعد.
+      if (_organizationId == null) {
+        state = const QueueState();
+        return;
+      }
+
+      final key = _keyFor(_organizationId);
+      var raw = await _storage.read(key: key);
+
+      // هجرة الطابور القديم مرّةً واحدة إلى مفتاح هذه المنظمة.
+      //
+      // **ولمن يُهاجَر؟** لأول منظمة تفتح التطبيق بعد الترقية. وهذا ليس
+      // دقيقاً بالضرورة — قد يكون الطابور لمنظمة أخرى استعملت الجهاز — لكنه
+      // أفضل من الخيارين الآخرين: محوُه يُضيّع مبيعات حقيقية لم تصل، وتركُه
+      // يُبقي العطب الأصلي قائماً لكل من يدخل. والخادم هو الحكم أخيراً:
+      // فاتورةٌ من منظمة أخرى يرفضها بـ400 فتسقط من الطابور.
+      if (raw == null || raw.isEmpty) {
+        final legacy = await _storage.read(key: _legacyKey);
+        if (legacy != null && legacy.isNotEmpty) {
+          raw = legacy;
+          await _storage.write(key: key, value: legacy);
+          await _storage.delete(key: _legacyKey);
+        }
+      }
+
+      if (raw == null || raw.isEmpty) {
+        state = const QueueState();
+        return;
+      }
       final list = (json.decode(raw) as List)
           .map((e) => OfflineSale.fromJson(e as Map<String, dynamic>))
           .toList();
@@ -117,10 +167,17 @@ class OfflineQueueNotifier extends StateNotifier<QueueState> {
     }
   }
 
+  /// يُعيد تحميل الطابور لمنظمة المستخدم الحالي — يُستدعى بعد الدخول.
+  ///
+  /// بلا هذا يبقى الطابور المُحمَّل وقت الإقلاع (أو الفارغ) معروضاً حتى
+  /// إعادة تشغيل التطبيق، فيرى الداخلُ الجديد عدّاد من قبله.
+  Future<void> reloadForCurrentUser() => _restore();
+
   Future<void> _persist(List<OfflineSale> sales) async {
     state = QueueState(pending: sales, syncing: state.syncing);
     try {
-      await _storage.write(key: _key, value: json.encode(sales.map((s) => s.toJson()).toList()));
+      await _storage.write(
+          key: _keyFor(_organizationId), value: json.encode(sales.map((s) => s.toJson()).toList()));
     } catch (_) {
       // فشل الكتابة يعني ضياع الطابور عند إعادة التشغيل — نتركه في الذاكرة
       // على الأقل ليُزامَن في هذه الجلسة.

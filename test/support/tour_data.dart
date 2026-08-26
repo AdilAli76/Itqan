@@ -132,6 +132,12 @@ FixtureAdapter installFixtureAdapter() {
     );
   }
   final adapter = FixtureAdapter(dir);
+
+  // عنوان وهمي: العميل يبدأ بعنوان فارغ خارج الويب حتى يضبطه المستخدم
+  // (راجع ApiClient.needsSetup)، وDio بعنوان فارغ يبني URI نسبياً فيسلك
+  // مساراً مختلفاً قبل أن يصل المُعترِض. والعيّنات تُطابَق بالمسار وحده،
+  // فأي مضيف يفي بالغرض.
+  ApiClient.instance.dio.options.baseUrl = 'http://fixtures.test/api';
   ApiClient.instance.dio.httpClientAdapter = adapter;
   _adapter = adapter;
   return adapter;

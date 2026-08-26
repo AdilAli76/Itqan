@@ -10,6 +10,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:kinetic_enterprise/core/auth/permissions.dart';
 import 'package:kinetic_enterprise/core/shell/screen_registry.dart';
 import 'package:kinetic_enterprise/core/theme/app_colors.dart';
+import 'package:kinetic_enterprise/core/time/app_clock.dart';
 import 'package:kinetic_enterprise/core/theme/app_theme.dart';
 
 import 'support/tour_data.dart';
@@ -99,6 +100,12 @@ void main() {
     final outDir = Directory('test/screenshots');
     if (!outDir.existsSync()) outDir.createSync(recursive: true);
     // اعتراض طبقة النقل مرّة واحدة لكل الجولة.
+    // الوقت مثبَّت: شاشتا التقارير والمخزون تعرضان «عدد الأيام منذ كذا» و
+    // «تنتهي خلال كذا يوماً» — محسوبَين من الآن على عيّنات ثابتة التواريخ.
+    // فبلا التثبيت تتغيّر اللقطة كل منتصف ليل بلا أن يتغيّر سطر من الكود،
+    // ويصير الفشل اليومي الكاذب عادةً يُتجاهَل معها الفشل الحقيقي.
+    AppClock.freeze(DateTime(2026, 8, 25, 12));
+
     installFixtureAdapter();
   });
 

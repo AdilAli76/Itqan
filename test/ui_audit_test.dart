@@ -12,6 +12,7 @@ import 'package:kinetic_enterprise/core/network/api_client.dart';
 import 'package:kinetic_enterprise/core/shell/screen_registry.dart';
 import 'package:kinetic_enterprise/core/theme/app_theme.dart';
 import 'package:kinetic_enterprise/core/theme/app_colors.dart';
+import 'package:kinetic_enterprise/core/time/app_clock.dart';
 
 /// ============================================================================
 ///  فحص بصري آلي لكل شاشات النظام
@@ -61,6 +62,8 @@ void main() {
   setUpAll(() {
     // تخزين آمن محاكى + توكن وهمي بادّعاءات مدير عام. الكود يفكّ الحمولة
     // ولا يتحقق من التوقيع (يتحقق منه السيرفر)، فتوكن مُركَّب يكفي هنا.
+    AppClock.freeze(DateTime(2026, 8, 25, 12));
+
     FlutterSecureStorage.setMockInitialValues({
       'kinetic_jwt_token': _fakeJwt({
         'organization_id': '00000000-0000-0000-0000-000000000001',
