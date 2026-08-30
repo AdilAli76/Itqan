@@ -45,6 +45,15 @@ jobs:
     # يقرأ مرفَق الإصدار ولا يكتب شيئاً على GitHub.
     permissions:
       contents: read
+
+    # كل الخطوات بـpowershell لا pwsh.
+    #
+    # عدّاءات GitHub المُستضافة تحمل PowerShell 7؛ وخادم ويندوز عاديّ لا
+    # يحمل إلا 5.1 المدمج. وسكربتات هذا المشروع مكتوبة له أصلاً — فتثبيت
+    # السابع على خادم إنتاج زيادةٌ تُصان بلا مقابل.
+    defaults:
+      run:
+        shell: powershell
     timeout-minutes: 30
     environment: ${{ inputs.target }}
 
@@ -55,8 +64,11 @@ jobs:
       # خادم ويندوز عاري، وأداةُ gh ليست عليه — واعتماد سير النشر على أداة
       # تُثبَّت يدوياً يجعله يفشل يوم يُعاد بناء الخادم.
       - name: تنزيل الحزمة من الإصدار
-        shell: pwsh
+        shell: powershell
         run: |
+          # ‏PowerShell 5.1 لا يتفاوض TLS 1.2 افتراضاً على ويندوز سيرفر،
+          # فيُقطع الاتصال بـGitHub برسالةٍ لا تذكر السبب.
+          [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
           $h = @{ Authorization = 'Bearer ${{ github.token }}'; 'User-Agent' = 'kinetic-deploy' }
           $rel = Invoke-RestMethod -Headers $h `
             "https://api.github.com/repos/${{ github.repository }}/releases/tags/${{ inputs.tag }}"
@@ -103,7 +115,7 @@ jobs:
       # خادم قطّ — وكله يبدو صحيحاً في السجلّ لأن رقم الوسم واحد.
       - name: التحقّق أن هذه الحزمة جُرِّبت
         if: inputs.target == 'production'
-        shell: pwsh
+        shell: powershell
         run: |
           $log = 'C:\kinetic-staging\deploy.log'
           if (-not (Test-Path $log)) { throw 'لا سجلّ نشر على بيئة التجربة — انشر عليها أولاً.' }
@@ -123,7 +135,7 @@ jobs:
       # نشرٌ يتأخّر ساعة أهون من دفاتر لا مرجع لها.
       - name: نسخة احتياطية قبل الترحيل
         if: inputs.target == 'production' && !inputs.skip_db
-        shell: pwsh
+        shell: powershell
         run: |
           $b = 'C:\kinetic\tool\backup.ps1'
           if (-not (Test-Path $b)) { throw "backup.ps1 غير موجود في C:\kinetic\tool — انشر حزمة حديثة على الإنتاج يدوياً مرّة، أو خذ نسخة بنفسك قبل المتابعة." }
@@ -131,7 +143,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'فشلت النسخة الاحتياطية — أُوقف النشر قبل أي ترحيل.' }
 
       - name: الترقية
-        shell: pwsh
+        shell: powershell
         run: |
           # ‏$args اسمٌ تلقائي في PowerShell — التسمية هنا $deploy تفادياً
           # لتصادمٍ يُفرغ الجدول بلا رسالة.
@@ -155,7 +167,7 @@ jobs:
       # باسم TEST- ولا مكان لها في دفاتر عميل.
       - name: فحص الواجهة بعد النشر
         if: inputs.target == 'staging'
-        shell: pwsh
+        shell: powershell
         continue-on-error: true
         run: |
           $t = 'C:\kinetic-staging\tool\api_test.ps1'
@@ -163,7 +175,7 @@ jobs:
 
       - name: ملخّص النشر
         if: always()
-        shell: pwsh
+        shell: powershell
         run: |
           # بأقواسٍ مفردة — راجع build-release.yml: علامة الهروب داخل نصٍّ
           # مزدوج ابتلعت الاقتباس الختامي فأسقطت وظيفةً نجحت.
