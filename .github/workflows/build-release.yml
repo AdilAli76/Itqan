@@ -6,7 +6,8 @@
 # فخرجت حزمة تعمل ظاهرياً وفيها شاشة معطّلة.
 #
 # التشغيل:  git tag v1.2.0 && git push origin v1.2.0
-# المخرَج:  publish.zip مرفقة بالإصدار على GitHub.
+# المخرَج:  kinetic_pkg_<التاريخ>_<الوقت>.zip مرفقة بالإصدار على GitHub،
+#           ومعها ملف بصمتها.
 
 name: بناء حزمة النشر
 
@@ -16,10 +17,17 @@ on:
   workflow_dispatch:
 
 jobs:
+  # لا تُبنى حزمة من شيفرة لم تمرّ بالفحص. والوسم لا يعني أن الاختبارات
+  # شُغِّلت — يعني أن أحداً كتب أمر وسم.
+  verify:
+    uses: ./.github/workflows/ci.yml
+
   build:
+    needs: verify
     # ويندوز إلزامي لا تفضيل: الخادم يُنشر win-x64، والنشر المستقلّ عن
     # المنصّة يُنتج ملفات لا تعمل على IIS كما هو مضبوط.
     runs-on: windows-latest
+    timeout-minutes: 45
 
     steps:
       - uses: actions/checkout@v4
@@ -32,13 +40,12 @@ jobs:
       - name: تهيئة Flutter
         uses: subosito/flutter-action@v2
         with:
+          flutter-version: '3.44.9'
           channel: stable
+          cache: true
 
       - name: جلب الاعتماديات
         run: flutter pub get
-
-      - name: فحص التحليل الساكن
-        run: flutter analyze lib
 
       # البناء النظيف مقصود: مجلدات .dart_tool المتبقّية هي ما يُسقط
       # تسجيل إضافات الويب من الحزمة بلا أي رسالة خطأ.
@@ -49,25 +56,41 @@ jobs:
           flutter pub get
           .\tool\publish.ps1
 
-      - name: بصمة الحزمة
+      # الاسم مؤرَّخ لا ثابت (kinetic_pkg_2026-08-30_1412.zip) — راجع
+      # publish.ps1. فيُلتقط بنمطه لا بحرفه، وغيابُه خطأ يوقف السير:
+      # وظيفةٌ «تنجح» وترفع لا شيء أسوأ من وظيفةٍ تفشل.
+      - name: تحديد الحزمة وبصمتها
         shell: pwsh
         run: |
-          $h = (Get-FileHash publish.zip -Algorithm SHA256).Hash
-          Write-Host "SHA256: $h"
-          $h | Out-File publish.zip.sha256 -Encoding utf8
+          $pkg = Get-ChildItem -Filter 'kinetic_pkg_*.zip' |
+                 Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          if (-not $pkg) { throw 'لم تُنتَج حزمة — راجع خطوة البناء أعلاه.' }
+          $h = (Get-FileHash $pkg.FullName -Algorithm SHA256).Hash
+          "$h  $($pkg.Name)" | Out-File "$($pkg.FullName).sha256" -Encoding utf8
+          Write-Host "الحزمة: $($pkg.Name)  ($([math]::Round($pkg.Length/1MB,1)) ميغابايت)"
+          Write-Host "البصمة: $h"
+          "PKG=$($pkg.Name)" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "SHA=$h"           | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: ملخّص الإصدار
+        shell: pwsh
+        run: |
+          "## الحزمة`n`n- **الملف:** ``$env:PKG```n- **SHA256:** ``$env:SHA```" |
+            Out-File $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
 
       - name: إرفاق بالإصدار
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            publish.zip
-            publish.zip.sha256
+            kinetic_pkg_*.zip
+            kinetic_pkg_*.zip.sha256
 
       - name: حفظ الحزمة كأثر
         uses: actions/upload-artifact@v4
         with:
-          name: publish
+          name: kinetic_pkg
           path: |
-            publish.zip
-            publish.zip.sha256
+            kinetic_pkg_*.zip
+            kinetic_pkg_*.zip.sha256
+          retention-days: 30

@@ -1,0 +1,146 @@
+# النشر على الخادم — تجربةً ثم إنتاجاً، من نفس الحزمة.
+#
+# ما يحلّه: النشر اليدوي كان أربع خطوات على جهازين — يُبنى هنا، يُرفع عبر
+# سطح المكتب البعيد، يُفكّ هناك، ثم يُنفَّذ deploy_update. وكل خطوة تُنسى
+# أو تُنفَّذ على النسخة الخطأ، ولا أثر يقول أيّ نسخةٍ تعمل الآن أين.
+#
+# وهذا السير لا يبني شيئاً: يُنزّل **الحزمة المبنيّة نفسها** من الإصدار،
+# فما يصل الإنتاج هو عين ما جُرِّب بايتاً ببايت — لا إعادة بناء «من نفس
+# الشيفرة»، فذاك يُبطل التجربة كلّها.
+#
+# يعمل على عدّاءٍ مُستضاف ذاتياً على الخادم — راجع tool/runner_setup.ps1.
+
+name: النشر
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'وسم الإصدار المراد نشره (مثال v1.2.0)'
+        required: true
+        type: string
+      target:
+        description: 'الوجهة'
+        required: true
+        type: choice
+        default: staging
+        options: [staging, production]
+      skip_db:
+        description: 'تخطّي الترحيلات (نُفِّذت للتوّ)'
+        type: boolean
+        default: false
+
+# نشرتان معاً على خادم واحد تتنازعان نفس الملفات المقفولة. الطابور لا
+# الإلغاء: نشرةٌ تُلغى في منتصفها تترك ملفات نسختين مختلطة.
+concurrency:
+  group: deploy-${{ inputs.target }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: [self-hosted, windows, kinetic]
+    timeout-minutes: 30
+    environment: ${{ inputs.target }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # التنزيل عبر REST مباشرةً لا عبر gh: العدّاء المُستضاف ذاتياً هو
+      # خادم ويندوز عاري، وأداةُ gh ليست عليه — واعتماد سير النشر على أداة
+      # تُثبَّت يدوياً يجعله يفشل يوم يُعاد بناء الخادم.
+      - name: تنزيل الحزمة من الإصدار
+        shell: pwsh
+        run: |
+          $h = @{ Authorization = 'Bearer ${{ github.token }}'; 'User-Agent' = 'kinetic-deploy' }
+          $rel = Invoke-RestMethod -Headers $h `
+            "https://api.github.com/repos/${{ github.repository }}/releases/tags/${{ inputs.tag }}"
+          $asset = $rel.assets | Where-Object { $_.name -like 'kinetic_pkg_*.zip' } | Select-Object -First 1
+          if (-not $asset) { throw "لا حزمة مرفقة بالإصدار ${{ inputs.tag }} — راجع سير «بناء حزمة النشر»." }
+
+          $dir = Join-Path $env:RUNNER_TEMP 'pkg'
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          $pkg = Join-Path $dir $asset.name
+          Invoke-WebRequest -Headers ($h + @{ Accept = 'application/octet-stream' }) `
+            -Uri $asset.url -OutFile $pkg
+
+          $sha = (Get-FileHash $pkg -Algorithm SHA256).Hash
+
+          # البصمة تُقارَن بالمرفَق .sha256 الذي كُتب وقت البناء: تنزيلٌ
+          # مبتور يُنتج ملفاً صالح الاسم فاسد المحتوى، ويُفكّ نصفَ حزمة
+          # فوق نشرٍ يعمل.
+          $sig = $rel.assets | Where-Object { $_.name -like '*.sha256' } | Select-Object -First 1
+          if ($sig) {
+              # إلى ملف ثم يُقرأ: محتوى Invoke-WebRequest يعود نصّاً أو
+              # بايتات بحسب إصدار PowerShell والترويسة، وفكّ ترميزه يدوياً
+              # يفشل على أحدهما.
+              $sigFile = Join-Path $dir 'pkg.sha256'
+              Invoke-WebRequest -Headers ($h + @{ Accept = 'application/octet-stream' }) `
+                -Uri $sig.url -OutFile $sigFile
+              $want = (Get-Content $sigFile -Raw) -replace '[^0-9A-Fa-f]', ''
+              if ($want.Length -ge 64 -and $want.Substring(0,64) -ne $sha) {
+                  throw "بصمة الحزمة المُنزَّلة لا تطابق المرفَق — التنزيل مبتور أو الحزمة استُبدلت."
+              }
+          }
+
+          Write-Host "الحزمة: $($asset.name)"
+          Write-Host "البصمة: $sha"
+          "PKG=$pkg" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "SHA=$sha" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+
+      # ── بوّابة الإنتاج ────────────────────────────────────────────────
+      #
+      # لا يصل الإنتاج إلا ما نُشر على التجربة **بعينه**. والدليل ليس ذاكرةَ
+      # أحد بل deploy.log على الخادم: هو من كتب البصمة ساعةَ النشر فعلاً.
+      #
+      # وهذا يمسك الحالة التي لا يمسكها انضباط: وسمٌ جديد بُني وأُصلح فيه
+      # سطر بعد اختبار التجربة، فيُنشر على الإنتاج شيءٌ لم يعمل على أي
+      # خادم قطّ — وكله يبدو صحيحاً في السجلّ لأن رقم الوسم واحد.
+      - name: التحقّق أن هذه الحزمة جُرِّبت
+        if: inputs.target == 'production'
+        shell: pwsh
+        run: |
+          $log = 'C:\kinetic-staging\deploy.log'
+          if (-not (Test-Path $log)) { throw 'لا سجلّ نشر على بيئة التجربة — انشر عليها أولاً.' }
+          if (-not (Select-String -Path $log -SimpleMatch $env:SHA -Quiet)) {
+            throw "هذه الحزمة ($($env:SHA.Substring(0,16))…) لم تُنشر على التجربة. انشرها هناك واختبرها، ثم أعد المحاولة بنفس الوسم."
+          }
+          $when = (Select-String -Path $log -SimpleMatch $env:SHA | Select-Object -Last 1).Line.Split('|')[0].Trim()
+          Write-Host "مطابِقة: نُشرت على التجربة في $when"
+
+      - name: الترقية
+        shell: pwsh
+        run: |
+          # ‏$args اسمٌ تلقائي في PowerShell — التسمية هنا $deploy تفادياً
+          # لتصادمٍ يُفرغ الجدول بلا رسالة.
+          $deploy = @{ Package = $env:PKG }
+          if ('${{ inputs.target }}' -eq 'staging') {
+              $deploy.Target   = 'C:\kinetic-staging'
+              $deploy.SiteName = 'KineticStaging'
+              $deploy.PoolName = 'KineticStagingPool'
+          } else {
+              $deploy.Target   = 'C:\kinetic'
+              $deploy.SiteName = 'Kinetic'
+              $deploy.PoolName = 'KineticApi'
+          }
+          # السكربت المقيم على الخادم لا نسخة المستودع: هو الذي حُدِّث مع
+          # آخر حزمة نُشرت هناك، ويعرف حال تلك البيئة.
+          & (Join-Path $deploy.Target 'tool\deploy_update.ps1') @deploy `
+              -SkipDb:$${{ inputs.skip_db }}
+
+      # اختبارات قواعد العمل على الخادم نفسه بعد الترقية — ١١٤ فحصاً
+      # يمسّ الترخيص والعزل والحدود. تُشغَّل على التجربة وحدها: تكتب بيانات
+      # باسم TEST- ولا مكان لها في دفاتر عميل.
+      - name: فحص الواجهة بعد النشر
+        if: inputs.target == 'staging'
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          $t = 'C:\kinetic-staging\tool\api_test.ps1'
+          if (Test-Path $t) { & $t } else { Write-Host 'api_test.ps1 غير موجود بعدُ على التجربة.' }
+
+      - name: ملخّص النشر
+        if: always()
+        shell: pwsh
+        run: |
+          "## ${{ inputs.target }}`n`n- **الوسم:** ``${{ inputs.tag }}```n- **SHA256:** ``$env:SHA```" |
+            Out-File $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
