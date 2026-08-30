@@ -14,6 +14,27 @@ public record SetLogoRequest(Guid? AttachmentId);
 public record OrganizationSettingsDto(string CurrencyCode, string CurrencySymbol, string Locale, decimal TaxRate, int PasswordMinLength, double ReceiptWidthMm, bool PosAllowOpenProduct, string CardModesAllowed, string CardModeDefault, decimal CardOpenModeDailyCap);
 public record UpdateSettingsRequest(string CurrencyCode, string CurrencySymbol, string Locale, decimal TaxRate, int PasswordMinLength, double ReceiptWidthMm, bool PosAllowOpenProduct, string? CardModesAllowed, string? CardModeDefault, decimal? CardOpenModeDailyCap);
 
+/// <summary>
+/// قالب الإيصال.
+///
+/// <para><c>Paper</c> أحد: <c>roll80</c>، <c>roll58</c>، <c>a4</c>،
+/// <c>a5</c>. والرقم الضريبي والسجلّ التجاري يُقرآن من المنظمة لا من
+/// القالب — القالب يقرّر أيُعرضان، لا ما قيمتهما.</para>
+/// </summary>
+public record ReceiptTemplateDto(
+    string Paper, bool ShowLogo, bool ShowTaxNumber, bool ShowCommercialRegistry,
+    bool ShowQr, string? HeaderText, string? FooterText);
+
+/// <summary>القالب ومعه ما يملأه — ردٌّ واحد فتطبع الشاشة بلا نداءين.</summary>
+public record ReceiptTemplateResponse(
+    ReceiptTemplateDto Template, string? TaxNumber, string? CommercialRegistry,
+    string? LogoUrl);
+
+public record UpdateReceiptTemplateRequest(
+    string Paper, bool ShowLogo, bool ShowTaxNumber, bool ShowCommercialRegistry,
+    bool ShowQr, string? HeaderText, string? FooterText,
+    string? TaxNumber, string? CommercialRegistry);
+
 public record BarcodeTemplateDto(double WidthMm, double HeightMm, bool ShowName, bool ShowPrice, bool ShowSku);
 
 [ApiController]
@@ -217,5 +238,76 @@ public class OrganizationsController : ControllerBase
         await _db.SaveChangesAsync();
 
         return NoContent();
+    }
+
+    /// <summary>
+    /// قالب الإيصال — الشكل الذي يُطبع به كل إيصال في المنظمة.
+    ///
+    /// <para>مفتوح لأي مستخدم مسجَّل: نقطة البيع تحتاجه لتطبع، وقصرُه على
+    /// المدير يجعل الكاشير عاجزاً عن الطباعة. والتعديل وحده محصور
+    /// (راجع <see cref="UpdateReceiptTemplate"/>).</para>
+    /// </summary>
+    [HttpGet("me/receipt-template")]
+    public async Task<ActionResult<ReceiptTemplateResponse>> GetReceiptTemplate()
+    {
+        var org = await _db.Organizations.FirstOrDefaultAsync();
+        if (org is null) return NotFound();
+
+        return new ReceiptTemplateResponse(
+            ParseReceiptTemplate(org), org.TaxNumber, org.CommercialRegistry, org.LogoUrl);
+    }
+
+    [HttpPut("me/receipt-template")]
+    [Authorize(Roles = "super_admin")]
+    public async Task<IActionResult> UpdateReceiptTemplate(UpdateReceiptTemplateRequest request)
+    {
+        var org = await _db.Organizations.FirstOrDefaultAsync();
+        if (org is null) return NotFound();
+
+        if (!ReceiptPapers.All.Contains(request.Paper))
+        {
+            // مقاسٌ مجهول يُنتج PDF بأبعادٍ غير متوقَّعة عند كل طباعة، ولا
+            // يكتشفه أحد إلا والورق يخرج مقصوصاً.
+            return BadRequest(new
+            {
+                message = $"مقاس غير معروف: {request.Paper} — المتاح: {string.Join(", ", ReceiptPapers.All)}",
+            });
+        }
+
+        org.TaxNumber = Trimmed(request.TaxNumber);
+        org.CommercialRegistry = Trimmed(request.CommercialRegistry);
+        org.ReceiptTemplateJson = JsonSerializer.Serialize(new ReceiptTemplateDto(
+            request.Paper, request.ShowLogo, request.ShowTaxNumber,
+            request.ShowCommercialRegistry, request.ShowQr,
+            Trimmed(request.HeaderText), Trimmed(request.FooterText)));
+
+        // العرض القديم يتبع المقاس فلا يفترق مصدرا الحقيقة: شاشةٌ تقرأ
+        // receiptWidthMm وأخرى تقرأ القالب كانتا ستطبعان بعرضين.
+        org.ReceiptWidthMm = request.Paper == ReceiptPapers.Roll58 ? 58 : 80;
+        org.UpdatedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync();
+
+        return NoContent();
+    }
+
+    private static string? Trimmed(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    /// <summary>القالب المحفوظ، أو الافتراضي إن كان النصّ تالفاً.</summary>
+    private static ReceiptTemplateDto ParseReceiptTemplate(Organization org)
+    {
+        try
+        {
+            var dto = JsonSerializer.Deserialize<ReceiptTemplateDto>(
+                org.ReceiptTemplateJson, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            if (dto is not null && ReceiptPapers.All.Contains(dto.Paper)) return dto;
+        }
+        catch (JsonException)
+        {
+            // نصّ غير صالح — يُستعمل الافتراضي أدناه بدل أن تتوقّف الطباعة.
+        }
+
+        return new ReceiptTemplateDto(
+            ReceiptPapers.Roll80, true, true, false, false, null, "شكراً لتعاملكم معنا");
     }
 }

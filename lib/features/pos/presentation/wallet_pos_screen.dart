@@ -4,8 +4,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/auth/current_user.dart';
 import '../../../core/feedback/pos_sounds.dart';
 import '../../../core/network/api_client.dart';
+import '../../../core/network/branch_roster_store.dart';
+import '../../../core/network/offline_queue.dart';
 import '../../../core/printing/wallet_receipt_printer.dart';
 import '../../../core/responsive/adaptive_scaffold.dart';
+import '../../../core/responsive/breakpoints.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_text_styles.dart';
 import '../../../core/theme/branding_provider.dart';
@@ -35,6 +38,14 @@ class WalletPosScreen extends ConsumerStatefulWidget {
 
 class _WalletPosScreenState extends ConsumerState<WalletPosScreen> {
   String _amountText = '';
+
+  /// حقل المبلغ على الهاتف — لوحة النظام لا لوحتنا.
+  ///
+  /// <para>لوحة الأرقام المرسومة بُنيت لشاشة كاشيرٍ ثابتة: أزرارٌ كبيرة
+  /// تُضغط بالإبهام وشاشةٌ عريضة تتّسع لها. وعلى الهاتف تأكل نصف الشاشة
+  /// فتدفع زرَّي الدفع تحت الطيّة — يكتب الكاشير المبلغ ثم يُمرّر ليجد
+  /// الزرّ. ولوحة الهاتف الرقمية أسرع وأقرب إلى ما اعتاده إبهامه.</para>
+  late final _amountController = TextEditingController();
   Map<String, dynamic>? _customer;
   String? _branchId;
   /// فروع المنظمة — تُملأ فقط لمن لا فرع مثبَّت في توكنه، ليختار منها.
@@ -150,7 +161,39 @@ class _WalletPosScreenState extends ConsumerState<WalletPosScreen> {
 
   // ── التنفيذ ──────────────────────────────────────────────────────────
 
-  Future<void> _chargeCash() => _submit('cash');
+  /// البيع النقدي — بعد تحديد ما استلمه الكاشير بيده.
+  ///
+  /// <para><b>الفجوة التي يسدّها:</b> كان النقد يُسجَّل بالمبلغ المطلوب
+  /// وحده، فلا يعرف أحدٌ كم دخل الدرج فعلاً ولا كم أُعيد للزبون. وفي نهاية
+  /// اليوم يُعدّ الدرج فيختلف عن النظام، ولا سبيل إلى معرفة أي عملية
+  /// سبّبت الفرق.</para>
+  ///
+  /// <para>والمستلَم اختياري: كاشيرٌ يستلم المبلغ بالضبط لا يُجبَر على
+  /// كتابته مرّتين — وإجبارُه يبطئ كل عملية ليضبط قليلاً منها.</para>
+  @override
+  void dispose() {
+    _amountController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _chargeCash() async {
+    if (_amount <= 0) {
+      _fail('أدخل المبلغ أولاً');
+      return;
+    }
+
+    final tendered = await showDialog<double?>(
+      context: context,
+      builder: (_) => _CashTenderedDialog(
+        due: _amount,
+        symbol: ref.read(brandingProvider).valueOrNull?.currencySymbol ?? 'د.ل',
+      ),
+    );
+    // null من زرّ التراجع، و-1 من «بالضبط» — والفرق بينهما أن الثاني يمضي.
+    if (tendered == null) return;
+
+    await _submit('cash', tendered: tendered < 0 ? null : tendered);
+  }
 
   Future<void> _chargeWallet() async {
     if (_customer == null) {
@@ -172,7 +215,7 @@ class _WalletPosScreenState extends ConsumerState<WalletPosScreen> {
     await _submit('customer_wallet', pin: pin);
   }
 
-  Future<void> _submit(String method, {String? pin}) async {
+  Future<void> _submit(String method, {String? pin, double? tendered}) async {
     if (_amount <= 0) {
       _fail('أدخل المبلغ أولاً');
       return;
@@ -206,6 +249,9 @@ class _WalletPosScreenState extends ConsumerState<WalletPosScreen> {
         'customerId': _customer?['id'],
         'paymentMethod': method,
         'customerPin': pin,
+        // الخادم يحسب الباقي من هذا الرقم — راجع InvoicesController.
+        // وحسابُه في الواجهة يعني رقمين قد يفترقان.
+        'tenderedAmount': tendered,
         'lines': [
           {
             'productId': openProducts.first['id'],
@@ -249,6 +295,15 @@ class _WalletPosScreenState extends ConsumerState<WalletPosScreen> {
       );
     } on DioException catch (e) {
       if (!mounted) return;
+
+      // انقطاع الشبكة لا رفضُ الخادم: الأوّل يُحاوَل محلياً، والثاني قرارٌ
+      // نهائي يُقال للكاشير كما هو.
+      if (_isOffline(e)) {
+        final handled = await _submitOffline(method, tendered: tendered);
+        if (handled) return;
+      }
+
+      if (!mounted) return;
       setState(() => _busy = false);
       final message = e.response?.data is Map
           ? (e.response!.data['message'] as String? ?? 'تعذّر إتمام العملية')
@@ -257,11 +312,155 @@ class _WalletPosScreenState extends ConsumerState<WalletPosScreen> {
     }
   }
 
+  /// زرّا الدفع — موضعُهما يختلف بالجهاز لا شكلُهما.
+  Widget _actions() => Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          SizedBox(
+            height: 58,
+            child: ElevatedButton.icon(
+              onPressed: (_busy || _loadingBranch) ? null : _chargeWallet,
+              icon: const Icon(Icons.credit_card_outlined),
+              label: Text('خصم من الرصيد',
+                  style: AppTextStyles.headlineMd(color: Colors.white)),
+            ),
+          ),
+          const SizedBox(height: 10),
+          SizedBox(
+            height: 52,
+            child: OutlinedButton.icon(
+              onPressed: (_busy || _loadingBranch) ? null : _chargeCash,
+              icon: const Icon(Icons.payments_outlined),
+              label: Text('بيع نقدي', style: AppTextStyles.headlineMd()),
+            ),
+          ),
+        ],
+      );
+
+  /// أهو انقطاع شبكة أم رفضٌ من الخادم؟
+  ///
+  /// <para>الفرق جوهري: رفضُ الخادم قرارٌ يُقال للكاشير («رصيد غير كافٍ»)،
+  /// والانقطاع حالةٌ تُعالَج محلياً. وخلطُهما يجعل رفضاً مشروعاً يُحفظ في
+  /// الطابور ليُرفض ثانيةً عند المزامنة.</para>
+  bool _isOffline(DioException e) =>
+      e.response == null &&
+      (e.type == DioExceptionType.connectionError ||
+          e.type == DioExceptionType.connectionTimeout ||
+          e.type == DioExceptionType.sendTimeout ||
+          e.type == DioExceptionType.receiveTimeout);
+
+  /// يحفظ العملية في الطابور — نقداً، أو سحباً من بطاقةٍ في كشف الفرع.
+  ///
+  /// <para><b>ولماذا يجوز السحب هنا وقد كان ممنوعاً:</b> المنع كان لسببين —
+  /// جهلِ الرصيد، وتعذّرِ التحقّق من الرقم السرّي. والأوّل يحلّه كشف الفرع
+  /// المخزَّن محلياً؛ أمّا الثاني فلا يحلّه شيء، ولذلك يُسمَح ببطاقات
+  /// «بطاقة فقط» وحدها — وهي وحدها ما يُصدَّر في الكشف
+  /// (راجع <c>BranchRosterController</c>).</para>
+  Future<bool> _submitOffline(String method, {double? tendered}) async {
+    final queue = ref.read(offlineQueueProvider.notifier);
+
+    if (method == 'customer_wallet') {
+      final code = _customer?['cardBarcode'] as String?;
+      final roster = ref.read(branchRosterProvider);
+      final card = code == null ? null : roster.byCode(code);
+
+      if (card == null) {
+        // القول صريحاً أن البطاقة ليست في كشف هذا الفرع: كاشيرٌ يقرأ
+        // «تعذّرت العملية» يُعيد المحاولة عشر مرّات.
+        setState(() => _busy = false);
+        _fail('لا اتصال، وهذه البطاقة ليست في كشف الفرع — تعذّر السحب. '
+            'استعمل البيع النقدي، أو انتظر عودة الشبكة.');
+        return true;
+      }
+
+      if (card.balance < _amount) {
+        setState(() => _busy = false);
+        _fail('لا اتصال — والرصيد المعروف محلياً '
+            '(${card.balance.toStringAsFixed(2)}) لا يكفي.');
+        return true;
+      }
+    }
+
+    final openProducts = await ref.read(posOpenProductsProvider.future).catchError(
+          (_) => <Map<String, dynamic>>[],
+        );
+    if (openProducts.isEmpty) {
+      if (mounted) setState(() => _busy = false);
+      _fail('لا اتصال ولا صنف قيمة محفوظ — تعذّرت العملية');
+      return true;
+    }
+
+    final queued = await queue.enqueue({
+      // مفتاحٌ لكل عملية: انقطاع بعد وصول الطلب وقبل الرد حالة شائعة،
+      // وبدونه تُنشأ العملية مرّتين.
+      'clientRequestId': OfflineQueueNotifier.newRequestId(),
+      'branchId': _branchId,
+      'customerId': _customer?['id'],
+      'paymentMethod': method,
+      'tenderedAmount': tendered,
+      'lines': [
+        {
+          'productId': openProducts.first['id'],
+          'quantity': 1,
+          'unitPrice': _amount,
+        }
+      ],
+    });
+
+    if (!queued) {
+      if (mounted) setState(() => _busy = false);
+      _fail('طابور العمليات المؤجَّلة ممتلئ (${OfflineQueueNotifier.maxQueued}) — '
+          'راجع الاتصال قبل متابعة الصرف');
+      return true;
+    }
+
+    // الرصيد المحلّي يُنقَص فوراً: سحبان متتاليان بلا اتصال كانا سيريان
+    // الرصيد الكامل كلاهما فيخرج ضعف ما في البطاقة.
+    if (method == 'customer_wallet' && _customer?['id'] != null) {
+      await ref
+          .read(branchRosterProvider.notifier)
+          .debitLocally('${_customer!['id']}', _amount);
+    }
+
+    PosSounds.success();
+    if (!mounted) return true;
+
+    final amount = _amount;
+    final customerName = _customer?['fullName'] as String?;
+    setState(() {
+      _amountText = '';
+      _amountController.clear();
+      _customer = null;
+      _busy = false;
+    });
+
+    await showDialog<void>(
+      context: context,
+      builder: (_) => _DeductionResultDialog(
+        amount: amount,
+        method: method,
+        customerName: customerName,
+        remaining: null,
+        offline: true,
+      ),
+    );
+    return true;
+  }
+
+  /// يُحمّل كشف الفرع ثم يُحدّثه ما دامت الشبكة موصولة.
+  Future<void> _loadRoster(String branchId) async {
+    final notifier = ref.read(branchRosterProvider.notifier);
+    await notifier.load(branchId);
+    // الفشل صامت: التحديث عملٌ خلفي، والكشف القديم يبقى صالحاً.
+    await notifier.refresh(branchId);
+  }
+
   // ── العرض ────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
     final symbol = ref.watch(brandingProvider).valueOrNull?.currencySymbol ?? 'د.ل';
+    final isPhone = Breakpoints.isMobile(context);
 
     return AdaptiveScaffold(
       title: 'الخصم من الأرصدة',
@@ -274,6 +473,12 @@ class _WalletPosScreenState extends ConsumerState<WalletPosScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
+                // الدفع أعلى الشاشة على الهاتف: هو الفعل المقصود، ووضعُه
+                // آخر الصفحة يجعله يحتاج تمريراً بعد كل مبلغ يُكتب.
+                if (isPhone) ...[
+                  _actions(),
+                  const SizedBox(height: 14),
+                ],
                 if (_branches.length > 1) ...[
                   SectionCard(
                     title: 'الفرع',
@@ -287,7 +492,10 @@ class _WalletPosScreenState extends ConsumerState<WalletPosScreen> {
                                   child: Text(b['name'] as String? ?? ''),
                                 ))
                             .toList(),
-                        onChanged: (v) => setState(() => _branchId = v),
+                        onChanged: (v) {
+                          setState(() => _branchId = v);
+                          if (v != null) _loadRoster(v);
+                        },
                       ),
                     ],
                   ),
@@ -298,38 +506,45 @@ class _WalletPosScreenState extends ConsumerState<WalletPosScreen> {
                 SectionCard(
                   title: 'المبلغ',
                   children: [
-                    KeypadDisplay(value: _amountText, suffix: symbol, label: 'المبلغ المطلوب'),
-                    const SizedBox(height: 12),
-                    NumericKeypad(
-                      value: _amountText,
-                      onChanged: (v) => setState(() => _amountText = v),
-                      size: KeypadSize.large,
-                      onSubmit: _busy ? () {} : _chargeWallet,
-                    ),
+                    if (isPhone)
+                      TextField(
+                        controller: _amountController,
+                        autofocus: true,
+                        // لوحة النظام الرقمية بفاصلة عشرية — لا لوحة حروف
+                        // يبحث فيها الكاشير عن الأرقام.
+                        keyboardType:
+                            const TextInputType.numberWithOptions(decimal: true),
+                        textInputAction: TextInputAction.done,
+                        style: AppTextStyles.displayLg(),
+                        textAlign: TextAlign.center,
+                        decoration: InputDecoration(
+                          labelText: 'المبلغ المطلوب',
+                          suffixText: symbol,
+                          border: const OutlineInputBorder(),
+                        ),
+                        onChanged: (v) => setState(() => _amountText = v),
+                        onSubmitted: (_) => _busy ? null : _chargeWallet(),
+                      )
+                    else ...[
+                      KeypadDisplay(value: _amountText, suffix: symbol, label: 'المبلغ المطلوب'),
+                      const SizedBox(height: 12),
+                      NumericKeypad(
+                        value: _amountText,
+                        onChanged: (v) => setState(() => _amountText = v),
+                        size: KeypadSize.large,
+                        onSubmit: _busy ? () {} : _chargeWallet,
+                      ),
+                    ],
                   ],
                 ),
                 if (_error != null) ...[
                   const SizedBox(height: 10),
                   Text(_error!, style: AppTextStyles.bodyMd(color: AppColors.danger)),
                 ],
-                const SizedBox(height: 14),
-                SizedBox(
-                  height: 62,
-                  child: ElevatedButton.icon(
-                    onPressed: (_busy || _loadingBranch) ? null : _chargeWallet,
-                    icon: const Icon(Icons.credit_card_outlined),
-                    label: Text('خصم من الرصيد', style: AppTextStyles.headlineMd(color: Colors.white)),
-                  ),
-                ),
-                const SizedBox(height: 10),
-                SizedBox(
-                  height: 54,
-                  child: OutlinedButton.icon(
-                    onPressed: (_busy || _loadingBranch) ? null : _chargeCash,
-                    icon: const Icon(Icons.payments_outlined),
-                    label: Text('بيع نقدي', style: AppTextStyles.headlineMd()),
-                  ),
-                ),
+                if (!isPhone) ...[
+                  const SizedBox(height: 14),
+                  _actions(),
+                ],
                 if (_busy) ...[
                   const SizedBox(height: 12),
                   const Center(child: CircularProgressIndicator()),
@@ -415,14 +630,23 @@ class _DeductionResultDialog extends ConsumerWidget {
     required this.method,
     required this.customerName,
     required this.remaining,
-    required this.invoice,
+    this.invoice,
+    this.offline = false,
   });
 
   final double amount;
   final String method;
   final String? customerName;
   final double? remaining;
-  final Map<String, dynamic> invoice;
+
+  /// الفاتورة كما ردّها الخادم — فارغةٌ في العملية غير المتّصلة.
+  ///
+  /// <para>الرقم يولّده الخادم عند المزامنة لا الجهاز: توليدُه محلياً يعني
+  /// تصادماً محتّماً بين جهازين يعملان بلا اتصال في المحلّ نفسه.</para>
+  final Map<String, dynamic>? invoice;
+
+  /// حُفظت في الطابور ولم تصل الخادم بعد.
+  final bool offline;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -452,14 +676,22 @@ class _DeductionResultDialog extends ConsumerWidget {
             _row('الرصيد المتبقي', remaining!, symbol),
           ],
           const SizedBox(height: 8),
-          Text('رقم العملية: ${invoice['invoiceNumber'] ?? ''}',
+          Text(
+              offline
+                  // لا رقم قبل المزامنة — وقولُه صراحةً أصدق من فراغٍ
+                  // يظنّه الكاشير عطباً.
+                  ? 'ستُرسَل عند عودة الشبكة — بلا رقم بعد'
+                  : 'رقم العملية: ${invoice?['invoiceNumber'] ?? ''}',
               style: AppTextStyles.bodyMd(color: AppColors.textSecondary)),
         ],
       ),
       actions: [
+        // لا طباعة قبل المزامنة: الإثبات يحمل رقم العملية، وطباعتُه بلا
+        // رقم تُعطي المنتسب ورقةً لا تُراجَع بها.
+        if (!offline && invoice != null)
         TextButton.icon(
           onPressed: () => printWalletDeduction(
-            invoice: invoice,
+            invoice: invoice!,
             orgName: branding?.displayName ?? '',
             currencySymbol: symbol,
             customerName: customerName,
@@ -619,5 +851,91 @@ class PosScreenSwitcher extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final isWallet = ref.watch(brandingProvider).valueOrNull?.isWallet ?? false;
     return isWallet ? const WalletPosScreen() : const PosScreen();
+  }
+}
+
+
+/// كم استلم الكاشير بيده — وكم يُعيد.
+///
+/// <para>الباقي يُحسب وهو يكتب، فلا يحسبه في رأسه أمام زبونٍ ينتظر. وهو
+/// أشيع مصدر لفروق الدرج في نهاية اليوم.</para>
+class _CashTenderedDialog extends StatefulWidget {
+  const _CashTenderedDialog({required this.due, required this.symbol});
+
+  final double due;
+  final String symbol;
+
+  @override
+  State<_CashTenderedDialog> createState() => _CashTenderedDialogState();
+}
+
+class _CashTenderedDialogState extends State<_CashTenderedDialog> {
+  String _text = '';
+
+  double get _tendered => double.tryParse(_text) ?? 0;
+  double get _change => _tendered - widget.due;
+
+  @override
+  Widget build(BuildContext context) {
+    final short = _text.isNotEmpty && _change < 0;
+
+    return AlertDialog(
+      title: const Text('المستلَم من الزبون'),
+      content: SizedBox(
+        width: 340,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text('المطلوب', style: AppTextStyles.bodyMd()),
+                CurrencyBadge(amount: widget.due, currencySymbol: widget.symbol),
+              ],
+            ),
+            const SizedBox(height: 12),
+            KeypadDisplay(value: _text, suffix: widget.symbol, label: 'المستلَم'),
+            const SizedBox(height: 10),
+            if (_text.isNotEmpty)
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    // ناقصٌ لا «باقٍ سالب»: الكاشير يقرأ كلمةً تقول ما يفعل.
+                    short ? 'ناقص' : 'الباقي للزبون',
+                    style: AppTextStyles.bodyMd(
+                        color: short ? AppColors.danger : AppColors.success),
+                  ),
+                  CurrencyBadge(
+                    amount: _change.abs(),
+                    currencySymbol: widget.symbol,
+                  ),
+                ],
+              ),
+            const SizedBox(height: 10),
+            NumericKeypad(
+              value: _text,
+              onChanged: (v) => setState(() => _text = v),
+              size: KeypadSize.compact,
+              onSubmit: () {},
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('تراجع')),
+        // «بالضبط» تمرّ بلا رقم: كاشيرٌ يستلم المبلغ تماماً لا يكتبه مرّتين.
+        TextButton(
+          onPressed: () => Navigator.pop(context, -1.0),
+          child: const Text('بالضبط'),
+        ),
+        FilledButton(
+          // الناقص يُمنع: بيعٌ نقدي بمالٍ لم يُستلَم كلّه ليس بيعاً نقدياً،
+          // وتسجيلُه كذلك يُخفي عجزاً في الدرج.
+          onPressed: (_text.isEmpty || short) ? null : () => Navigator.pop(context, _tendered),
+          child: const Text('تأكيد'),
+        ),
+      ],
+    );
   }
 }

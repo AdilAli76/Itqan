@@ -15,9 +15,36 @@ namespace KineticEnterprise.Api.Controllers;
 /// مجمّعة من stock_levels التي تُفلتَر تلقائياً حسب فرع المستخدم عبر
 /// StockLevelsPolicy (مدير عام بلا branch_id يرى مجموع كل الفروع).
 /// </summary>
+/// <summary>
+/// ما يُقبَل عند إنشاء صنف أو تعديله.
+///
+/// <para><b>الثغرة التي يغلقها:</b> كان <c>Create</c> يربط الكيان كاملاً،
+/// فيقبل <c>id</c> و<c>isDeleted</c> و<c>lastCountedAt</c> — أي صنفاً
+/// يُولَد محذوفاً، أو تاريخَ جردٍ مزوَّراً يُخفيه من قائمة «لم يُجرَد منذ».
+/// راجع نفس المبدأ في <c>SaveCustomerRequest</c>.</para>
+/// </summary>
+/// <para><b>⚠ والافتراضات تطابق افتراضات الكيان</b>: شاشة المشتريات
+/// تُنشئ صنفاً سريعاً بستّة حقول وهي أمام المورّد. وحقلٌ بلا قيمة
+/// افتراضية هنا يصل صفراً — و<c>unitConversionFactor = 0</c> يجعل كل
+/// تحويل وحدةٍ قسمةً على صفر.</para>
+public record SaveProductRequest(
+    string Name, string Sku,
+    string? Barcode = null,
+    string UnitBase = "piece", decimal UnitConversionFactor = 1,
+    Guid? CategoryId = null, Guid? SupplierId = null,
+    decimal CostPrice = 0, decimal SalePrice = 0, decimal MinSalePrice = 0,
+    decimal ReorderLevel = 0, bool TrackExpiry = false, bool TracksStock = true,
+    Guid? MedicineRefId = null,
+    string? SubUnitName = null, decimal SubUnitsPerBase = 0, decimal SubUnitPrice = 0,
+    int LeadTimeDays = 7);
+
 public record ProductInventoryDto(
     Guid Id, string Sku, string? Barcode, string Name, string UnitBase,
-    decimal CostPrice, decimal SalePrice, bool TrackExpiry, decimal ReorderLevel,
+    decimal CostPrice, decimal SalePrice,
+    // الحدّ الأدنى — تعرفه شاشة البيع فتمنع الإدخال قبل أن يرفضه الخادم:
+    // كاشيرٌ يكتب رقماً فيُرفض أمام زبونٍ ينتظر يجرّب أرقاماً.
+    decimal MinSalePrice,
+    bool TrackExpiry, decimal ReorderLevel,
     Guid? CategoryId, string? CategoryName, Guid? SupplierId, string? SupplierName,
     decimal Quantity, DateTime? NearestExpiryDate, bool TracksStock,
     // معرّف النشرة فقط لا محتواها: القائمة قد تحمل مئتَي صنف، وضخّ نصوص
@@ -251,6 +278,7 @@ public class ProductsController : ControllerBase
             suppliers.TryGetValue(p.SupplierId ?? Guid.Empty, out var supplierName);
             return new ProductInventoryDto(
                 p.Id, p.Sku, p.Barcode, p.Name, p.UnitBase, p.CostPrice, p.SalePrice,
+                p.MinSalePrice,
                 p.TrackExpiry, p.ReorderLevel, p.CategoryId, categoryName, p.SupplierId, supplierName,
                 stock?.Quantity ?? 0, stock?.NearestExpiry, p.TracksStock, p.MedicineRefId,
                 p.MedicineRefId.HasValue && restrictedRefs.Contains(p.MedicineRefId.Value),
@@ -404,12 +432,37 @@ public class ProductsController : ControllerBase
     [RequireModule("inventory")]
     [HttpPost]
     [RequirePermission("inventory.manage")]
-    public async Task<ActionResult<Product>> Create(Product product)
+    public async Task<ActionResult<Product>> Create(SaveProductRequest request)
     {
+        if (string.IsNullOrWhiteSpace(request.Name))
+            return BadRequest(new { message = "اسم الصنف إلزامي" });
+
         // organization_id يُشتق دائماً من التوكن، لا من الطلب — وإلا
         // ترفض BLOCK PREDICATE الخاصة بـ ProductsPolicy العملية بصمت
         // (أو أسوأ: يسمح لعميل خبيث بمحاولة الكتابة بمنظمة أخرى).
-        product.OrganizationId = Guid.Parse(User.FindFirstValue("organization_id")!);
+        var product = new Product
+        {
+            OrganizationId = Guid.Parse(User.FindFirstValue("organization_id")!),
+            Name = request.Name.Trim(),
+            Sku = request.Sku,
+            Barcode = string.IsNullOrWhiteSpace(request.Barcode) ? null : request.Barcode,
+            UnitBase = request.UnitBase,
+            UnitConversionFactor = request.UnitConversionFactor,
+            CategoryId = request.CategoryId,
+            SupplierId = request.SupplierId,
+            CostPrice = request.CostPrice,
+            SalePrice = request.SalePrice,
+            MinSalePrice = request.MinSalePrice,
+            ReorderLevel = request.ReorderLevel,
+            TrackExpiry = request.TrackExpiry,
+            TracksStock = request.TracksStock,
+            MedicineRefId = request.MedicineRefId,
+            SubUnitName = request.SubUnitName,
+            SubUnitsPerBase = request.SubUnitsPerBase,
+            SubUnitPrice = request.SubUnitPrice,
+            LeadTimeDays = request.LeadTimeDays,
+        };
+
         _db.Products.Add(product);
         await _db.SaveChangesAsync();
         return CreatedAtAction(nameof(GetById), new { id = product.Id }, product);
@@ -418,8 +471,11 @@ public class ProductsController : ControllerBase
     [RequireModule("inventory")]
     [HttpPut("{id:guid}")]
     [RequirePermission("inventory.manage")]
-    public async Task<IActionResult> Update(Guid id, Product update)
+    public async Task<IActionResult> Update(Guid id, SaveProductRequest update)
     {
+        if (string.IsNullOrWhiteSpace(update.Name))
+            return BadRequest(new { message = "اسم الصنف إلزامي" });
+
         var product = await _db.Products.FindAsync(id);
         if (product is null) return NotFound();
 
@@ -432,6 +488,7 @@ public class ProductsController : ControllerBase
         product.SupplierId = update.SupplierId;
         product.SalePrice = update.SalePrice;
         product.CostPrice = update.CostPrice;
+        product.MinSalePrice = update.MinSalePrice;
         product.ReorderLevel = update.ReorderLevel;
         product.TrackExpiry = update.TrackExpiry;
         product.TracksStock = update.TracksStock;

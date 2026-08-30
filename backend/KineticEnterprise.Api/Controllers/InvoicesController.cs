@@ -365,6 +365,34 @@ public class InvoicesController : ControllerBase
                 return BadRequest(new { message = $"سعر «{product.Name}» لا يطابق سعر الكتالوج، وتعديل السعر غير مسموح لك" });
             }
 
+            // ── الحدّ الأدنى: نقطة تحقّقٍ واحدة بعد الفروع الثلاثة ──
+            //
+            // موضعها هنا لا داخل كل فرع: الفروع ثلاثة (صنف مفتوح، وحدة
+            // جزئية، وحدة أساسية) وثلاثةُ فحوصٍ متطابقة تفترق أوّل مرّة
+            // يُعدَّل أحدها. وهو نفس مبدأ [StockLedger] و[Ledger] — بوابةٌ
+            // واحدة يستحيل الالتفاف عليها.
+            //
+            // ولا يُستثنى منها حامل pos.price_override: حدٌّ له استثناء ليس
+            // حدّاً، ومدير المنظمة يملك الصلاحية دائماً فيصير الحدّ زينة.
+            if (product.MinSalePrice > 0)
+            {
+                // الحدّ بالوحدة الأساسية، والبيع الجزئي يقيسه بالنسبة.
+                var floor = line.SoldAsSubUnit && product.SubUnitsPerBase > 0
+                    ? product.MinSalePrice / product.SubUnitsPerBase
+                    : product.MinSalePrice;
+
+                if (unitPrice < floor)
+                {
+                    return BadRequest(new
+                    {
+                        // يُسمّى الحدّ صراحةً: «السعر منخفض» تترك الكاشير
+                        // يجرّب أرقاماً أمام زبونٍ ينتظر.
+                        message = $"سعر «{product.Name}» أقلّ من الحدّ الأدنى "
+                            + $"({floor:0.00}) — عدّل الحدّ من بطاقة الصنف إن أردت بيعاً أرخص",
+                    });
+                }
+            }
+
             resolvedLines.Add((product, line.Quantity, unitPrice, overridden, line.SoldAsSubUnit));
         }
 

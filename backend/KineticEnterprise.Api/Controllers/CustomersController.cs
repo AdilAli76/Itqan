@@ -18,6 +18,21 @@ public record WalletAdjustmentRequest(decimal AmountDelta, string? Note);
 /// يُنشئ سرّاً لا يستعمله أحد ويبقى قابلاً للتسريب.
 /// </param>
 public record IssueCardRequest(string? Pin, string? CardMode = null, decimal? DailyCap = null);
+
+/// <summary>إصدار بطاقات لمجموعة عملاء دفعةً واحدة.</summary>
+public record BulkIssueCardsRequest(
+    /// عملاءٌ بأعيانهم. فارغة = كل من في [CategoryId] بلا بطاقة.
+    List<Guid>? CustomerIds,
+    Guid? CategoryId,
+    /// النمط لكل البطاقات. NULL = افتراضي المنظمة.
+    string? CardMode = null,
+    /// إعادة الإصدار لمن له بطاقة. الافتراضي: تخطّيه.
+    bool Reissue = false);
+
+public record BulkIssuedCardDto(Guid CustomerId, string FullName, string CardCode);
+
+public record BulkIssueCardsResult(
+    int Issued, int Skipped, string CardMode, List<BulkIssuedCardDto> Cards);
 public record IssuedCardDto(string CardCode);
 
 public record SetCardModeRequest(string? CardMode, decimal? DailyCap);
@@ -26,6 +41,44 @@ public record SetCardModeRequest(string? CardMode, decimal? DailyCap);
 /// العدد الكلي لا عدد الصفحة، وإلا تعذّر عليها رسم "عرض 1–50 من 1,240"
 /// ولا معرفة ما إذا كانت هناك صفحة تالية أصلاً.
 public record CustomerPageDto(List<CustomerDto> Items, int TotalCount, int Page, int PageSize);
+
+/// <summary>
+/// ما يُقبَل من العميل عند إنشاء زبون أو تعديله.
+///
+/// <para><b>الثغرة التي يغلقها:</b> كان <c>Create</c> يربط كيان
+/// <see cref="Customer"/> كاملاً من الطلب. فمن يملك <c>customers.manage</c>
+/// يستطيع إرسال حقولٍ لا تعرضها أي شاشة ويحرسها الخادم في مسارات أخرى:</para>
+///
+/// <list type="bullet">
+/// <item><c>pinHash</c> — بصمة رقمٍ سرّي يعرفه هو، متجاوزاً
+///   <c>CustomerCards.ValidatePin</c> ومسار إصدار البطاقة كلّه.</item>
+/// <item><c>cardBarcode</c> — بطاقةٌ برمزٍ لا صفَّ له في
+///   <c>customer_card_index</c>، فتوجد بطاقة لا يعرفها فهرس البطاقات.</item>
+/// <item><c>dailyCap</c> — يتجاوز سقف المنظمة الذي يفرضه
+///   <see cref="CardModeGate"/>.</item>
+/// <item><c>id</c> و<c>isDeleted</c> و<c>createdAt</c> — معرّفٌ من اختياره،
+///   أو زبونٌ يُولَد محذوفاً.</item>
+/// </list>
+///
+/// <para><b>ولماذا عقدٌ لا فحوصٌ إضافية:</b> ما لا يُذكَر هنا **لا يمكن
+/// إرساله أصلاً** — لا يُحرَس بشرطٍ قد يُنسى عند إضافة حقلٍ جديد. وهذا
+/// الفرق بين بابٍ مغلق وبابٍ عليه حارس.</para>
+/// </summary>
+/// <para><b>⚠ والافتراضات تطابق افتراضات الكيان</b>: نقطة البيع تُنشئ
+/// زبوناً سريعاً بالاسم والهاتف وحدهما، فحقلٌ بلا قيمة افتراضية هنا كان
+/// سيصل صفراً أو فارغاً — و<c>accountModel</c> فارغاً يُرفَض الطلبُ كلّه
+/// فينكسر الإنشاء السريع من على الصندوق.</para>
+public record SaveCustomerRequest(
+    string FullName,
+    string? Phone = null, string? Email = null, string? Notes = null,
+    string? CardBarcode = null,
+    decimal CreditLimit = 0, int CreditDays = 0,
+    Guid? BranchId = null,
+    string AccountModel = AccountModels.Prepaid,
+    Guid? SponsorId = null, decimal EntitlementCeiling = 0,
+    DateOnly? EntitlementExpiresOn = null,
+    Guid? CategoryId = null, decimal? EntitlementOverride = null,
+    string? PhotoUrl = null);
 
 public record CustomerDto(
     Guid Id, Guid OrganizationId, Guid? BranchId, string FullName, string? Phone,
@@ -36,6 +89,12 @@ public record CustomerDto(
     int LoyaltyPoints, DateTime CreatedAt,
     string AccountModel, Guid? SponsorId, string? SponsorName,
     decimal EntitlementCeiling, DateOnly? EntitlementExpiresOn,
+    /// فئة العميل ومبلغها — الشاشة تعرض المنحة المستحقّة بلا نداءٍ ثانٍ.
+    Guid? CategoryId, string? CategoryName,
+    /// مبلغٌ يخصّه وحده يَجُبّ فئته. NULL = اتبع الفئة، والصفر إيقافٌ صريح.
+    decimal? EntitlementOverride,
+    /// صورة صاحب البطاقة — تُطبع عليها وتظهر للكاشير عند المسح.
+    string? PhotoUrl,
     /// نمط التحقّق المختار لهذا الحساب — NULL يعني اتباع افتراضي المنظمة.
     string? CardMode,
     /// النمط الفعّال بعد تطبيق مسموح المنظمة وافتراضها — ما سيحدث فعلاً.
@@ -128,10 +187,16 @@ public class CustomersController : ControllerBase
                 .Select(s => new { s.Id, s.Name })
                 .ToDictionaryAsync(s => s.Id, s => s.Name);
 
+        // أسماء الفئات مرّةً واحدة — قائمةٌ بألف عميل لا تحتمل نداءً لكلٍّ.
+        var categoryNames = await _db.CustomerCategories
+            .Select(c => new { c.Id, c.Name })
+            .ToDictionaryAsync(c => c.Id, c => c.Name);
+
         var org = await OrgAsync();
         var items = customers
             .Select(c => ToDto(c, balances.GetValueOrDefault(c.Id),
-                c.SponsorId is null ? null : sponsorNames.GetValueOrDefault(c.SponsorId.Value), org))
+                c.SponsorId is null ? null : sponsorNames.GetValueOrDefault(c.SponsorId.Value), org,
+                c.CategoryId is null ? null : categoryNames.GetValueOrDefault(c.CategoryId.Value)))
             .ToList();
 
         return new CustomerPageDto(items, totalCount, page, pageSize);
@@ -186,9 +251,35 @@ public class CustomersController : ControllerBase
 
     [HttpPost]
     [RequirePermission("customers.manage")]
-    public async Task<ActionResult<CustomerDto>> Create(Customer customer)
+    public async Task<ActionResult<CustomerDto>> Create(SaveCustomerRequest request)
     {
-        customer.OrganizationId = Guid.Parse(User.FindFirstValue("organization_id")!);
+        if (string.IsNullOrWhiteSpace(request.FullName))
+            return BadRequest(new { message = "اسم العميل إلزامي" });
+        if (!AccountModels.IsValid(request.AccountModel))
+            return BadRequest(new { message = "نموذج حساب غير معروف" });
+
+        var customer = new Customer
+        {
+            OrganizationId = Guid.Parse(User.FindFirstValue("organization_id")!),
+            FullName = request.FullName.Trim(),
+            Phone = request.Phone,
+            Email = request.Email,
+            Notes = request.Notes,
+            // الباركود يُقبَل هنا لأن الاستيراد القديم يعتمده، ورمز البطاقة
+            // الحقيقي يُولَّد في مسار الإصدار — راجع IssueCard.
+            CardBarcode = string.IsNullOrWhiteSpace(request.CardBarcode) ? null : request.CardBarcode,
+            CreditLimit = request.CreditLimit,
+            CreditDays = request.CreditDays,
+            BranchId = request.BranchId,
+            AccountModel = request.AccountModel,
+            SponsorId = request.SponsorId,
+            EntitlementCeiling = request.EntitlementCeiling,
+            EntitlementExpiresOn = request.EntitlementExpiresOn,
+            CategoryId = request.CategoryId,
+            EntitlementOverride = request.EntitlementOverride,
+            PhotoUrl = request.PhotoUrl,
+        };
+
         _db.Customers.Add(customer);
         try
         {
@@ -205,8 +296,13 @@ public class CustomersController : ControllerBase
 
     [HttpPut("{id:guid}")]
     [RequirePermission("customers.manage")]
-    public async Task<IActionResult> Update(Guid id, Customer update)
+    public async Task<IActionResult> Update(Guid id, SaveCustomerRequest update)
     {
+        if (string.IsNullOrWhiteSpace(update.FullName))
+            return BadRequest(new { message = "اسم العميل إلزامي" });
+        if (!AccountModels.IsValid(update.AccountModel))
+            return BadRequest(new { message = "نموذج حساب غير معروف" });
+
         var customer = await _db.Customers.FindAsync(id);
         if (customer is null) return NotFound();
 
@@ -318,6 +414,118 @@ public class CustomersController : ControllerBase
         await _db.SaveChangesAsync();
 
         return ToDto(customer, newBalance, null, await OrgAsync());
+    }
+
+    /// <summary>
+    /// إصدار بطاقات لمجموعة عملاء دفعةً واحدة.
+    ///
+    /// <para><b>الفجوة:</b> جهةٌ تُدخل ألف منتسب تحتاج ألف بطاقة. وإصدارها
+    /// واحدةً واحدة عملُ يومين، ويُنسى فيها من يُنسى فلا يعرف أحد من بقي
+    /// بلا بطاقة إلا حين يقف على الصندوق.</para>
+    ///
+    /// <para><b>ولا يقبل رقماً سرّياً إطلاقاً</b> — نمط <c>pin</c> مرفوض
+    /// هنا: رقمٌ واحد لألف بطاقة يُبطل معنى السرّ، ورقمٌ لكلٍّ يحتاج تسليماً
+    /// فردياً فلا يبقى للجملة معنى. والبطاقة بلا رقم تُسلَّم باليد وتُقفَل
+    /// بسقفٍ يومي — وهو ما يجعل الإصدار الجماعي ممكناً أصلاً.</para>
+    ///
+    /// <para>ولا يُعاد الإصدار لمن له بطاقة إلا بطلبٍ صريح: إعادةٌ بالخطأ
+    /// تُبطل ألف بطاقة في جيوب أصحابها دفعةً واحدة.</para>
+    /// </summary>
+    [HttpPost("bulk-issue-cards")]
+    [RequirePermission("cards.issue")]
+    public async Task<ActionResult<BulkIssueCardsResult>> BulkIssueCards(BulkIssueCardsRequest request)
+    {
+        var org = await OrgAsync();
+        if (org is null) return BadRequest(new { message = "تعذّر تحديد المنظمة" });
+
+        // ── إصدار «المحفظة بالمحاسبة» وحده ──────────────────────────────
+        //
+        // فحصٌ بالإصدار لا بوحدة: الإصدار الجماعي ليس وحدةً تُشترى وحدها،
+        // بل ما يُميّز wallet_plus عن المحفظة البسيطة. وحصرُه هنا لا في
+        // الواجهة وحدها: من يتجاوز الشاشة يصل إلى نقطة النهاية مباشرةً،
+        // وحدٌّ تجاري لا تفرضه إلا الواجهة ليس حدّاً.
+        if (org.Edition != Editions.WalletPlus)
+        {
+            return BadRequest(new
+            {
+                message = "الإصدار الجماعي للبطاقات متاحٌ في «المحفظة بالمحاسبة» وحدها — "
+                    + $"إصدار هذه المنظمة «{org.Edition}». أصدر البطاقات فرادى، "
+                    + "أو راجع مزوّد النظام للترقية.",
+            });
+        }
+
+        var mode = request.CardMode ?? org.CardModeDefault;
+        if (!CardModeGate.AllowedModes(org).Contains(mode))
+            return BadRequest(new { message = "هذا النمط غير مسموح في إعدادات المنظمة" });
+
+        if (mode == CardModes.Pin)
+        {
+            return BadRequest(new
+            {
+                message = "الإصدار الجماعي لا يصلح لنمط الرقم السرّي — "
+                    + "رقمٌ واحد لألف بطاقة يُبطل السرّ. استعمل نمط «بطاقة فقط».",
+            });
+        }
+
+        var query = _db.Customers.Where(c => !c.IsDeleted);
+        if (request.CustomerIds is { Count: > 0 })
+        {
+            query = query.Where(c => request.CustomerIds.Contains(c.Id));
+        }
+        else if (request.CategoryId is { } categoryId)
+        {
+            query = query.Where(c => c.CategoryId == categoryId);
+        }
+        else
+        {
+            // بلا تحديد لأصدرنا بطاقةً لكل عميل في المنظمة — ومنهم من لا
+            // يُراد له بطاقة. الاختيار الصريح شرطٌ لا تشدّد.
+            return BadRequest(new { message = "حدّد العملاء أو الفئة" });
+        }
+
+        var customers = await query.ToListAsync();
+        if (customers.Count == 0) return new BulkIssueCardsResult(0, 0, mode, new List<BulkIssuedCardDto>());
+
+        var ids = customers.Select(c => c.Id).ToList();
+        var existing = await _db.CustomerCardIndexes
+            .Where(c => ids.Contains(c.CustomerId))
+            .ToDictionaryAsync(c => c.CustomerId, c => c);
+
+        var cards = new List<BulkIssuedCardDto>();
+        var skipped = 0;
+
+        foreach (var customer in customers)
+        {
+            var hasCard = existing.TryGetValue(customer.Id, out var old);
+            if (hasCard && !request.Reissue) { skipped++; continue; }
+            if (hasCard) _db.CustomerCardIndexes.Remove(old!);
+
+            var code = CustomerCards.GenerateCardCode();
+            _db.CustomerCardIndexes.Add(new CustomerCardIndex
+            {
+                CardCode = code,
+                CustomerId = customer.Id,
+                OrganizationId = customer.OrganizationId,
+            });
+
+            customer.CardBarcode = code;
+            customer.CardMode = mode;
+            // نمط «بطاقة فقط» يمحو أي رقم قديم: تركُه محفوظاً يُبقي سرّاً
+            // قابلاً للتسريب لا يستعمله أحد.
+            customer.PinHash = null;
+            customer.PinLockedUntil = null;
+
+            cards.Add(new BulkIssuedCardDto(customer.Id, customer.FullName, code));
+        }
+
+        if (cards.Count > 0)
+        {
+            _db.LogAudit(org.Id, CurrentUserId(), "customers.bulk_cards_issued", "customers", null,
+                newValues: new { Issued = cards.Count, Skipped = skipped, Mode = mode, request.Reissue });
+            await _db.SaveChangesAsync();
+        }
+
+        return new BulkIssueCardsResult(cards.Count, skipped, mode, cards);
     }
 
     /// <summary>
@@ -577,10 +785,12 @@ public class CustomersController : ControllerBase
     /// منظمة العميل — تلزم لحساب النمط والسقف الفعّالين. حين تكون null
     /// يُعرَض اختيار العميل الخام: لا نخترع نمطاً فعّالاً من فراغ.
     /// </param>
-    private static CustomerDto ToDto(Customer c, decimal balance, string? sponsorName = null, Organization? org = null) =>
+    private static CustomerDto ToDto(Customer c, decimal balance, string? sponsorName = null,
+        Organization? org = null, string? categoryName = null) =>
         new(c.Id, c.OrganizationId, c.BranchId, c.FullName, c.Phone, c.Email, c.Notes,
             c.CardBarcode, balance, c.CreditLimit, c.CreditDays, c.LoyaltyPoints, c.CreatedAt,
             c.AccountModel, c.SponsorId, sponsorName, c.EntitlementCeiling, c.EntitlementExpiresOn,
+            c.CategoryId, categoryName, c.EntitlementOverride, c.PhotoUrl,
             c.CardMode,
             org is null ? (c.CardMode ?? CardModes.Pin) : CardModeGate.EffectiveMode(org, c),
             c.DailyCap,

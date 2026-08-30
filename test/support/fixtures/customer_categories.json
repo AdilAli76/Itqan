@@ -1,0 +1,20 @@
+[
+  {
+    "id": "aaaa1111-1111-1111-1111-111111111111",
+    "name": "فئة أ",
+    "periodAmount": 300.0,
+    "unspentExpires": true,
+    "isActive": true,
+    "customerCount": 412,
+    "periodTotal": 124100.0
+  },
+  {
+    "id": "aaaa1111-1111-1111-1111-111111111112",
+    "name": "فئة ب",
+    "periodAmount": 180.0,
+    "unspentExpires": false,
+    "isActive": true,
+    "customerCount": 587,
+    "periodTotal": 105660.0
+  }
+]

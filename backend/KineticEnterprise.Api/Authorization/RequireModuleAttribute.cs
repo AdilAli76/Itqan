@@ -20,7 +20,10 @@ namespace KineticEnterprise.Api.Authorization;
 /// أصلاً؟». فلا يتجاوزها super_admin — صاحب المنظمة لا يملك تفعيل وحدة لم
 /// يشترها، وذلك قرار مالك المنصة عند الإنشاء.
 /// </summary>
-[AttributeUsage(AttributeTargets.Class | AttributeTargets.Method)]
+// AllowMultiple: وحدةٌ واحدة لا تكفي دائماً — فواتير الموردين تحتاج
+// accounting **و** procurement معاً. والمرشّحات تتراكم فيمرّ من استوفى
+// الشرطين وحده.
+[AttributeUsage(AttributeTargets.Class | AttributeTargets.Method, AllowMultiple = true)]
 public class RequireModuleAttribute : Attribute, IAsyncActionFilter
 {
     private readonly string _module;

@@ -20,6 +20,11 @@ Future<void> printWalletCard({
   required String holderName,
   required String orgName,
   required Color brandColor,
+  /// صورة صاحب البطاقة — تُطبع على وجهها.
+  ///
+  /// <para>بطاقةٌ بلا رقم سرّي يحميها شيءٌ واحد: أن يعرف الكاشير أن حاملها
+  /// صاحبها. وبلا صورة يستعملها من وجدها في الشارع.</para>
+  Uint8List? photoBytes,
   DateTime? expiryDate,
   String? supportPhone,
   /// شعار المنظمة بايتاتٍ — يُجلب بالتوكن قبل الاستدعاء (نقطة الملفات
@@ -58,6 +63,7 @@ Future<void> printWalletCard({
             cardCode: cardCode,
             holderName: holderName,
             orgName: orgName,
+            photoBytes: photoBytes,
             logoBytes: logoBytes,
             expiryDate: expiryDate,
             brand: brand,
@@ -100,6 +106,7 @@ pw.Widget _front({
   required String holderName,
   required String orgName,
   required Uint8List? logoBytes,
+  required Uint8List? photoBytes,
   required DateTime? expiryDate,
   required PdfColor brand,
   required PdfColor onBrand,
@@ -147,7 +154,25 @@ pw.Widget _front({
                 style: pw.TextStyle(fontSize: 7, color: onBrandMuted)),
           ],
         ),
-        pw.Column(
+        pw.Row(
+          crossAxisAlignment: pw.CrossAxisAlignment.end,
+          children: [
+            if (photoBytes != null) ...[
+              pw.Container(
+                width: 42,
+                height: 52,
+                // إطارٌ فاتح حول الصورة: صورةٌ داكنة على لون علامة داكن
+                // تذوب فيه فلا يُميَّز الوجه — وهو كل الغرض منها.
+                decoration: pw.BoxDecoration(
+                  color: PdfColors.white,
+                  borderRadius: pw.BorderRadius.circular(3),
+                ),
+                padding: const pw.EdgeInsets.all(1.5),
+                child: pw.Image(pw.MemoryImage(photoBytes), fit: pw.BoxFit.cover),
+              ),
+              pw.SizedBox(width: 10),
+            ],
+            pw.Expanded(child: pw.Column(
           crossAxisAlignment: pw.CrossAxisAlignment.start,
           children: [
             pw.Text('حامل البطاقة', style: pw.TextStyle(fontSize: 7, color: onBrandMuted)),
@@ -157,6 +182,8 @@ pw.Widget _front({
               style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold, color: onBrand),
               maxLines: 1,
             ),
+          ],
+        )),
           ],
         ),
         pw.Row(

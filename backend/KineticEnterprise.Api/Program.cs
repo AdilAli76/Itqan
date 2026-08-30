@@ -153,6 +153,9 @@ builder.Services.AddSwaggerGen();
 builder.Services.AddCors(options =>
 {
     options.AddDefaultPolicy(policy =>
+        // النطاقات المسموحة من الإعداد لا "كل نطاق": مع AllowCredentials
+        // يعني السماح المفتوح أن أي موقع على الإنترنت يستطيع مناداة الـAPI
+        // باعتماديات المستخدم المسجَّل — وهو تعريف CSRF.
         policy.WithOrigins(builder.Configuration["AllowedOrigins"]?.Split(',') ?? Array.Empty<string>())
               .AllowAnyHeader()
               .AllowAnyMethod()
