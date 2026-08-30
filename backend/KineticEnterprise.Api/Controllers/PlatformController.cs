@@ -1,4 +1,5 @@
-﻿using System.Text.Json;
+﻿﻿using System.IdentityModel.Tokens.Jwt;
+using System.Text.Json;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -30,6 +31,45 @@ public record PlatformOrganizationDto(
     decimal MonthlyFee, decimal StorageFee, decimal MaintenanceRate, DateTime? LicenseIssuedAt,
     /// حجم مرفقات هذا العميل على القرص — الرقم الذي يُسنِد StorageFee.
     long StorageBytes);
+
+/// <summary>مستخدم في منظمة عميل — كما يراه مالك المنصّة.</summary>
+public record OrganizationUserDto(
+    Guid Id, string FullName, string Email, string Role,
+    bool IsActive, bool IsPlatformAdmin, DateTime CreatedAt, DateTime? LastLoginAt);
+
+public record ResetOrgUserPasswordRequest(
+    /// سبب إعادة التعيين — يُحفظ في سجلّ التدقيق.
+    string Reason);
+
+/// <summary>كلمة المرور المؤقّتة — تُعرَض مرّةً واحدة ولا تُخزَّن نصّاً.</summary>
+public record ResetOrgUserPasswordResponse(string Email, string TemporaryPassword);
+
+public record UpdateOrgUserRequest(string FullName, string Email, bool IsActive);
+
+/// <summary>منظمةٌ يقترب ترخيصها من الانتهاء — أو انتهى.</summary>
+public record ExpiringLicenseDto(
+    Guid OrganizationId, string DisplayName, DateTime? ExpiresAt, int DaysLeft, string PlanTier);
+
+/// <summary>
+/// لوحة مالك المنصّة — حال العملاء كلّهم في شاشة.
+///
+/// <para><b>الفجوة التي تسدّها:</b> بنود المنصّة كانت مدسوسة في آخر مجموعة
+/// «النظام» بجانب الإعدادات، ومالك المنصّة يدخل كأي مدير منظمة فيجد ثلاثة
+/// بنودٍ زائدة. فلا يرى حال أعماله كمشغّل: كم عميلاً، وكم اشتراكاً يقترب
+/// انتهاؤه، وكم يُحصّل شهرياً، وكم يشغل الجميع من قرص.</para>
+///
+/// <para><b>ومنظمتُه هو ليست فيها:</b> بذرُ حساب المنصّة يُنشئ منظمةً بلا
+/// صفٍّ في <c>platform_organizations</c> — فالفهرس يحمل العملاء وحدهم،
+/// وأرقام هذه اللوحة لا تُحسَب فيها أعماله.</para>
+/// </summary>
+public record PlatformDashboardDto(
+    int TotalOrganizations, int ActiveOrganizations, int SuspendedOrganizations,
+    int TotalBranches, int TotalUsers,
+    /// ما يُحصَّل شهرياً من المنظمات النشطة وحدها — الموقوفة لا تدفع.
+    decimal MonthlyRecurring,
+    long TotalStorageBytes,
+    /// تنتهي خلال ثلاثين يوماً أو انتهت — مرتَّبةً بالأقرب.
+    List<ExpiringLicenseDto> ExpiringSoon);
 
 public record ChangeSubscriptionStatusRequest(string Status, string? Reason = null);
 public record WarnOrganizationRequest(string Message, string? Title = null);
@@ -96,6 +136,298 @@ public class PlatformController : ControllerBase
                 d?.MonthlyFee ?? 0, d?.StorageFee ?? 0, d?.MaintenanceRate ?? 0, d?.IssuedAt,
                 StorageBytesOf(o.Id));
         }).ToList();
+    }
+
+    /// <summary>
+    /// لوحة مالك المنصّة — الأرقام الإجمالية وما يقترب انتهاؤه.
+    ///
+    /// <para>تُبنى من نفس قراءة قائمة العملاء لا من استعلامٍ ثانٍ: رقمان
+    /// يُحسبان بطريقتين يفترقان أوّل مرّة تتغيّر إحداهما، فيرى مالك المنصّة
+    /// «١٢ عميلاً» في اللوحة و«١١» في القائمة ولا يعرف أيّهما الصحيح.</para>
+    /// </summary>
+    [HttpGet("dashboard")]
+    public async Task<ActionResult<PlatformDashboardDto>> Dashboard()
+    {
+        if (User.FindFirstValue("is_platform_admin") != "True") return Forbid();
+
+        var orgs = await _db.PlatformOrganizations.ToListAsync();
+        if (orgs.Count == 0)
+        {
+            return new PlatformDashboardDto(0, 0, 0, 0, 0, 0, 0, new List<ExpiringLicenseDto>());
+        }
+
+        var details = await ReadOrgDetailsAsync(orgs.Select(o => o.Id).ToList());
+        var today = DateTime.UtcNow.Date;
+
+        var active = orgs.Count(o => o.IsActive);
+        var branches = 0;
+        var users = 0;
+        var monthly = 0m;
+        long storage = 0;
+        var expiring = new List<ExpiringLicenseDto>();
+
+        foreach (var org in orgs)
+        {
+            details.TryGetValue(org.Id, out var d);
+            branches += d?.Branches ?? 0;
+            users += d?.Users ?? 0;
+            storage += StorageBytesOf(org.Id);
+
+            // الموقوفة لا تدفع: جمعُها في الإيراد الشهري يُعطي رقماً لا
+            // يصل الحساب، ويبني عليه صاحبه قراراً.
+            if (org.IsActive) monthly += (d?.MonthlyFee ?? 0) + (d?.StorageFee ?? 0);
+
+            if (d?.ExpiresAt is { } expiresAt)
+            {
+                var daysLeft = (expiresAt.Date - today).Days;
+                if (daysLeft <= 30)
+                {
+                    expiring.Add(new ExpiringLicenseDto(
+                        org.Id, org.DisplayName, expiresAt, daysLeft, d?.PlanTier ?? "-"));
+                }
+            }
+        }
+
+        return new PlatformDashboardDto(
+            orgs.Count, active, orgs.Count - active,
+            branches, users, monthly, storage,
+            expiring.OrderBy(e => e.DaysLeft).ToList());
+    }
+
+    /// <summary>
+    /// مستخدمو منظمة عميل — أسماؤهم وبُرُدهم وأدوارهم.
+    ///
+    /// <para><b>الفجوة التي تسدّها:</b> مالك المنصّة يُنشئ المنظمة ومعها
+    /// بريد مديرها وكلمة مروره **مرّةً واحدة**، ثم لا يجدهما في أي شاشة
+    /// بعدها. فإذا نسي مدير المنظمة بريده، أو أُدخل خطأً، أو طلب إعادة
+    /// كلمة مروره — لا سبيل إلى شيء من ذلك إلا بفتح قاعدة البيانات.</para>
+    ///
+    /// <para>ولا تُعاد بصمة كلمة المرور ولا جزءٌ منها: قائمةٌ تحمل البصمات
+    /// تُسرّبها كلّها بتسريبٍ واحد، وBCrypt يُكسَر بالقوّة الغاشمة على
+    /// كلمات المرور الضعيفة.</para>
+    /// </summary>
+    [HttpGet("{id:guid}/users")]
+    public async Task<ActionResult<List<OrganizationUserDto>>> GetOrganizationUsers(Guid id)
+    {
+        if (User.FindFirstValue("is_platform_admin") != "True") return Forbid();
+
+        await using var db = OpenPlatformContext();
+        var conn = db.Database.GetDbConnection();
+        await conn.OpenAsync();
+        await SetOrgContextAsync(conn, id);
+
+        var users = new List<OrganizationUserDto>();
+        try
+        {
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = @"
+SELECT id, full_name, email, role, is_active, is_platform_admin, created_at, last_login_at
+FROM dbo.app_users
+ORDER BY is_platform_admin DESC, created_at;";
+
+            await using var reader = await cmd.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                users.Add(new OrganizationUserDto(
+                    reader.GetGuid(0),
+                    reader.IsDBNull(1) ? "" : reader.GetString(1),
+                    reader.IsDBNull(2) ? "" : reader.GetString(2),
+                    reader.IsDBNull(3) ? "" : reader.GetString(3),
+                    !reader.IsDBNull(4) && reader.GetBoolean(4),
+                    !reader.IsDBNull(5) && reader.GetBoolean(5),
+                    reader.IsDBNull(6) ? DateTime.MinValue : reader.GetDateTime(6),
+                    reader.IsDBNull(7) ? null : reader.GetDateTime(7)));
+            }
+        }
+        finally
+        {
+            await ClearOrgContextAsync(conn);
+        }
+
+        return users;
+    }
+
+    /// <summary>
+    /// إعادة تعيين كلمة مرور مستخدم في منظمة عميل.
+    ///
+    /// <para><b>ولماذا كلمة مؤقّتة يولّدها النظام لا كلمة يكتبها مالك
+    /// المنصّة:</b> كلمةٌ يختارها هو يعرفها هو، فيستطيع الدخول بحساب العميل
+    /// بعدها بلا أثر يميّز دخوله من دخول صاحب الحساب. والمولَّدة تُعرَض
+    /// مرّةً وتُسلَّم للعميل ليغيّرها — والفارق أن الدخول بعدها فعلُ من
+    /// يملكها لا من أنشأها.</para>
+    ///
+    /// <para><b>ويُسجَّل في التدقيق دائماً:</b> إعادة تعيين كلمة مرور
+    /// عميلٍ حدثٌ يجب أن يُسأل عنه. سجلٌّ بلا هذا الحدث يجعل الوصول إلى
+    /// حسابات العملاء غير قابل للمراجعة أصلاً.</para>
+    /// </summary>
+    [HttpPost("{id:guid}/users/{userId:guid}/reset-password")]
+    public async Task<ActionResult<ResetOrgUserPasswordResponse>> ResetOrganizationUserPassword(
+        Guid id, Guid userId, ResetOrgUserPasswordRequest request)
+    {
+        if (User.FindFirstValue("is_platform_admin") != "True") return Forbid();
+
+        var reason = (request?.Reason ?? "").Trim();
+        if (reason.Length == 0) return BadRequest(new { message = "سبب إعادة التعيين إلزامي" });
+
+        var temporary = GenerateTemporaryPassword();
+        var hash = BCrypt.Net.BCrypt.HashPassword(temporary);
+
+        await using var db = OpenPlatformContext();
+        var conn = db.Database.GetDbConnection();
+        await conn.OpenAsync();
+        await SetOrgContextAsync(conn, id);
+
+        string? email = null;
+        try
+        {
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = @"
+UPDATE dbo.app_users SET password_hash = @hash
+OUTPUT inserted.email
+WHERE id = @userId;";
+            AddParam(cmd, "@hash", hash);
+            AddParam(cmd, "@userId", userId);
+
+            await using var reader = await cmd.ExecuteReaderAsync();
+            if (await reader.ReadAsync()) email = reader.IsDBNull(0) ? "" : reader.GetString(0);
+        }
+        finally
+        {
+            await ClearOrgContextAsync(conn);
+        }
+
+        // صفر صفوف يعني أن المستخدم ليس في هذه المنظمة — وسياسة العزل هي
+        // التي منعت، لا شرطٌ في الكود. فالرسالة «غير موجود» صادقة.
+        if (email is null) return NotFound(new { message = "المستخدم غير موجود في هذه المنظمة" });
+
+        _db.LogAudit(id, CurrentUserId(), "platform.user_password_reset", "app_users", userId,
+            newValues: new { Email = email, Reason = reason });
+        await _db.SaveChangesAsync();
+
+        _logger.LogWarning(
+            "مالك المنصّة {Admin} أعاد تعيين كلمة مرور {Email} في المنظمة {OrganizationId}. السبب: {Reason}",
+            User.FindFirstValue(ClaimTypes.NameIdentifier), email, id, reason);
+
+        return new ResetOrgUserPasswordResponse(email, temporary);
+    }
+
+    /// <summary>
+    /// تصحيح اسم مستخدم أو بريده، أو إيقافه.
+    ///
+    /// <para>البريد يُدخَل مرّةً عند الإنشاء، وخطأُ حرفٍ فيه يجعل الحساب
+    /// غير قابل للدخول ولا للاسترجاع — فلا بدّ من تصحيحه من هنا.</para>
+    /// </summary>
+    [HttpPut("{id:guid}/users/{userId:guid}")]
+    public async Task<IActionResult> UpdateOrganizationUser(
+        Guid id, Guid userId, UpdateOrgUserRequest request)
+    {
+        if (User.FindFirstValue("is_platform_admin") != "True") return Forbid();
+
+        var email = (request?.Email ?? "").Trim().ToLowerInvariant();
+        var fullName = (request?.FullName ?? "").Trim();
+        if (email.Length == 0 || !email.Contains('@'))
+            return BadRequest(new { message = "بريد إلكتروني غير صالح" });
+        if (fullName.Length == 0)
+            return BadRequest(new { message = "الاسم إلزامي" });
+
+        await using var db = OpenPlatformContext();
+        var conn = db.Database.GetDbConnection();
+        await conn.OpenAsync();
+        await SetOrgContextAsync(conn, id);
+
+        int affected;
+        try
+        {
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = @"
+UPDATE dbo.app_users
+SET full_name = @name, email = @email, is_active = @active
+WHERE id = @userId;";
+            AddParam(cmd, "@name", fullName);
+            AddParam(cmd, "@email", email);
+            AddParam(cmd, "@active", request!.IsActive);
+            AddParam(cmd, "@userId", userId);
+            affected = await cmd.ExecuteNonQueryAsync();
+        }
+        catch (Microsoft.Data.SqlClient.SqlException ex) when (ex.Number is 2601 or 2627)
+        {
+            // البريد فريد على مستوى النشِطين — راجع UQ_app_users_email_active.
+            return Conflict(new { message = $"البريد {email} مستعمَل في حساب نشط آخر" });
+        }
+        finally
+        {
+            await ClearOrgContextAsync(conn);
+        }
+
+        if (affected == 0) return NotFound(new { message = "المستخدم غير موجود في هذه المنظمة" });
+
+        _db.LogAudit(id, CurrentUserId(), "platform.user_updated", "app_users", userId,
+            newValues: new { FullName = fullName, Email = email, request.IsActive });
+        await _db.SaveChangesAsync();
+
+        return NoContent();
+    }
+
+    // ── مشتركات القراءة عبر المنظمات ────────────────────────────────────
+
+    private Guid? CurrentUserId()
+    {
+        var raw = User.FindFirstValue(JwtRegisteredClaimNames.Sub)
+                  ?? User.FindFirstValue(ClaimTypes.NameIdentifier);
+        return Guid.TryParse(raw, out var id) ? id : null;
+    }
+
+    private AppDbContext OpenPlatformContext()
+    {
+        var options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseSqlServer(_config.GetConnectionString("Default"))
+            .UseSnakeCaseNamingConvention()
+            .Options;
+        return new AppDbContext(options);
+    }
+
+    private static async Task SetOrgContextAsync(System.Data.Common.DbConnection conn, Guid id)
+    {
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "EXEC sp_set_session_context @key=N'organization_id', @value=@org;";
+        AddParam(cmd, "@org", id);
+        await cmd.ExecuteNonQueryAsync();
+    }
+
+    /// <summary>
+    /// يمسح السياق قبل عودة الاتصال إلى المجمّع.
+    ///
+    /// <para>اتصالٌ يعود بسياق منظمةٍ مضبوط قد يخدم طلباً آخر فيراها —
+    /// وهو خرقٌ للعزل لا يظهر في أي اختبار.</para>
+    /// </summary>
+    private static async Task ClearOrgContextAsync(System.Data.Common.DbConnection conn)
+    {
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "EXEC sp_set_session_context @key=N'organization_id', @value=NULL;";
+        await cmd.ExecuteNonQueryAsync();
+    }
+
+    private static void AddParam(System.Data.Common.DbCommand cmd, string name, object value)
+    {
+        var p = cmd.CreateParameter();
+        p.ParameterName = name;
+        p.Value = value;
+        cmd.Parameters.Add(p);
+    }
+
+    /// <summary>
+    /// كلمة مرور مؤقّتة قوية — من مولّد عشوائي تشفيري لا من <c>Random</c>.
+    ///
+    /// <para><c>Random</c> يُبذَر بالوقت، فكلمتان تُولَّدان في نفس الثانية
+    /// قد تتطابقان، ومن يعرف وقت الإنشاء يُضيّق مجال التخمين.</para>
+    /// </summary>
+    private static string GenerateTemporaryPassword()
+    {
+        // بلا حروف تلتبس بالأرقام (O/0، l/1، I): الكلمة تُملى هاتفياً
+        // للعميل، والالتباس يُنتج محاولات فاشلة تُلام على النظام.
+        const string alphabet = "ABCDEFGHJKMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
+        var bytes = System.Security.Cryptography.RandomNumberGenerator.GetBytes(14);
+        return new string(bytes.Select(b => alphabet[b % alphabet.Length]).ToArray());
     }
 
     /// <summary>
@@ -652,7 +984,7 @@ LEFT JOIN dbo.licenses l ON l.organization_id = o.id;";
             //
             // يُزرع هنا لا يُطلَب من العميل إنشاؤه: شاشات المخزون مخفية عنه
             // أصلاً في هذا الإصدار، فلا سبيل له إليه.
-            if (edition == Editions.Wallet)
+            if (Editions.IsWalletShaped(edition))
             {
                 db.Products.Add(new Product
                 {

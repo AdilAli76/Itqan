@@ -1,0 +1,25 @@
+{
+  "totalOrganizations": 12,
+  "activeOrganizations": 10,
+  "suspendedOrganizations": 2,
+  "totalBranches": 27,
+  "totalUsers": 63,
+  "monthlyRecurring": 4850.0,
+  "totalStorageBytes": 734003200,
+  "expiringSoon": [
+    {
+      "organizationId": "aaaa0000-0000-0000-0000-000000000001",
+      "displayName": "مؤسسة النهضة التجارية",
+      "expiresAt": "2026-08-22T00:00:00",
+      "daysLeft": -3,
+      "planTier": "standard"
+    },
+    {
+      "organizationId": "aaaa0000-0000-0000-0000-000000000002",
+      "displayName": "صيدلية الشفاء",
+      "expiresAt": "2026-09-05T00:00:00",
+      "daysLeft": 11,
+      "planTier": "pharmacy"
+    }
+  ]
+}

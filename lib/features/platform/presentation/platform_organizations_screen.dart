@@ -9,12 +9,15 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_text_styles.dart';
 import '../../../shared/widgets/app_surface.dart';
 import '../data/platform_organizations_providers.dart';
+import '../../../core/time/app_clock.dart';
+import 'organization_users_dialog.dart';
 
 final _dateFormat = DateFormat('yyyy-MM-dd');
 
 const _editionLabels = {
   'standard': 'قياسي',
   'wallet': 'المحفظة',
+  'wallet_plus': 'المحفظة بالمحاسبة',
   'trial': 'تجريبي',
   'enterprise': 'مؤسسات',
 };
@@ -112,7 +115,7 @@ class _OrgCard extends ConsumerWidget {
     final isActive = org['isActive'] as bool? ?? true;
     final expiresRaw = org['licenseExpiresAt'] as String?;
     final expires = expiresRaw == null ? null : DateTime.tryParse(expiresRaw);
-    final expired = expires != null && expires.isBefore(DateTime.now());
+    final expired = expires != null && expires.isBefore(AppClock.now());
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
@@ -147,8 +150,12 @@ class _OrgCard extends ConsumerWidget {
                 spacing: 18,
                 runSpacing: 8,
                 children: [
-                  _fact('الإصدار', _editionLabels[org['edition']] ?? '${org['edition']}'),
-                  _fact('الباقة', _tierLabels[org['planTier']] ?? '${org['planTier']}'),
+                  // «—» لا «null»: القيمة قد تغيب فعلاً — منظمةٌ أُنشئت
+                  // قبل ترحيل عمود الإصدار تحمله NULL. وطباعة اسم القيمة
+                  // الفارغة كما هي تُظهر كلمة برمجية للمستخدم بدل أن تقول
+                  // له إن البيانات ناقصة.
+                  _fact('الإصدار', _labelOr(_editionLabels, org['edition'])),
+                  _fact('الباقة', _labelOr(_tierLabels, org['planTier'])),
                   _fact('الفروع', '${org['branchCount'] ?? 0}'),
                   _fact('المستخدمون', '${org['userCount'] ?? 0}'),
                   _fact('انتهاء الترخيص', expires == null ? '—' : _dateFormat.format(expires)),
@@ -173,6 +180,17 @@ class _OrgCard extends ConsumerWidget {
                     icon: const Icon(Icons.description_outlined, size: 18),
                     label: const Text('طباعة العقد'),
                   ),
+                  // حسابات المنظمة: بريد المدير وكلمة مروره يُدخَلان مرّةً
+                  // عند الإنشاء ثم لا يظهران في أي شاشة. فمن نسي بريده أو
+                  // أُدخل خطأً لم يكن له طريق إلا قاعدة البيانات.
+                  OutlinedButton.icon(
+                    onPressed: () => showDialog(
+                      context: context,
+                      builder: (_) => OrganizationUsersDialog(org: org),
+                    ),
+                    icon: const Icon(Icons.manage_accounts_outlined, size: 18),
+                    label: const Text('الحسابات'),
+                  ),
                 ],
               ),
             ],
@@ -180,6 +198,14 @@ class _OrgCard extends ConsumerWidget {
         ),
       ),
     );
+  }
+
+  /// التسمية العربية للقيمة، أو القيمة نفسها، أو «—» إن غابت.
+  static String _labelOr(Map<String, String> labels, Object? value) {
+    if (value == null) return '—';
+    final key = '$value';
+    if (key.isEmpty || key == 'null') return '—';
+    return labels[key] ?? key;
   }
 
   Widget _tag(String text, Color color) => Container(
