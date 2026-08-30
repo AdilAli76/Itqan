@@ -38,7 +38,10 @@ concurrency:
 
 jobs:
   deploy:
-    runs-on: [self-hosted, windows, kinetic]
+    # وسمان لا أربعة: كل وسمٍ زائد طريقٌ إضافية لعدم المطابقة، ولا يزيد
+    # دقّةً — «kinetic» وحده لا يحمله عدّاءٌ آخر في هذا المستودع. و«windows»
+    # كان يفترض تطابقاً في حالة الأحرف مع «Windows» الذي يضعه المسجِّل.
+    runs-on: [self-hosted, kinetic]
     # يقرأ مرفَق الإصدار ولا يكتب شيئاً على GitHub.
     permissions:
       contents: read
