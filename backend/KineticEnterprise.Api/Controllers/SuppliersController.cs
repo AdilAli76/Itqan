@@ -160,7 +160,7 @@ public class SuppliersController : ControllerBase
             Method = method,
             Reference = string.IsNullOrWhiteSpace(request.Reference) ? null : request.Reference.Trim(),
             Note = string.IsNullOrWhiteSpace(request.Note) ? null : request.Note.Trim(),
-            PaidOn = request.PaidOn?.Date ?? DateTime.UtcNow.Date,
+            PaidOn = request.PaidOn?.Date ?? OrgClock.Today(org),
             CreatedBy = CurrentUserId(),
         };
         _db.SupplierPayments.Add(payment);

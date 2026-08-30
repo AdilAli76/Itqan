@@ -1,0 +1,47 @@
+[
+  {
+    "productId": "dddddddd-4444-4444-4444-444444444441",
+    "productName": "زيت محرّك 5W-30",
+    "sku": "OIL-5W30",
+    "latestCost": 77.0,
+    "latestOn": "2026-08-18T00:00:00",
+    "latestSupplierName": "شركة الوفاء للتوريدات",
+    "previousCost": 70.0,
+    "previousOn": "2026-06-02T00:00:00",
+    "changePercent": 10.0,
+    "cheapestSupplierName": "مؤسسة النهضة التجارية",
+    "cheapestCost": 72.5,
+    "supplierCount": 2,
+    "purchaseCount": 5
+  },
+  {
+    "productId": "dddddddd-4444-4444-4444-444444444442",
+    "productName": "فلتر هواء",
+    "sku": "FLT-AIR",
+    "latestCost": 15.0,
+    "latestOn": "2026-08-10T00:00:00",
+    "latestSupplierName": "مؤسسة النهضة التجارية",
+    "previousCost": 15.0,
+    "previousOn": "2026-05-21T00:00:00",
+    "changePercent": 0.0,
+    "cheapestSupplierName": "مؤسسة النهضة التجارية",
+    "cheapestCost": 15.0,
+    "supplierCount": 1,
+    "purchaseCount": 3
+  },
+  {
+    "productId": "dddddddd-4444-4444-4444-444444444443",
+    "productName": "بطارية 70 أمبير",
+    "sku": "BAT-70",
+    "latestCost": 410.0,
+    "latestOn": "2026-07-29T00:00:00",
+    "latestSupplierName": "شركة الوفاء للتوريدات",
+    "previousCost": 455.0,
+    "previousOn": "2026-04-11T00:00:00",
+    "changePercent": -9.9,
+    "cheapestSupplierName": "شركة الوفاء للتوريدات",
+    "cheapestCost": 410.0,
+    "supplierCount": 2,
+    "purchaseCount": 4
+  }
+]

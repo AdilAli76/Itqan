@@ -152,6 +152,22 @@ public class AccountingController : ControllerBase
     [Authorize(Roles = "super_admin")]
     public async Task<ActionResult<object>> Seed()
     {
+        // ── لا دفترَ نصفَ عامل ──────────────────────────────────────────
+        //
+        // [RequireModule] على هذه الوحدة **يمرّ مالكَ المنصّة بلا فحص** —
+        // عمداً، ليدير محتوى المنصّة في منظمته القياسية. لكن الترحيل الآلي
+        // (بيع، مرتجع، استلام، سداد) يقيس بـ[Ledger.IsEnabled] وهو لا
+        // يستثني أحداً. فالنتيجة دفترٌ يقبل قيوداً يدوية ولا تصله قيود
+        // البيع إطلاقاً.
+        //
+        // وذلك **أسوأ من غياب الدفتر**: ميزان المراجعة يتوازن فيبدو
+        // صحيحاً، بينما المبيعات وتكلفتها غائبتان عنه كلّها. اكتُشف حين
+        // مرّ فحص الـAPI ببذر الدليل وقيدٍ يدوي ثم فشلت أربع فحوصات ترحيلٍ
+        // آلي متتالية بلا سببٍ ظاهر.
+        //
+        // فيُقاس هنا بنفس ما يقيس به الترحيل، لا بما يقيس به الحاجز.
+        if (await LedgerDisabledAsync() is { } refusal) return refusal;
+
         var orgId = Guid.Parse(User.FindFirstValue("organization_id")!);
         var seeded = await ChartOfAccounts.SeedAsync(_db, orgId);
 
@@ -277,8 +293,9 @@ public class AccountingController : ControllerBase
     public async Task<ActionResult<TrialBalanceDto>> GetTrialBalance(
         [FromQuery] DateTime? from, [FromQuery] DateTime? to)
     {
-        var fromDate = from?.Date ?? new DateTime(DateTime.UtcNow.Year, 1, 1);
-        var toDate = to?.Date ?? DateTime.UtcNow.Date;
+        var org = await _db.Organizations.FirstOrDefaultAsync();
+        var fromDate = from?.Date ?? OrgClock.StartOfYear(org);
+        var toDate = to?.Date ?? OrgClock.Today(org);
 
         var accounts = await _db.Accounts.ToDictionaryAsync(a => a.Id, a => a);
 
@@ -320,8 +337,11 @@ public class AccountingController : ControllerBase
     public async Task<ActionResult<IncomeStatementDto>> GetIncomeStatement(
         [FromQuery] DateTime? from, [FromQuery] DateTime? to)
     {
-        var fromDate = from?.Date ?? new DateTime(DateTime.UtcNow.Year, 1, 1);
-        var toDate = to?.Date ?? DateTime.UtcNow.Date;
+        // الافتراضات بتوقيت المنظمة: تقرير «هذا العام» في أول ساعتين من أول
+        // يناير كان يعرض العام السابق.
+        var org = await _db.Organizations.FirstOrDefaultAsync();
+        var fromDate = from?.Date ?? OrgClock.StartOfYear(org);
+        var toDate = to?.Date ?? OrgClock.Today(org);
 
         var balances = await BalancesAsync(fromDate, toDate);
         var accounts = await _db.Accounts.ToDictionaryAsync(a => a.Id, a => a);
@@ -369,7 +389,8 @@ public class AccountingController : ControllerBase
     [HttpGet("balance-sheet")]
     public async Task<ActionResult<BalanceSheetDto>> GetBalanceSheet([FromQuery] DateTime? asOf)
     {
-        var date = asOf?.Date ?? DateTime.UtcNow.Date;
+        var org = await _db.Organizations.FirstOrDefaultAsync();
+        var date = asOf?.Date ?? OrgClock.Today(org);
 
         // من بداية التشغيل: DateTime.MinValue يغطّي كل قيد مكتوب.
         var balances = await BalancesAsync(DateTime.MinValue, date);
@@ -549,17 +570,12 @@ public class AccountingController : ControllerBase
     {
         var periodEnd = request.PeriodEnd.Date;
 
-        // الحدّ بتوقيت UTC كبقية تواريخ النظام (CreatedAt وEntryDate).
+        // الحدّ بتوقيت **المنظمة** لا بغرينتش — راجع [OrgClock].
         //
-        // <para><b>وأثره المعلوم:</b> منظمةٌ شرق غرينتش تُنهي يومها قبل أن
-        // ينتهي يوم UTC، فمحاولةُ إقفال «أمسها» في الساعات الأولى تُرفض حتى
-        // يمرّ منتصف ليل غرينتش. ولذلك تُسمّى الرسالةُ التاريخَ المسموح
-        // صراحةً بدل «قبل اليوم» الغامضة — فيعرف من قرأها ما يكتب.</para>
-        //
-        // <para>ومنطقة زمنية لكل منظمة إصلاحٌ أوسع من هذا الموضع: كل تاريخ
-        // في النظام يُقاس بـUTC، وتغييرُ واحدٍ منها يُنتج تقريرين بحدّين
-        // مختلفين.</para>
-        var latestAllowed = DateTime.UtcNow.Date.AddDays(-1);
+        // كان بـUTC، فمنظمةٌ شرق غرينتش لا تستطيع إقفال «أمسها» حتى يمرّ
+        // منتصف ليل غرينتش. والرسالة تُسمّي التاريخ المسموح صراحةً.
+        var org = await _db.Organizations.FirstOrDefaultAsync();
+        var latestAllowed = OrgClock.Today(org).AddDays(-1);
         if (periodEnd > latestAllowed)
         {
             // إقفال اليوم أو المستقبل يمنع بيع اليوم نفسه.
@@ -824,6 +840,27 @@ public class AccountingController : ControllerBase
                 accounts.GetValueOrDefault(l.AccountId)?.Code ?? "-",
                 accounts.GetValueOrDefault(l.AccountId)?.Name ?? "-",
                 l.Debit, l.Credit, l.Note)).ToList())).ToList();
+    }
+
+    /// <summary>
+    /// يرفض حين تكون المحاسبة غير مفعَّلة فعلياً للمنظمة.
+    ///
+    /// <para>يقيس بـ<see cref="Ledger.IsEnabled"/> لا بـ<c>RequireModule</c>:
+    /// الأخير يمرّر مالك المنصّة بلا فحص، والترحيل الآلي لا يمرّره — فيقعان
+    /// على حالتين متناقضتين ما لم يُقَس بمقياسٍ واحد.</para>
+    /// </summary>
+    private async Task<ActionResult?> LedgerDisabledAsync()
+    {
+        var org = await _db.Organizations.FirstOrDefaultAsync();
+        var license = await _db.Licenses.FirstOrDefaultAsync();
+        if (org is not null && Ledger.IsEnabled(org, license)) return null;
+
+        return BadRequest(new
+        {
+            message = "وحدة المحاسبة غير مفعَّلة لهذه المنظمة — "
+                + $"إصدارها «{org?.Edition ?? "غير معروف"}». "
+                + "بذرُ دليل هنا يُنشئ دفتراً تصله القيود اليدوية ولا تصله قيود البيع.",
+        });
     }
 
     private Guid? CurrentUserId()

@@ -1,0 +1,66 @@
+[
+  {
+    "id": "aaaaaaaa-1111-1111-1111-111111111111",
+    "supplierId": "bbbbbbbb-2222-2222-2222-222222222222",
+    "supplierName": "شركة الوفاء للتوريدات",
+    "invoiceNumber": "INV-2026-118",
+    "invoiceDate": "2026-08-20T00:00:00",
+    "dueDate": "2026-09-20T00:00:00",
+    "totalAmount": 4620.0,
+    "linesTotal": 4620.0,
+    "headerVariance": 0.0,
+    "status": "draft",
+    "notes": null,
+    "postedAt": null,
+    "createdByName": "مدير النظام",
+    "createdAt": "2026-08-20T09:30:00",
+    "lines": [
+      {
+        "purchaseReceiptItemId": "cccccccc-3333-3333-3333-333333333331",
+        "productId": "dddddddd-4444-4444-4444-444444444441",
+        "productName": "زيت محرّك 5W-30",
+        "supplierNoteNumber": "SN-9041",
+        "receivedOn": "2026-08-18T00:00:00",
+        "receivedQuantity": 60.0,
+        "receivedUnitCost": 70.0,
+        "invoicedQuantity": 60.0,
+        "invoicedUnitCost": 77.0,
+        "quantityVariance": 0.0,
+        "unitCostVariance": 7.0,
+        "amountVariance": 420.0
+      }
+    ]
+  },
+  {
+    "id": "aaaaaaaa-1111-1111-1111-111111111112",
+    "supplierId": "bbbbbbbb-2222-2222-2222-222222222223",
+    "supplierName": "مؤسسة النهضة التجارية",
+    "invoiceNumber": "INV-2026-092",
+    "invoiceDate": "2026-08-12T00:00:00",
+    "dueDate": null,
+    "totalAmount": 1800.0,
+    "linesTotal": 1800.0,
+    "headerVariance": 0.0,
+    "status": "posted",
+    "notes": null,
+    "postedAt": "2026-08-12T14:05:00",
+    "createdByName": "مدير النظام",
+    "createdAt": "2026-08-12T13:40:00",
+    "lines": [
+      {
+        "purchaseReceiptItemId": "cccccccc-3333-3333-3333-333333333332",
+        "productId": "dddddddd-4444-4444-4444-444444444442",
+        "productName": "فلتر هواء",
+        "supplierNoteNumber": "SN-8817",
+        "receivedOn": "2026-08-10T00:00:00",
+        "receivedQuantity": 120.0,
+        "receivedUnitCost": 15.0,
+        "invoicedQuantity": 120.0,
+        "invoicedUnitCost": 15.0,
+        "quantityVariance": 0.0,
+        "unitCostVariance": 0.0,
+        "amountVariance": 0.0
+      }
+    ]
+  }
+]
