@@ -107,6 +107,23 @@ jobs:
           $when = (Select-String -Path $log -SimpleMatch $env:SHA | Select-Object -Last 1).Line.Split('|')[0].Trim()
           Write-Host "مطابِقة: نُشرت على التجربة في $when"
 
+      # ── نسخة قبل الترحيل ──────────────────────────────────────────────
+      #
+      # الترقية تُنفّذ ترحيلات على قاعدة الإنتاج، والترحيل لا يُتراجع عنه.
+      # وdeploy_update يحفظ ملف الأسرار وحده — لا القاعدة.
+      #
+      # والنسخة الليلية لا تكفي: بين الثانية فجراً ونشرةِ الظهر يومُ عملٍ
+      # كامل من فواتير عملاء. فالنسخة تُؤخذ الآن، ويفشل النشر إن تعذّرت —
+      # نشرٌ يتأخّر ساعة أهون من دفاتر لا مرجع لها.
+      - name: نسخة احتياطية قبل الترحيل
+        if: inputs.target == 'production' && !inputs.skip_db
+        shell: pwsh
+        run: |
+          $b = 'C:\kinetic\tool\backup.ps1'
+          if (-not (Test-Path $b)) { throw "backup.ps1 غير موجود في C:\kinetic\tool — انشر حزمة حديثة على الإنتاج يدوياً مرّة، أو خذ نسخة بنفسك قبل المتابعة." }
+          & $b -Database 'KineticEnterprise'
+          if ($LASTEXITCODE -ne 0) { throw 'فشلت النسخة الاحتياطية — أُوقف النشر قبل أي ترحيل.' }
+
       - name: الترقية
         shell: pwsh
         run: |
