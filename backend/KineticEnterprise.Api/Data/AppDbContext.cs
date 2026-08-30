@@ -48,6 +48,11 @@ public class AppDbContext : DbContext
     public DbSet<JournalEntryLine> JournalEntryLines => Set<JournalEntryLine>();
     public DbSet<AccountMapping> AccountMappings => Set<AccountMapping>();
     public DbSet<FiscalClosing> FiscalClosings => Set<FiscalClosing>();
+    public DbSet<BankAccount> BankAccounts => Set<BankAccount>();
+    public DbSet<CustomerCategory> CustomerCategories => Set<CustomerCategory>();
+    public DbSet<CustomerAdvance> CustomerAdvances => Set<CustomerAdvance>();
+    public DbSet<SupplierInvoice> SupplierInvoices => Set<SupplierInvoice>();
+    public DbSet<SupplierInvoiceLine> SupplierInvoiceLines => Set<SupplierInvoiceLine>();
     public DbSet<Permission> Permissions => Set<Permission>();
     public DbSet<RolePermission> RolePermissions => Set<RolePermission>();
     public DbSet<PurchaseOrder> PurchaseOrders => Set<PurchaseOrder>();
@@ -115,6 +120,11 @@ public class AppDbContext : DbContext
         modelBuilder.Entity<JournalEntryLine>().ToTable("journal_entry_lines");
         modelBuilder.Entity<AccountMapping>().ToTable("account_mappings");
         modelBuilder.Entity<FiscalClosing>().ToTable("fiscal_closings");
+        modelBuilder.Entity<BankAccount>().ToTable("bank_accounts");
+        modelBuilder.Entity<CustomerCategory>().ToTable("customer_categories");
+        modelBuilder.Entity<CustomerAdvance>().ToTable("customer_advances");
+        modelBuilder.Entity<SupplierInvoice>().ToTable("supplier_invoices");
+        modelBuilder.Entity<SupplierInvoiceLine>().ToTable("supplier_invoice_lines");
         modelBuilder.Entity<Permission>().ToTable("permissions").HasKey(p => p.Code);
         modelBuilder.Entity<RolePermission>().ToTable("role_permissions")
             .HasKey(rp => new { rp.OrganizationId, rp.Role, rp.PermissionCode });
@@ -167,6 +177,8 @@ public class AppDbContext : DbContext
         // License.EnabledModulesJson مقابل عمود enabled_modules، وكانت خامدة
         // لأن لا شيء استعلم عن Licenses قبل بناء LicensesController الآن.
         modelBuilder.Entity<Organization>().Property(o => o.BarcodeTemplateJson).HasColumnName("barcode_template");
+        // ونفسها لقالب الإيصال: ReceiptTemplateJson ← receipt_template.
+        modelBuilder.Entity<Organization>().Property(o => o.ReceiptTemplateJson).HasColumnName("receipt_template");
         modelBuilder.Entity<License>().Property(l => l.EnabledModulesJson).HasColumnName("enabled_modules");
 
         // خطأ حقيقي ثانٍ كان يُسقِط GetMyOrganization/GetSettings بـ 500 دائماً

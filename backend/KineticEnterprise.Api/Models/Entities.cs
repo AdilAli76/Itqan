@@ -18,6 +18,20 @@ public static class Editions
     public const string Wallet = "wallet";
 
     /// <summary>
+    /// المحفظة ومعها دفتر محاسبي كامل.
+    ///
+    /// <para><b>لماذا إصدارٌ مستقلّ لا ترقية إلى «المؤسسات»:</b> جهةٌ تصرف
+    /// على منتسبيها تريد ميزاناً ودفتراً — ورصيد البطاقة عندها **التزام**
+    /// لا إيراد (راجع [AccountRoles.CustomerWallet]). لكنها لا بضاعة لها،
+    /// فترقيتُها إلى المؤسسات تُغرق قائمتها بمخزونٍ ومستودعاتٍ ومشترياتٍ لا
+    /// معنى لها عندها — وهو نفس ما نتجنّبه حين نُخفي المحاسبة عن
+    /// البقّالة.</para>
+    ///
+    /// <para>وهو محفظةٌ في كل سلوكه — راجع [IsWalletShaped].</para>
+    /// </summary>
+    public const string WalletPlus = "wallet_plus";
+
+    /// <summary>
     /// الإصدار القياسي زائد المعرفة الدوائية: نشرة الدواء المرتبطة بالصنف
     /// (المادة الفعّالة، التركيز، دواعي الاستعمال، موانعه، التحذيرات،
     /// الأعراض الجانبية) تُعرض للكاشير لحظة الصرف.
@@ -30,12 +44,15 @@ public static class Editions
     /// </summary>
     public const string Pharmacy = "pharmacy";
 
-    public static readonly string[] All = { Standard, Wallet, Pharmacy, Trial, Enterprise };
+    public static readonly string[] All = { Standard, Wallet, WalletPlus, Pharmacy, Trial, Enterprise };
 
     /// <summary>الوحدات المفعَّلة لكل إصدار — منها يُبنى التنقّل وتُقيَّد النقاط.</summary>
     public static string[] ModulesOf(string edition) => edition switch
     {
         Wallet => new[] { "pos", "customers", "reports" },
+        // المحفظة ومعها المحاسبة — ولا مخزون: لا بضاعة تُقاس ولا مستودع
+        // يُدار. والمصروفات تأتي مع accounting لا وحدةً مستقلّة.
+        WalletPlus => new[] { "pos", "customers", "reports", "accounting" },
         // وحدة pharmacy فوق وحدات الإصدار القياسي لا بدلاً منها: الصيدلية
         // متجر تجزئة كامل قبل أن تكون صيدلية — لها مخزون ومشتريات وموردون.
         Pharmacy => new[] { "inventory", "pos", "customers", "reports", "pharmacy" },
@@ -54,8 +71,20 @@ public static class Editions
         _ => new[] { "inventory", "pos", "customers", "reports" },
     };
 
-    /// <summary>إصدار المحفظة يبيع بالقيمة الحرّة حصراً — لا أصناف يختار منها.</summary>
-    public static bool AllowsOpenProduct(string edition) => edition == Wallet;
+    /// <summary>
+    /// أهذا إصدارٌ على شكل المحفظة — بطاقات وأرصدة بلا بضاعة؟
+    ///
+    /// <para><b>ولماذا دالّة لا مقارنة مكرّرة:</b> سلوك المحفظة يُفحَص في
+    /// ستّة مواضع بين الخادم والواجهة (شاشة البيع، إخفاء المخزون، بذر صنف
+    /// القيمة، البيع بالقيمة الحرّة…). وإضافةُ إصدارٍ جديد على شكلها بـ
+    /// <c>== Wallet</c> مكرّرة تعني تحديث خمسةٍ ونسيان السادس — والسادس هو
+    /// الذي يُكتشف عند العميل.</para>
+    /// </summary>
+    public static bool IsWalletShaped(string edition) =>
+        edition == Wallet || edition == WalletPlus;
+
+    /// <summary>إصدارات المحفظة تبيع بالقيمة الحرّة حصراً — لا أصناف تُختار.</summary>
+    public static bool AllowsOpenProduct(string edition) => IsWalletShaped(edition);
 }
 
 public class Organization
@@ -88,6 +117,38 @@ public class Organization
     // الطابعات الحديثة (تكامل الأجهزة §2.12). الطباعة نفسها عبر تعريف
     // Windows القياسي للطابعة، لا بروتوكول ESC/POS مباشر لموديل بعينه.
     public double ReceiptWidthMm { get; set; } = 80;
+
+    /// <summary>
+    /// الرقم الضريبي — كما تطلبه الفاتورة الرسمية.
+    ///
+    /// <para>لم يكن له موضع، فيكتبه التاجر بخطّ اليد على الورقة المطبوعة أو
+    /// لا يكتبه.</para>
+    /// </summary>
+    public string? TaxNumber { get; set; }
+
+    /// <summary>رقم السجلّ التجاري.</summary>
+    public string? CommercialRegistry { get; set; }
+
+    /// <summary>
+    /// قالب الإيصال — JSON واحد لا عمودٌ لكل خيار.
+    ///
+    /// <para><b>الفجوة التي يسدّه:</b> الإيصال كان يطبع اسم المنظمة نصّاً
+    /// وحسب: لا شعار ولا رقم ضريبي ولا سجلّ تجاري ولا شروط تذييل ولا رمز
+    /// استجابة سريعة. والتاجر يريد شعاره على الورقة — وهو أوّل ما يسأل عنه
+    /// بعد الشراء.</para>
+    ///
+    /// <para><b>ولماذا JSON لا أعمدة:</b> نفس نهج
+    /// <see cref="BarcodeTemplateJson"/>. كل خيار عمودٌ يعني هجرةً لكل خيار
+    /// جديد — وهو الطريق الذي انتهى بجدولٍ ذي ١٦٥ عموداً في نظامٍ آخر
+    /// دُرس (راجع ENTERPRISE_HARVEST.md §32.2).</para>
+    ///
+    /// <para><c>paper</c> أحد: <c>roll80</c>، <c>roll58</c>، <c>a4</c>،
+    /// <c>a5</c>.</para>
+    /// </summary>
+    public string ReceiptTemplateJson { get; set; } =
+        "{\"paper\":\"roll80\",\"showLogo\":true,\"showTaxNumber\":true,"
+        + "\"showCommercialRegistry\":false,\"showQr\":false,"
+        + "\"headerText\":null,\"footerText\":\"شكراً لتعاملكم معنا\"}";
     // شريط جانبي أو شريط علوي — تفضيل عرض بحت لا يغيّر أي وظيفة.
     public string NavLayout { get; set; } = "sidebar";
     // السماح ببيع الأصناف مفتوحة القيمة في نقطة البيع. مطفأ افتراضياً:
@@ -95,6 +156,17 @@ public class Organization
     // لسحب نقدية بلا أثر. تفعيله قرار مدير المنظمة (super_admin) وحده،
     // ولا يُضبط من إعدادات جهاز الكاشير.
     public bool PosAllowOpenProduct { get; set; }
+
+    /// <summary>
+    /// منطقة المنظمة الزمنية — راجع [OrgClock].
+    ///
+    /// <para>«اليوم» كان يُقاس بـUTC، فمحلٌّ في طرابلس بين العاشرة مساءً
+    /// ومنتصف الليل يُسجّل مصروف اليوم في يوم أمس، ولا يستطيع إقفال أمس.
+    /// </para>
+    /// </summary>
+    // النصّ لا OrgClock.DefaultTimeZone: الكيانات لا تعتمد على طبقة
+    // البيانات. والقيمتان متطابقتان وتُفحصان في الاختبار.
+    public string TimeZoneId { get; set; } = "Libya";
 
     // ── أنماط بطاقة المحفظة (راجع [CardModes]) ──────────────────────────
 
@@ -302,6 +374,24 @@ public class Product
     public bool AllowsSubUnitSale => SubUnitsPerBase > 1 && SubUnitPrice > 0;
     public decimal CostPrice { get; set; }
     public decimal SalePrice { get; set; }
+
+    /// <summary>
+    /// الحدّ الأدنى لسعر البيع. صفر = بلا حدّ.
+    ///
+    /// <para><b>العطب الذي يسدّه:</b> صلاحية <c>pos.price_override</c> تسمح
+    /// بتغيير السعر، ولا شيء كان يمنع البيع **تحت التكلفة**. كاشيرٌ يخطئ في
+    /// رقم، أو يجامل قريباً، فتخرج البضاعة بخسارة ولا يظهر ذلك إلا في تقرير
+    /// الشهر — إن ظهر. والصلاحية لا تحمي: مدير المنظمة يملكها دائماً.</para>
+    ///
+    /// <para><b>وهو حدٌّ مطلق لا يتجاوزه أحد</b> — ولا حتى حامل صلاحية
+    /// تعديل السعر. حدٌّ له استثناء ليس حدّاً: من يريد بيعاً أرخص يُنزل
+    /// الحدّ صراحةً على بطاقة الصنف، فيبقى القرار مسجَّلاً في مكانٍ واحد بدل
+    /// أن يتكرّر صامتاً في كل فاتورة.</para>
+    ///
+    /// <para>وبالوحدة الأساسية دائماً: البيع الجزئي يقيسه بالنسبة (راجع
+    /// [SubUnitsPerBase])، فحدٌّ ثانٍ للوحدة الجزئية كان سيفترق عن الأوّل
+    /// أوّل مرّة يُعدَّل أحدهما.</para>
+    public decimal MinSalePrice { get; set; }
     /// <summary>
     /// نشرة الدواء المرتبطة بهذا الصنف — راجع [MedicineReference].
     ///
@@ -925,6 +1015,30 @@ public class Customer
     /// <summary>سقف ما يُمنَح خلال الفترة الواحدة. صفر = بلا سقف.</summary>
     public decimal EntitlementCeiling { get; set; }
 
+    /// <summary>فئة العميل — منها يُؤخذ مبلغ المرتَّب. NULL = بلا فئة.</summary>
+    public Guid? CategoryId { get; set; }
+
+    /// <summary>
+    /// صورة صاحب البطاقة — مسارُ مرفقٍ لا الصورة نفسها.
+    ///
+    /// <para><b>لماذا تُطبع على البطاقة:</b> بطاقةٌ بلا رقم سرّي يحميها شيءٌ
+    /// واحد — أن يعرف الكاشير أن حاملها صاحبها. وبطاقةٌ بلا صورة في نمط
+    /// «بطاقة فقط» يستعملها من وجدها في الشارع.</para>
+    ///
+    /// <para>ومسارٌ لا بايتات: صورةٌ في عمود تُحمَّل مع كل قراءة عميل، وقائمةٌ
+    /// بألف منتسب كانت ستنقل عشرات الميغابايتات في كل فتح شاشة.</para>
+    /// </summary>
+    public string? PhotoUrl { get; set; }
+
+    /// <summary>
+    /// مبلغٌ يخصّ هذا العميل وحده، يَجُبّ مبلغ فئته. NULL = اتبع الفئة.
+    ///
+    /// <para><b>ولماذا NULL لا صفر:</b> الصفر قرارٌ صريح — «هذا العميل
+    /// موقوف المرتَّب هذه الدورة». وجعلُه يعني «اتبع الفئة» يُلغي القدرة على
+    /// إيقاف مرتَّب شخصٍ بعينه، وهي حاجةٌ حقيقية.</para>
+    /// </summary>
+    public decimal? EntitlementOverride { get; set; }
+
     /// <summary>
     /// نهاية فترة الاستحقاق الحالية. ما تبقّى بعدها يسقط بحركة إسقاط صريحة
     /// (راجع [EntitlementSweeper]) — ولا يُطبَّق هذا على الرصيد المدفوع مسبقاً أبداً.
@@ -960,6 +1074,47 @@ public static class AccountModels
 ///
 /// لا يحمل branch_id — الجهة تتعامل مع المنظمة ككل، بنفس مبرر [Supplier].
 /// </summary>
+/// <summary>
+/// فئة عملاء — اسمٌ ومبلغُ مرتَّبٍ دوري.
+///
+/// <para><b>الفجوة التي تسدّها:</b> سقف الاستحقاق كان
+/// <see cref="Customer.EntitlementCeiling"/> — رقماً **على كل عميل على
+/// حدة**. وجهةٌ تصرف على ألف منتسب مقسَّمين إلى ثلاث فئات كانت ترفع مرتب
+/// الفئة بتعديل ألف صفّ يدوياً؛ وأوّل صفٍّ يُنسى يُنتج منتسباً يقبض أقلّ
+/// من زملائه ولا يعرف أحدٌ لماذا.</para>
+///
+/// <para>والفئة **مبلغٌ واسم فقط** — لا سقفٌ يومي ولا نمط بطاقة ولا مدّة.
+/// تلك تبقى على العميل حيث كانت: خلطُها هنا يجعل تغيير المرتب يغيّر معه
+/// إعداداتٍ لم يقصد أحدٌ تغييرها.</para>
+/// </summary>
+public class CustomerCategory
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid OrganizationId { get; set; }
+
+    /// <summary>اسمها كما تسمّيها الإدارة — «أ» أو «موظفون» أو غيرهما.</summary>
+    public string Name { get; set; } = "";
+
+    /// <summary>المرتَّب الذي يُودَع لكل عميل فيها كل دورة صرف.</summary>
+    public decimal PeriodAmount { get; set; }
+
+    /// <summary>
+    /// أيسقط ما لم يُصرَف من مرتَّب الدورة عند صرف الدورة التالية؟
+    ///
+    /// <para><b>قرارُ إدارةٍ لا قاعدةٌ ثابتة:</b> جهةٌ تريد الرصيد «استعمله
+    /// أو تفقده» فلا يتراكم عندها التزام، وأخرى تريده يتراكم لمن لم يصرف.
+    /// وفرضُ أحدهما على الاثنتين يجعل النظام غير صالح لإحداهما.</para>
+    ///
+    /// <para>وتنفيذُه لا يحتاج شيئاً جديداً: <see cref="EntitlementSweeper"/>
+    /// لا يمسّ إلا من له <c>EntitlementExpiresOn</c> غير فارغ. فالرصيد الذي
+    /// لا يسقط يُودَع بتاريخ انتهاءٍ فارغ — فلا تراه المكنسة أصلاً.</para>
+    /// </summary>
+    public bool UnspentExpires { get; set; } = true;
+
+    public bool IsActive { get; set; } = true;
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+}
+
 public class Sponsor
 {
     public Guid Id { get; set; } = Guid.NewGuid();
@@ -1032,12 +1187,63 @@ public class CustomerPinAttempt
 /// (نفس حرمة القيد المحاسبي؛ التصحيح بحركة معاكسة لا بتعديل الماضي).
 /// amount موجب دائماً والإشارة تُشتق من Kind عبر [WalletKinds.SignOf] وحدها.
 /// </summary>
+/// <summary>
+/// سلفة على منتسب — مالٌ يُقرَض ويُستردّ من مرتَّبه.
+///
+/// <para><b>ولماذا كيانٌ لا حركةُ محفظةٍ وحدها:</b> الحركة تقول كم دخل
+/// البطاقة؛ والسلفة تحتاج ما لا تحمله الحركة: كم القسط، ومتى بدأت، وكم
+/// بقي منها. والمتبقّي <b>محسوبٌ لا مخزَّن</b> — مجموعُ أقساطها مطروحاً من
+/// أصلها، بنفس مبدأ رصيد المحفظة وحساب المورّد.</para>
+///
+/// <para><b>والاسترداد تلقائي</b> عند صرف مرتَّب الدورة: يُخصم القسط، وما
+/// لا يتّسع له المرتَّب يُرحَّل. فلا يهبط رصيد المنتسب تحت الصفر بسبب قسط،
+/// ولا يبقى دَينٌ لا يُسدَّد.</para>
+/// </summary>
+public class CustomerAdvance
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid OrganizationId { get; set; }
+    public Guid CustomerId { get; set; }
+
+    /// <summary>أصل السلفة كما صُرفت.</summary>
+    public decimal Amount { get; set; }
+
+    /// <summary>
+    /// ما يُخصم من كل مرتَّب. صفر = كامل المتبقّي دفعةً واحدة.
+    ///
+    /// <para>وتحديدُه للإدارة لا حدَّ أدنى له — منتسبٌ يستلف مئتين ويسدّد
+    /// عشرين شهرياً أمرٌ تقرّره هي لا النظام.</para>
+    /// </summary>
+    public decimal InstallmentAmount { get; set; }
+
+    public DateOnly IssuedOn { get; set; }
+    public string? Note { get; set; }
+
+    /// <summary>
+    /// مُلغاة — لا محذوفة. أقساطها المخصومة حركاتٌ في الدفتر تشير إليها،
+    /// وحذفُها يترك خصماً بلا سببٍ ظاهر في كشف المنتسب.
+    /// </summary>
+    public bool IsCancelled { get; set; }
+
+    public Guid? CreatedBy { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+}
+
 public class CustomerWalletTransaction
 {
     public Guid Id { get; set; } = Guid.NewGuid();
     public Guid OrganizationId { get; set; }
     public Guid CustomerId { get; set; }
     public Guid? InvoiceId { get; set; }
+
+    /// <summary>
+    /// السلفة التي تخصّها هذه الحركة — صرفاً أو سداداً.
+    ///
+    /// <para>بدونه يستحيل معرفة كم بقي من سلفةٍ بعينها حين يكون على المنتسب
+    /// أكثر من واحدة.</para>
+    /// </summary>
+    public Guid? AdvanceId { get; set; }
+
     public string Kind { get; set; } = "";
     public decimal Amount { get; set; }
     public string? Note { get; set; }
@@ -1122,10 +1328,23 @@ public static class WalletKinds
     /// </summary>
     public const string EntitlementExpiry = "entitlement_expiry";
 
+    /// <summary>
+    /// سلفة صُرفت على البطاقة — مالٌ يُقرَض لا يُعطى.
+    ///
+    /// <para><b>ولماذا نوعٌ مستقلّ عن <see cref="TopUp"/>:</b> السلفة ترفع
+    /// الرصيد كالشحن، لكنها **تبقى ديناً على المنتسب** حتى تُستردّ. وخلطُها
+    /// بالشحن يجعل الجهة لا تعرف كم على منتسبيها من ديون — وهو أوّل ما
+    /// تسأل عنه.</para>
+    /// </summary>
+    public const string Advance = "advance";
+
+    /// <summary>قسطٌ من سلفة يُخصم — يُقابل [Advance].</summary>
+    public const string AdvanceRepayment = "advance_repayment";
+
     public static int SignOf(string kind) => kind switch
     {
-        TopUp or InvoiceRefund or AdjustmentIn or EntitlementGrant => 1,
-        Spend or AdjustmentOut or EntitlementExpiry => -1,
+        TopUp or InvoiceRefund or AdjustmentIn or EntitlementGrant or Advance => 1,
+        Spend or AdjustmentOut or EntitlementExpiry or AdvanceRepayment => -1,
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "نوع حركة محفظة غير معروف"),
     };
 
@@ -1534,6 +1753,9 @@ public static class JournalSources
     /// <summary>بضاعة أُعيدت إلى المورّد.</summary>
     public const string PurchaseReturn = "purchase_return";
 
+    /// <summary>فاتورة مورّد — تُفرغ «وردت ولم تُفوتَر» إلى «الموردون».</summary>
+    public const string SupplierInvoice = "supplier_invoice";
+
     public const string WalletTopUp = "wallet_top_up";
     public const string Payment = "payment";
 
@@ -1637,6 +1859,30 @@ public static class AccountRoles
     public const string PurchaseReturns = "purchase_returns";
 
     /// <summary>
+    /// بضاعة وردت ولم تُفوتَر — التزامٌ وسيط بين الاستلام والفاتورة.
+    ///
+    /// <para><b>العطب الذي يسدّه:</b> كان الاستلام يُقيَّد مباشرةً على
+    /// «الموردون»، أي أن الدَّين يُثبَت بورقة أمين المخزن قبل أن تصل ورقة
+    /// المورّد. فإن اختلف السعران — وهو الغالب — لم يكن ثمّة موضعٌ يظهر فيه
+    /// الفرق، فيُدفَع للمورّد ما طلبه ويبقى الميزان يقول رقماً آخر.</para>
+    ///
+    /// <para>فيصير الاستلام: من ح/ المخزون إلى ح/ <b>بضاعة وردت ولم
+    /// تُفوتَر</b>. ثم تأتي الفاتورة فتُفرغه إلى «الموردون». ورصيدُه في أي
+    /// لحظة هو **قيمة ما في المخزن ولم يُطالِب به المورّد بعد** — رقمٌ
+    /// يُسأل عنه في كل جرد.</para>
+    /// </summary>
+    public const string GoodsReceivedNotInvoiced = "grni";
+
+    /// <summary>
+    /// فروق أسعار المشتريات — الفرق بين تكلفة أمر الشراء وما فوتره المورّد.
+    ///
+    /// <para>حسابٌ مستقلّ لا تسويةٌ صامتة على المخزون: الفرق المتراكم هنا
+    /// يقول كم يُكلّف المورّد الذي يرفع أسعاره بعد الاتفاق — وهو رقمٌ
+    /// تفاوضي. ودفنُه في تكلفة المخزون يجعله غير قابل للرؤية أصلاً.</para>
+    /// </summary>
+    public const string PurchasePriceVariance = "purchase_price_variance";
+
+    /// <summary>
     /// الأرباح المحتجزة — وعاء نتيجة السنوات المُقفَلة.
     ///
     /// <para>إليه تُرحَّل أرصدة الإيرادات والاستخدامات عند الإقفال، فتصفر
@@ -1659,7 +1905,7 @@ public static class AccountRoles
     {
         Cash, Receivables, Payables, SalesRevenue, SalesTax, Inventory,
         CostOfGoodsSold, CustomerWallet, SalesReturns, PurchaseReturns, GeneralExpense,
-        RetainedEarnings,
+        RetainedEarnings, GoodsReceivedNotInvoiced, PurchasePriceVariance,
     };
 }
 
@@ -1706,6 +1952,9 @@ public class Expense
     /// </summary>
     public DateTime SpentOn { get; set; } = DateTime.UtcNow.Date;
 
+    /// <summary>المصرف الذي دُفع منه — NULL يعني الصندوق.</summary>
+    public Guid? BankAccountId { get; set; }
+
     public Guid? CreatedBy { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }
@@ -1730,6 +1979,14 @@ public class SupplierPayment
 
     /// <summary>نقداً أو حوالة — راجع [SupplierPaymentMethods].</summary>
     public string Method { get; set; } = SupplierPaymentMethods.Cash;
+
+    /// <summary>
+    /// المصرف الذي خرج منه المبلغ — NULL يعني الصندوق.
+    ///
+    /// <para>كانت الحوالة تُقيَّد على الصندوق كالنقد، فتظهر النقدية الدفترية
+    /// أعلى ممّا في الدرج بمقدارها. راجع [BankAccount].</para>
+    /// </summary>
+    public Guid? BankAccountId { get; set; }
 
     /// <summary>رقم الإيصال أو الحوالة كما كتبه المورّد.</summary>
     public string? Reference { get; set; }
@@ -1808,4 +2065,160 @@ public class FiscalClosing
     public string? ReopenReason { get; set; }
     public Guid? ReopenedBy { get; set; }
     public DateTime? ReopenedAt { get; set; }
+}
+
+
+/// <summary>
+/// حساب مصرفي للمنشأة.
+///
+/// <para><b>الثقب الذي يسدّه:</b> كل ما يُدفع أو يُقبَض كان يُقيَّد على
+/// «الصندوق» — النقد والحوالة سواء. فتظهر النقدية الدفترية أعلى ممّا في
+/// الدرج بمقدار كل حوالة، ولا يُعرف رصيد المصرف إطلاقاً. وهو أوّل ما يسأل
+/// عنه من يُطابق كشف حسابه.</para>
+///
+/// <para><b>وكلٌّ له حسابه في الدليل:</b> لا حساب «المصارف» واحدٌ للجميع —
+/// مطابقةُ كشف مصرفٍ بعينه تستحيل إن اختلط برصيد مصرف آخر.</para>
+/// </summary>
+public class BankAccount
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid OrganizationId { get; set; }
+    public string Name { get; set; } = "";
+
+    /// <summary>رقم الحساب أو الآيبان — للعرض والمطابقة لا للتحويل.</summary>
+    public string? AccountNumber { get; set; }
+
+    /// <summary>
+    /// حسابه في دليل الحسابات — تحت «المصارف» (1102).
+    ///
+    /// <para>يُنشأ تلقائياً عند إنشاء المصرف: تركُه للمستخدم يعني حساباً
+    /// مصرفياً بلا أثر محاسبي، أو مربوطاً بحسابٍ خاطئ.</para>
+    /// </summary>
+    public Guid? LedgerAccountId { get; set; }
+
+    public bool IsActive { get; set; } = true;
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+}
+
+
+/// <summary>حالات فاتورة المورّد.</summary>
+public static class SupplierInvoiceStatuses
+{
+    /// <summary>مُدخَلة ولم تُرحَّل — تُعدَّل وتُحذف بحرّية.</summary>
+    public const string Draft = "draft";
+
+    /// <summary>مُرحَّلة إلى الدفتر — لا تُعدَّل، والإلغاء بقيد عكسي.</summary>
+    public const string Posted = "posted";
+
+    /// <summary>مُلغاة بقيد عكسي.</summary>
+    public const string Cancelled = "cancelled";
+}
+
+/// <summary>
+/// فاتورة المورّد — ورقتُه هو، مطابَقةً بما استُلم فعلاً.
+///
+/// <para><b>الفجوة التي تسدّها:</b> لم يكن للمورّد فاتورة في النظام إطلاقاً.
+/// كان الاستلام يُنشئ الدَّين مباشرةً بتكلفة **أمر الشراء** — أي بالسعر
+/// المتّفق عليه لا بالسعر المُطالَب به. فإذا رفع المورّد سعره، أو فوتر كميةً
+/// غير التي سلّمها، أو أضاف نقلاً، لم يكن في النظام موضعٌ واحد يُظهر الفرق.
+/// يدفع أمين الصندوق ما تقوله الورقة، ويبقى الميزان يقول رقماً آخر إلى
+/// الأبد.</para>
+///
+/// <para><b>المطابقة الثلاثية:</b> أمر الشراء (ما اتُّفق عليه) ← الاستلام
+/// (ما وصل) ← الفاتورة (ما طُولب به). وثلاثتها تلتقي في هذا المستند: كل سطر
+/// فيه يشير إلى سطر استلام بعينه، فالفرق يُحسَب لا يُقدَّر.</para>
+///
+/// <para><b>ولماذا لا تُلزَم بالمطابقة الكاملة:</b> فاتورةٌ تُرفض لأن فيها
+/// فرق دينارين تُدفَع خارج النظام. فتُقبَل ويُقيَّد الفرق على
+/// [AccountRoles.PurchasePriceVariance] صراحةً — ظاهراً للمراجعة، لا
+/// مدفوناً في تكلفة المخزون.</para>
+/// </summary>
+public class SupplierInvoice
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid OrganizationId { get; set; }
+    public Guid BranchId { get; set; }
+    public Guid SupplierId { get; set; }
+
+    /// <summary>
+    /// رقم الفاتورة كما كتبه المورّد. إلزامي — بخلاف
+    /// <see cref="PurchaseReceipt.SupplierNoteNumber"/>: إشعار التسليم قد
+    /// لا يُرقَّم، أمّا الفاتورة فهي مستند المطالبة ولا تخلو من رقم. وهو
+    /// المرجع الوحيد عند الخلاف، وأساس منع الازدواج.
+    /// </summary>
+    public string InvoiceNumber { get; set; } = "";
+
+    /// <summary>تاريخ الفاتورة كما عليها — لا تاريخ الإدخال.</summary>
+    public DateTime InvoiceDate { get; set; }
+
+    /// <summary>تاريخ الاستحقاق. NULL يعني نقداً أو بلا أجل متّفق.</summary>
+    public DateTime? DueDate { get; set; }
+
+    /// <summary>
+    /// إجمالي الفاتورة كما هو مكتوب عليها — يُدخله المستخدم ولا يُحسب.
+    ///
+    /// <para>وحسابُه من السطور يجعل النظام يُصحّح المورّد بدل أن يطابقه.
+    /// المطلوب معرفة أن ثمّة فرقاً، وذلك يقتضي رقمين لا رقماً واحداً.</para>
+    /// </summary>
+    public decimal TotalAmount { get; set; }
+
+    public string Status { get; set; } = SupplierInvoiceStatuses.Draft;
+    public string? Notes { get; set; }
+
+    public Guid? CreatedBy { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime? PostedAt { get; set; }
+
+    public List<SupplierInvoiceLine> Lines { get; set; } = new();
+}
+
+/// <summary>
+/// سطر في فاتورة المورّد، مربوطٌ بسطر استلامٍ بعينه.
+/// </summary>
+public class SupplierInvoiceLine
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid SupplierInvoiceId { get; set; }
+
+    /// <summary>
+    /// سطر الاستلام الذي تُفوتره. هو **مِحور المطابقة كله**: بدونه يبقى
+    /// السطر ادّعاءً لا يقابله وصول، ويصير «الفرق» غير قابل للحساب أصلاً.
+    ///
+    /// <para>ويمنع الازدواج: سطر استلامٍ فُوتر مرّة لا يُفوتر ثانية.</para>
+    /// </summary>
+    public Guid PurchaseReceiptItemId { get; set; }
+
+    public Guid ProductId { get; set; }
+
+    /// <summary>الكمية كما فوترها المورّد — قد تخالف ما وصل.</summary>
+    public decimal Quantity { get; set; }
+
+    /// <summary>سعر الوحدة كما فوتره المورّد — قد يخالف تكلفة الأمر.</summary>
+    public decimal UnitCost { get; set; }
+
+    public decimal LineTotal => Quantity * UnitCost;
+}
+
+
+/// <summary>
+/// مقاسات ورق الإيصال المتاحة.
+///
+/// <para>قائمةٌ مغلقة لا نصٌّ حرّ: مقاسٌ مجهول يُنتج PDF بأبعادٍ غير
+/// متوقَّعة، ولا يكتشفه أحد إلا والورق يخرج مقصوصاً.</para>
+/// </summary>
+public static class ReceiptPapers
+{
+    /// <summary>لفّة حرارية 80 ملم — الأشيع في نقاط البيع.</summary>
+    public const string Roll80 = "roll80";
+
+    /// <summary>لفّة حرارية 58 ملم — الطابعات الصغيرة والمحمولة.</summary>
+    public const string Roll58 = "roll58";
+
+    /// <summary>A4 — الفاتورة الرسمية التي تُقدَّم لجهة.</summary>
+    public const string A4 = "a4";
+
+    /// <summary>A5 — نصف الورقة، لفواتير الجملة المختصرة.</summary>
+    public const string A5 = "a5";
+
+    public static readonly string[] All = { Roll80, Roll58, A4, A5 };
 }

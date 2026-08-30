@@ -49,6 +49,10 @@ public static class ChartOfAccounts
         // بمالٍ ليس ربحاً، ثم يُنقصها حين يُصرف فعلاً.
         new("2102", "أرصدة العملاء (محافظ)", AccountTypes.Liability, AccountRoles.CustomerWallet),
         new("2103", "ضريبة المبيعات المستحقّة", AccountTypes.Liability, AccountRoles.SalesTax),
+        // بضاعة في المخزن لم تصل فاتورتها بعد. التزامٌ حقيقي لا حساب وسيط
+        // للزينة: البضاعة دخلت والدَّين قائم، وإنما لم تُحدَّد قيمته نهائياً
+        // حتى تصل ورقة المورّد.
+        new("2104", "بضاعة وردت ولم تُفوتَر", AccountTypes.Liability, AccountRoles.GoodsReceivedNotInvoiced),
         new("22", "حقوق الملكية", AccountTypes.Equity),
         new("2201", "رأس المال", AccountTypes.Equity),
         new("2202", "الأرباح المحتجزة", AccountTypes.Equity, AccountRoles.RetainedEarnings),
@@ -60,6 +64,9 @@ public static class ChartOfAccounts
         // مردودات المشتريات تحت تكلفة المبيعات لا تحت الإيرادات: البضاعة
         // المُعادة إلى المورّد تُنقص التكلفة لا تزيد الدخل.
         new("3102", "مردودات المشتريات", AccountTypes.Expense, AccountRoles.PurchaseReturns),
+        // فروق أسعار المشتريات — ظاهرةً لا مدفونة في تكلفة المخزون. رصيدُه
+        // المتراكم يقول كم يُكلّف المورّد الذي يرفع سعره بعد الاتفاق.
+        new("3103", "فروق أسعار المشتريات", AccountTypes.Expense, AccountRoles.PurchasePriceVariance),
         new("32", "المصروفات التشغيلية", AccountTypes.Expense),
         new("3201", "مصروفات عمومية", AccountTypes.Expense, AccountRoles.GeneralExpense),
         new("3202", "رواتب وأجور", AccountTypes.Expense),

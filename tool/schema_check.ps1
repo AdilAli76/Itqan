@@ -59,6 +59,7 @@ if (-not $fromSource -and -not $snapshot) {
 # خصائص لا تُخزَّن أو تُخزَّن باسم مختلف صراحةً عبر HasColumnName / Ignore.
 $known = @{
     'BarcodeTemplateJson' = 'barcode_template'
+    'ReceiptTemplateJson' = 'receipt_template'
     'EnabledModulesJson'  = 'enabled_modules'
 }
 

@@ -45,6 +45,14 @@ CREATE TABLE organizations (
   password_min_length INT NOT NULL DEFAULT 6,          -- ARCHITECTURE.md §2.14
   barcode_template NVARCHAR(MAX) NOT NULL              -- ARCHITECTURE.md §2.12
     DEFAULT N'{"widthMm":40,"heightMm":25,"showName":true,"showPrice":true,"showSku":false}',
+  -- الرقم الضريبي ورقم السجلّ التجاري — تطلبهما الفاتورة الرسمية، ولم يكن
+  -- لهما موضع فيُكتبان بخطّ اليد أو لا يُكتبان.
+  tax_number NVARCHAR(50) NULL,
+  commercial_registry NVARCHAR(50) NULL,
+  -- قالب الإيصال: JSON واحد لا عمودٌ لكل خيار — نفس نهج barcode_template.
+  receipt_template NVARCHAR(MAX) NOT NULL
+    CONSTRAINT df_organizations_receipt_template DEFAULT
+    N'{"paper":"roll80","showLogo":true,"showTaxNumber":true,"showCommercialRegistry":false,"showQr":false,"headerText":null,"footerText":"شكراً لتعاملكم معنا"}',
   receipt_width_mm DECIMAL(5,2) NOT NULL DEFAULT 80,    -- ARCHITECTURE.md §2.12
   -- تخطيط التنقّل: شريط جانبي ثابت أو شريط علوي أفقي — يختاره كل عميل
   -- لمنظمته حسب تفضيله، بلا أي فرق في الوظائف.
@@ -53,6 +61,10 @@ CREATE TABLE organizations (
   -- السماح ببيع الأصناف مفتوحة القيمة في نقطة البيع. مطفأ افتراضياً: قيمة
   -- يكتبها الكاشير بنفسه لا تقابلها بضاعة في المخزون. يضبطه مدير المنظمة.
   pos_allow_open_product BIT NOT NULL DEFAULT 0,
+  -- منطقة المنظمة الزمنية. «اليوم» يُقاس بها لا بـUTC: محلٌّ في طرابلس بين
+  -- العاشرة مساءً ومنتصف الليل كان يُسجّل مصروف اليوم في يوم أمس.
+  -- والتخزين يبقى UTC — يُحوَّل ما يُقارَن باليوم أو يُعرَض فقط.
+  time_zone_id NVARCHAR(60) NOT NULL DEFAULT N'Libya',
   -- مظروف أنماط بطاقة المحفظة: المنظمة تحدّد المسموح والسقف والافتراضي،
   -- والزبون يختار داخله. راجع CardModeGate.
   card_modes_allowed NVARCHAR(100) NOT NULL DEFAULT 'card,pin',
@@ -315,6 +327,12 @@ CREATE TABLE products (
   sub_unit_price DECIMAL(14,2) NOT NULL DEFAULT 0,
   cost_price DECIMAL(14,2) NOT NULL DEFAULT 0,
   sale_price DECIMAL(14,2) NOT NULL DEFAULT 0,
+  -- الحدّ الأدنى لسعر البيع. صفر = بلا حدّ.
+  --
+  -- لم يكن ثمّة ما يمنع البيع تحت التكلفة: صلاحية تعديل السعر تسمح بأي رقم،
+  -- ومدير المنظمة يملكها دائماً. وهو حدٌّ مطلق لا يتجاوزه أحد — حدٌّ له
+  -- استثناء ليس حدّاً.
+  min_sale_price DECIMAL(14,2) NOT NULL CONSTRAINT df_products_min_sale_price DEFAULT 0,
   -- اختياري دائماً: الصيدلية نفسها تبيع مستحضرات تجميل وحفاضات وأدوات.
   medicine_ref_id UNIQUEIDENTIFIER NULL REFERENCES medicine_reference(id),
   track_expiry BIT NOT NULL DEFAULT 0,
@@ -630,6 +648,29 @@ GO
 -- تُحاسبه المنشأة في نموذج الاستحقاق الممنوح، لا المستفيد نفسه.
 -- لا تحمل branch_id: الجهة تتعامل مع المنظمة ككل، بنفس مبرر suppliers.
 -- ----------------------------------------------------------------------------
+--  فئات العملاء — اسمٌ ومرتَّبٌ دوري
+--
+--  كان مبلغ الاستحقاق رقماً على كل عميل على حدة. وجهةٌ تصرف على ألف منتسب في
+--  ثلاث فئات كانت ترفع مرتب الفئة بتعديل ألف صفّ يدوياً — وأوّل صفٍّ
+--  يُنسى يُنتج منتسباً يقبض أقلّ من زملائه بلا سببٍ معلوم.
+--
+--  ⚠ قبل customers: العميل يشير إليها.
+-- ----------------------------------------------------------------------------
+CREATE TABLE customer_categories (
+  id UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
+  organization_id UNIQUEIDENTIFIER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  name NVARCHAR(80) NOT NULL,
+  period_amount DECIMAL(18,2) NOT NULL DEFAULT 0,
+  -- أيسقط ما لم يُصرَف من مرتَّب الدورة عند صرف التالية؟ قرارُ إدارة.
+  unspent_expires BIT NOT NULL DEFAULT 1,
+  is_active BIT NOT NULL DEFAULT 1,
+  created_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+  -- فئتان بنفس الاسم في منظمةٍ واحدة تجعلان اختيار الصحيحة تخميناً.
+  CONSTRAINT uq_customer_categories_name UNIQUE (organization_id, name)
+);
+GO
+
+-- ----------------------------------------------------------------------------
 CREATE TABLE sponsors (
   id UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
   organization_id UNIQUEIDENTIFIER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
@@ -669,6 +710,14 @@ CREATE TABLE customers (
   sponsor_id UNIQUEIDENTIFIER NULL REFERENCES sponsors(id),
   entitlement_ceiling DECIMAL(18,3) NOT NULL DEFAULT 0,
   entitlement_expires_on DATE NULL,
+  -- فئة العميل — منها يُؤخذ مبلغ المنحة. NULL = بلا فئة.
+  category_id UNIQUEIDENTIFIER NULL REFERENCES customer_categories(id),
+  -- صورة صاحب البطاقة — مسارُ مرفق لا الصورة. بطاقةٌ بلا رقم سرّي يحميها
+  -- أن يعرف الكاشير أن حاملها صاحبها.
+  photo_url NVARCHAR(400) NULL,
+  -- مبلغٌ يخصّ هذا العميل وحده يَجُبّ فئته. NULL = اتبع الفئة، والصفر
+  -- قرارٌ صريح بإيقاف منحته هذه الدورة.
+  entitlement_override DECIMAL(18,2) NULL,
 
   loyalty_points INT NOT NULL DEFAULT 0,
   is_deleted BIT NOT NULL DEFAULT 0,
@@ -745,6 +794,8 @@ CREATE TABLE supplier_payments (
   amount DECIMAL(18,3) NOT NULL,
   method NVARCHAR(20) NOT NULL
     CONSTRAINT CK_supplier_payments_method CHECK (method IN ('cash','bank')),
+  -- المصرف الذي خرج منه المبلغ. NULL = الصندوق.
+  bank_account_id UNIQUEIDENTIFIER NULL REFERENCES bank_accounts(id),
   reference NVARCHAR(80) NULL,
   note NVARCHAR(300) NULL,
   -- تاريخ السداد الفعلي، منفصل عن تاريخ الإدخال.
@@ -948,11 +999,39 @@ GO
 -- amount موجب دائماً (مفروض بـ CHECK)، والإشارة تُشتق من kind وحده عبر
 -- WalletKinds.SignOf في الكود — فلا يمكن أن تتناقض قيمة مع إشارتها.
 -- ----------------------------------------------------------------------------
+-- ----------------------------------------------------------------------------
+--  سلف المنتسبين
+--
+--  السلفة مالٌ يُقرَض لا يُعطى: ترفع رصيد البطاقة كالشحن، وتبقى ديناً حتى
+--  تُستردّ من المرتَّب. وخلطُها بالشحن يجعل الجهة لا تعرف كم على منتسبيها.
+--
+--  والمتبقّي محسوبٌ لا مخزَّن: أصلها ناقص مجموع أقساطها في دفتر المحفظة.
+-- ----------------------------------------------------------------------------
+CREATE TABLE customer_advances (
+  id UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
+  organization_id UNIQUEIDENTIFIER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  customer_id UNIQUEIDENTIFIER NOT NULL REFERENCES customers(id),
+  amount DECIMAL(18,2) NOT NULL,
+  -- ما يُخصم من كل مرتَّب. صفر = كامل المتبقّي دفعةً واحدة.
+  installment_amount DECIMAL(18,2) NOT NULL DEFAULT 0,
+  issued_on DATE NOT NULL,
+  note NVARCHAR(300) NULL,
+  -- مُلغاة لا محذوفة: أقساطها في الدفتر تشير إليها.
+  is_cancelled BIT NOT NULL DEFAULT 0,
+  created_by UNIQUEIDENTIFIER NULL REFERENCES app_users(id),
+  created_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+  CONSTRAINT ck_customer_advances_amount CHECK (amount > 0)
+);
+GO
+
 CREATE TABLE customer_wallet_transactions (
   id UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
   organization_id UNIQUEIDENTIFIER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
   customer_id UNIQUEIDENTIFIER NOT NULL REFERENCES customers(id),
   invoice_id UNIQUEIDENTIFIER NULL REFERENCES invoices(id),
+  -- السلفة التي تخصّها الحركة — صرفاً أو سداداً. بدونه يستحيل معرفة كم بقي
+  -- من سلفةٍ بعينها حين يكون على المنتسب أكثر من واحدة.
+  advance_id UNIQUEIDENTIFIER NULL REFERENCES customer_advances(id),
   kind NVARCHAR(20) NOT NULL
     CHECK (kind IN ('topup','spend','invoice_refund','adjustment_in','adjustment_out',
                     'entitlement_grant','entitlement_expiry')),
@@ -1050,6 +1129,78 @@ CREATE TABLE account_mappings (
 GO
 
 -- ----------------------------------------------------------------------------
+--  فاتورة المورّد والمطابقة بالاستلام
+--
+--  لم يكن للمورّد فاتورة في النظام. كان الاستلام يُنشئ الدَّين بتكلفة أمر
+--  الشراء — أي بالسعر المتّفق عليه لا بالسعر المُطالَب به. فإذا رفع المورّد
+--  سعره أو فوتر كميةً غير التي سلّمها، لم يكن ثمّة موضعٌ يُظهر الفرق.
+--
+--  ⚠ بعد purchase_receipts: كل سطر فاتورة يشير إلى سطر استلام.
+-- ----------------------------------------------------------------------------
+CREATE TABLE supplier_invoices (
+  id UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
+  organization_id UNIQUEIDENTIFIER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  branch_id UNIQUEIDENTIFIER NOT NULL REFERENCES branches(id),
+  supplier_id UNIQUEIDENTIFIER NOT NULL REFERENCES suppliers(id),
+  -- رقم الفاتورة كما كتبه المورّد. إلزامي: هو المرجع عند الخلاف وأساس
+  -- منع الازدواج.
+  invoice_number NVARCHAR(80) NOT NULL,
+  invoice_date DATETIME2 NOT NULL,
+  due_date DATETIME2 NULL,
+  -- الإجمالي كما هو مكتوب على الفاتورة — يُدخَل ولا يُحسب من السطور، وإلا
+  -- صحّح النظامُ المورّدَ بدل أن يطابقه.
+  total_amount DECIMAL(18,2) NOT NULL,
+  status NVARCHAR(20) NOT NULL CONSTRAINT df_supplier_invoices_status DEFAULT 'draft',
+  notes NVARCHAR(500) NULL,
+  created_by UNIQUEIDENTIFIER NULL REFERENCES app_users(id),
+  created_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+  posted_at DATETIME2 NULL,
+  CONSTRAINT ck_supplier_invoices_status
+    CHECK (status IN ('draft', 'posted', 'cancelled')),
+  -- لا فاتورتان بنفس الرقم من نفس المورّد: أشيع خطأ إدخال هو تسجيل الورقة
+  -- مرّتين، فيتضاعف الدَّين بلا أن يلاحظ أحد.
+  CONSTRAINT uq_supplier_invoices_number UNIQUE (organization_id, supplier_id, invoice_number)
+);
+GO
+
+CREATE TABLE supplier_invoice_lines (
+  id UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
+  supplier_invoice_id UNIQUEIDENTIFIER NOT NULL
+    REFERENCES supplier_invoices(id) ON DELETE CASCADE,
+  -- محور المطابقة: بدونه يبقى السطر ادّعاءً لا يقابله وصول.
+  purchase_receipt_item_id UNIQUEIDENTIFIER NOT NULL REFERENCES purchase_receipt_items(id),
+  product_id UNIQUEIDENTIFIER NOT NULL REFERENCES products(id),
+  quantity DECIMAL(18,3) NOT NULL,
+  unit_cost DECIMAL(18,2) NOT NULL,
+  -- سطر استلامٍ فُوتر مرّة لا يُفوتر ثانية.
+  CONSTRAINT uq_supplier_invoice_lines_receipt_item UNIQUE (purchase_receipt_item_id)
+);
+GO
+
+-- ----------------------------------------------------------------------------
+--  الحسابات المصرفية
+--
+--  كل ما يُدفع أو يُقبَض كان يُقيَّد على «الصندوق» — النقد والحوالة سواء.
+--  فتظهر النقدية الدفترية أعلى ممّا في الدرج بمقدار كل حوالة، ولا يُعرف
+--  رصيد المصرف إطلاقاً.
+--
+--  ولكلٍّ حسابه في الدليل تحت «المصارف»: حسابٌ واحد للجميع يجعل مطابقة كشف
+--  مصرفٍ بعينه مستحيلة.
+--
+--  ⚠ بعد كتلة المحاسبة: ledger_account_id يشير إلى accounts.
+-- ----------------------------------------------------------------------------
+CREATE TABLE bank_accounts (
+  id UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
+  organization_id UNIQUEIDENTIFIER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  name NVARCHAR(150) NOT NULL,
+  account_number NVARCHAR(60) NULL,
+  ledger_account_id UNIQUEIDENTIFIER NULL REFERENCES accounts(id),
+  is_active BIT NOT NULL DEFAULT 1,
+  created_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
+);
+GO
+
+-- ----------------------------------------------------------------------------
 --  الإقفال السنوي
 --
 --  ⚠ **بعد كتلة المحاسبة عمداً:** journal_entry_id يشير إلى journal_entries،
@@ -1104,6 +1255,8 @@ CREATE TABLE expenses (
   -- تاريخ الصرف الفعلي، منفصل عن تاريخ الإدخال: فاتورة الأسبوع الماضي
   -- تُدخَل اليوم ويجب أن تقع في مدّتها هي.
   spent_on DATETIME2 NOT NULL CONSTRAINT df_expenses_spent_on DEFAULT SYSUTCDATETIME(),
+  -- المصرف الذي دُفع منه. NULL = الصندوق.
+  bank_account_id UNIQUEIDENTIFIER NULL REFERENCES bank_accounts(id),
   created_by UNIQUEIDENTIFIER NULL REFERENCES app_users(id),
   created_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
 );
@@ -1303,6 +1456,18 @@ WHERE EXISTS (
 );
 GO
 
+CREATE FUNCTION Security.fn_SupplierInvoiceChild(@SupplierInvoiceId UNIQUEIDENTIFIER)
+RETURNS TABLE
+WITH SCHEMABINDING
+AS
+RETURN SELECT 1 AS fn_result
+WHERE EXISTS (
+    SELECT 1 FROM dbo.supplier_invoices i
+    WHERE i.id = @SupplierInvoiceId
+      AND i.organization_id = CAST(SESSION_CONTEXT(N'organization_id') AS UNIQUEIDENTIFIER)
+);
+GO
+
 CREATE FUNCTION Security.fn_StockCountChild(@StockCountId UNIQUEIDENTIFIER)
 RETURNS TABLE
 WITH SCHEMABINDING
@@ -1366,6 +1531,37 @@ GO
 CREATE SECURITY POLICY Security.StockTransferItemsPolicy
   ADD FILTER PREDICATE Security.fn_StockTransferChild(transfer_id) ON dbo.stock_transfer_items,
   ADD BLOCK PREDICATE Security.fn_StockTransferChild(transfer_id) ON dbo.stock_transfer_items AFTER INSERT
+  WITH (STATE = ON);
+GO
+
+CREATE SECURITY POLICY Security.CustomerAdvancesPolicy
+  ADD FILTER PREDICATE Security.fn_OrgOnlyPredicate(organization_id) ON dbo.customer_advances,
+  ADD BLOCK PREDICATE Security.fn_OrgOnlyPredicate(organization_id) ON dbo.customer_advances AFTER INSERT
+  WITH (STATE = ON);
+GO
+
+CREATE SECURITY POLICY Security.CustomerCategoriesPolicy
+  ADD FILTER PREDICATE Security.fn_OrgOnlyPredicate(organization_id) ON dbo.customer_categories,
+  ADD BLOCK PREDICATE Security.fn_OrgOnlyPredicate(organization_id) ON dbo.customer_categories AFTER INSERT
+  WITH (STATE = ON);
+GO
+
+CREATE SECURITY POLICY Security.SupplierInvoicesPolicy
+  ADD FILTER PREDICATE Security.fn_OrgOnlyPredicate(organization_id) ON dbo.supplier_invoices,
+  ADD BLOCK PREDICATE Security.fn_OrgOnlyPredicate(organization_id) ON dbo.supplier_invoices AFTER INSERT
+  WITH (STATE = ON);
+GO
+
+-- سطور الفاتورة بلا organization_id — تُحمى عبر أبيها كسائر جداول الأبناء.
+CREATE SECURITY POLICY Security.SupplierInvoiceLinesPolicy
+  ADD FILTER PREDICATE Security.fn_SupplierInvoiceChild(supplier_invoice_id) ON dbo.supplier_invoice_lines,
+  ADD BLOCK PREDICATE Security.fn_SupplierInvoiceChild(supplier_invoice_id) ON dbo.supplier_invoice_lines AFTER INSERT
+  WITH (STATE = ON);
+GO
+
+CREATE SECURITY POLICY Security.BankAccountsPolicy
+  ADD FILTER PREDICATE Security.fn_OrgOnlyPredicate(organization_id) ON dbo.bank_accounts,
+  ADD BLOCK PREDICATE Security.fn_OrgOnlyPredicate(organization_id) ON dbo.bank_accounts AFTER INSERT
   WITH (STATE = ON);
 GO
 

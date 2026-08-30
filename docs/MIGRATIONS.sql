@@ -2100,6 +2100,397 @@ END
 GO
 
 -- ----------------------------------------------------------------------------
+--  منطقة المنظمة الزمنية
+--
+--  «اليوم» كان يُقاس بـUTC. ومحلٌّ في طرابلس يُنهي يومه منتصف الليل بتوقيته
+--  — أي العاشرة مساءً بغرينتش. فبين العاشرة ومنتصف الليل: مصروف «اليوم»
+--  يقع في يوم أمس، ومحاولة إقفال أمس تُرفض، وتقرير «هذا الشهر» في أول
+--  ساعتين من الشهر يعرض الشهر السابق.
+--
+--  والتخزين يبقى UTC: تحويله يجعل صفّاً واحداً يُقرأ بمعنيين عند تغيّر
+--  التوقيت أو انتقال المنظمة.
+-- ----------------------------------------------------------------------------
+IF NOT EXISTS (SELECT 1 FROM sys.columns
+               WHERE object_id = OBJECT_ID('dbo.organizations') AND name = 'time_zone_id')
+BEGIN
+    ALTER TABLE dbo.organizations ADD time_zone_id NVARCHAR(60) NOT NULL
+        CONSTRAINT df_organizations_time_zone DEFAULT N'Libya';
+    PRINT N'أُضيف عمود organizations.time_zone_id';
+END
+GO
+
+-- ----------------------------------------------------------------------------
+--  الحسابات المصرفية
+--
+--  ⚠ يجب أن يلي كتلة المحاسبة: ledger_account_id يشير إلى accounts.
+-- ----------------------------------------------------------------------------
+IF OBJECT_ID('dbo.bank_accounts', 'U') IS NULL
+   AND OBJECT_ID('dbo.accounts', 'U') IS NOT NULL
+BEGIN
+    CREATE TABLE dbo.bank_accounts (
+      id UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
+      organization_id UNIQUEIDENTIFIER NOT NULL REFERENCES dbo.organizations(id) ON DELETE CASCADE,
+      name NVARCHAR(150) NOT NULL,
+      account_number NVARCHAR(60) NULL,
+      ledger_account_id UNIQUEIDENTIFIER NULL REFERENCES dbo.accounts(id),
+      is_active BIT NOT NULL DEFAULT 1,
+      created_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
+    );
+    PRINT N'أُنشئ جدول bank_accounts';
+END
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.security_policies WHERE name = 'BankAccountsPolicy')
+   AND OBJECT_ID('dbo.bank_accounts', 'U') IS NOT NULL
+EXEC('
+CREATE SECURITY POLICY Security.BankAccountsPolicy
+  ADD FILTER PREDICATE Security.fn_OrgOnlyPredicate(organization_id) ON dbo.bank_accounts,
+  ADD BLOCK PREDICATE Security.fn_OrgOnlyPredicate(organization_id) ON dbo.bank_accounts AFTER INSERT
+  WITH (STATE = ON);');
+GO
+
+PRINT N'الحسابات المصرفية جاهزة';
+GO
+
+-- ----------------------------------------------------------------------------
+--  ربط السداد والمصروف بالمصرف
+--
+--  كانت الحوالة تُقيَّد على الصندوق كالنقد، فتظهر النقدية الدفترية أعلى
+--  ممّا في الدرج بمقدارها.
+--
+--  ⚠ يجب أن يلي جدول bank_accounts.
+-- ----------------------------------------------------------------------------
+IF OBJECT_ID('dbo.bank_accounts', 'U') IS NOT NULL
+   AND NOT EXISTS (SELECT 1 FROM sys.columns
+                   WHERE object_id = OBJECT_ID('dbo.supplier_payments') AND name = 'bank_account_id')
+BEGIN
+    ALTER TABLE dbo.supplier_payments ADD bank_account_id UNIQUEIDENTIFIER NULL
+        CONSTRAINT FK_supplier_payments_bank REFERENCES dbo.bank_accounts(id);
+    PRINT N'أُضيف عمود supplier_payments.bank_account_id';
+END
+GO
+
+IF OBJECT_ID('dbo.bank_accounts', 'U') IS NOT NULL
+   AND NOT EXISTS (SELECT 1 FROM sys.columns
+                   WHERE object_id = OBJECT_ID('dbo.expenses') AND name = 'bank_account_id')
+BEGIN
+    ALTER TABLE dbo.expenses ADD bank_account_id UNIQUEIDENTIFIER NULL
+        CONSTRAINT FK_expenses_bank REFERENCES dbo.bank_accounts(id);
+    PRINT N'أُضيف عمود expenses.bank_account_id';
+END
+GO
+
+-- ----------------------------------------------------------------------------
+--  فاتورة المورّد والمطابقة بالاستلام
+--
+--  كان الاستلام يُنشئ الدَّين بتكلفة أمر الشراء — بالسعر المتّفق عليه لا
+--  بالسعر المُطالَب به. فإن رفع المورّد سعره لم يكن ثمّة موضعٌ يُظهر الفرق.
+--
+--  ⚠ يجب أن يلي purchase_receipt_items وsuppliers.
+-- ----------------------------------------------------------------------------
+IF OBJECT_ID('dbo.supplier_invoices', 'U') IS NULL
+   AND OBJECT_ID('dbo.purchase_receipt_items', 'U') IS NOT NULL
+BEGIN
+    CREATE TABLE dbo.supplier_invoices (
+      id UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
+      organization_id UNIQUEIDENTIFIER NOT NULL REFERENCES dbo.organizations(id) ON DELETE CASCADE,
+      branch_id UNIQUEIDENTIFIER NOT NULL REFERENCES dbo.branches(id),
+      supplier_id UNIQUEIDENTIFIER NOT NULL REFERENCES dbo.suppliers(id),
+      invoice_number NVARCHAR(80) NOT NULL,
+      invoice_date DATETIME2 NOT NULL,
+      due_date DATETIME2 NULL,
+      total_amount DECIMAL(18,2) NOT NULL,
+      status NVARCHAR(20) NOT NULL CONSTRAINT df_supplier_invoices_status DEFAULT 'draft',
+      notes NVARCHAR(500) NULL,
+      created_by UNIQUEIDENTIFIER NULL REFERENCES dbo.app_users(id),
+      created_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+      posted_at DATETIME2 NULL,
+      CONSTRAINT ck_supplier_invoices_status
+        CHECK (status IN ('draft', 'posted', 'cancelled')),
+      CONSTRAINT uq_supplier_invoices_number UNIQUE (organization_id, supplier_id, invoice_number)
+    );
+    PRINT N'أُنشئ جدول supplier_invoices';
+END
+GO
+
+IF OBJECT_ID('dbo.supplier_invoice_lines', 'U') IS NULL
+   AND OBJECT_ID('dbo.supplier_invoices', 'U') IS NOT NULL
+BEGIN
+    CREATE TABLE dbo.supplier_invoice_lines (
+      id UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
+      supplier_invoice_id UNIQUEIDENTIFIER NOT NULL
+        REFERENCES dbo.supplier_invoices(id) ON DELETE CASCADE,
+      purchase_receipt_item_id UNIQUEIDENTIFIER NOT NULL REFERENCES dbo.purchase_receipt_items(id),
+      product_id UNIQUEIDENTIFIER NOT NULL REFERENCES dbo.products(id),
+      quantity DECIMAL(18,3) NOT NULL,
+      unit_cost DECIMAL(18,2) NOT NULL,
+      CONSTRAINT uq_supplier_invoice_lines_receipt_item UNIQUE (purchase_receipt_item_id)
+    );
+    PRINT N'أُنشئ جدول supplier_invoice_lines';
+END
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE name = 'fn_SupplierInvoiceChild')
+   AND OBJECT_ID('dbo.supplier_invoices', 'U') IS NOT NULL
+EXEC('
+CREATE FUNCTION Security.fn_SupplierInvoiceChild(@SupplierInvoiceId UNIQUEIDENTIFIER)
+RETURNS TABLE
+WITH SCHEMABINDING
+AS
+RETURN SELECT 1 AS fn_result
+WHERE EXISTS (
+    SELECT 1 FROM dbo.supplier_invoices i
+    WHERE i.id = @SupplierInvoiceId
+      AND i.organization_id = CAST(SESSION_CONTEXT(N''organization_id'') AS UNIQUEIDENTIFIER)
+);');
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.security_policies WHERE name = 'SupplierInvoicesPolicy')
+   AND OBJECT_ID('dbo.supplier_invoices', 'U') IS NOT NULL
+EXEC('
+CREATE SECURITY POLICY Security.SupplierInvoicesPolicy
+  ADD FILTER PREDICATE Security.fn_OrgOnlyPredicate(organization_id) ON dbo.supplier_invoices,
+  ADD BLOCK PREDICATE Security.fn_OrgOnlyPredicate(organization_id) ON dbo.supplier_invoices AFTER INSERT
+  WITH (STATE = ON);');
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.security_policies WHERE name = 'SupplierInvoiceLinesPolicy')
+   AND OBJECT_ID('dbo.supplier_invoice_lines', 'U') IS NOT NULL
+EXEC('
+CREATE SECURITY POLICY Security.SupplierInvoiceLinesPolicy
+  ADD FILTER PREDICATE Security.fn_SupplierInvoiceChild(supplier_invoice_id) ON dbo.supplier_invoice_lines,
+  ADD BLOCK PREDICATE Security.fn_SupplierInvoiceChild(supplier_invoice_id) ON dbo.supplier_invoice_lines AFTER INSERT
+  WITH (STATE = ON);');
+GO
+
+-- ----------------------------------------------------------------------------
+--  حسابا «وردت ولم تُفوتَر» و«فروق أسعار المشتريات»
+--
+--  دورٌ ناقص يعني أن Ledger.EnsureChartAsync يرفض أول ترحيل. والدورة تقرأ
+--  من app_users لا من organizations: الأخيرة محميّة بعزل الصفوف فتعود فارغة
+--  قبل ضبط السياق، فيمرّ الترحيل صامتاً بلا أن يفعل شيئاً.
+-- ----------------------------------------------------------------------------
+IF OBJECT_ID('dbo.accounts', 'U') IS NOT NULL
+BEGIN
+    DECLARE @orgId UNIQUEIDENTIFIER;
+    DECLARE org_cursor CURSOR LOCAL FAST_FORWARD FOR
+        SELECT DISTINCT organization_id FROM dbo.app_users;
+
+    OPEN org_cursor;
+    FETCH NEXT FROM org_cursor INTO @orgId;
+
+    WHILE @@FETCH_STATUS = 0
+    BEGIN
+        EXEC sp_set_session_context @key = N'organization_id', @value = @orgId;
+
+        -- لا يُبذَر إلا لمن بُذر دليله أصلاً: منظمةٌ بلا محاسبة مفعَّلة
+        -- تُبذَر كاملةً عند أول تفعيل.
+        IF EXISTS (SELECT 1 FROM dbo.accounts WHERE organization_id = @orgId AND code = '2101')
+        BEGIN
+            IF NOT EXISTS (SELECT 1 FROM dbo.accounts WHERE organization_id = @orgId AND code = '2104')
+            BEGIN
+                INSERT INTO dbo.accounts (organization_id, code, name, parent_id, type, is_postable, is_system, is_active)
+                SELECT @orgId, '2104', N'بضاعة وردت ولم تُفوتَر', a.id, 'liability', 1, 1, 1
+                FROM dbo.accounts a WHERE a.organization_id = @orgId AND a.code = '21';
+
+                INSERT INTO dbo.account_mappings (organization_id, role, account_id)
+                SELECT @orgId, 'grni', a.id
+                FROM dbo.accounts a WHERE a.organization_id = @orgId AND a.code = '2104';
+            END
+
+            IF NOT EXISTS (SELECT 1 FROM dbo.accounts WHERE organization_id = @orgId AND code = '3103')
+            BEGIN
+                INSERT INTO dbo.accounts (organization_id, code, name, parent_id, type, is_postable, is_system, is_active)
+                SELECT @orgId, '3103', N'فروق أسعار المشتريات', a.id, 'expense', 1, 1, 1
+                FROM dbo.accounts a WHERE a.organization_id = @orgId AND a.code = '31';
+
+                INSERT INTO dbo.account_mappings (organization_id, role, account_id)
+                SELECT @orgId, 'purchase_price_variance', a.id
+                FROM dbo.accounts a WHERE a.organization_id = @orgId AND a.code = '3103';
+            END
+        END
+
+        FETCH NEXT FROM org_cursor INTO @orgId;
+    END
+
+    CLOSE org_cursor;
+    DEALLOCATE org_cursor;
+    EXEC sp_set_session_context @key = N'organization_id', @value = NULL;
+    PRINT N'حسابا «وردت ولم تُفوتَر» و«فروق الأسعار» جاهزان';
+END
+GO
+
+-- ----------------------------------------------------------------------------
+--  قالب الإيصال والبيانات الرسمية
+--
+--  الإيصال كان يطبع اسم المنظمة نصّاً وحسب: لا شعار ولا رقم ضريبي ولا سجلّ
+--  تجاري ولا تذييل ولا رمز استجابة سريعة.
+--
+--  وقالبٌ في JSON واحد لا عمودٌ لكل خيار — نفس نهج barcode_template. كل
+--  خيار عمودٌ يعني هجرةً لكل خيار جديد.
+-- ----------------------------------------------------------------------------
+IF NOT EXISTS (SELECT 1 FROM sys.columns
+               WHERE object_id = OBJECT_ID('dbo.organizations') AND name = 'tax_number')
+BEGIN
+    ALTER TABLE dbo.organizations ADD tax_number NVARCHAR(50) NULL;
+    PRINT N'أُضيف عمود organizations.tax_number';
+END
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.columns
+               WHERE object_id = OBJECT_ID('dbo.organizations') AND name = 'commercial_registry')
+BEGIN
+    ALTER TABLE dbo.organizations ADD commercial_registry NVARCHAR(50) NULL;
+    PRINT N'أُضيف عمود organizations.commercial_registry';
+END
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.columns
+               WHERE object_id = OBJECT_ID('dbo.organizations') AND name = 'receipt_template')
+BEGIN
+    ALTER TABLE dbo.organizations ADD receipt_template NVARCHAR(MAX) NOT NULL
+        CONSTRAINT df_organizations_receipt_template DEFAULT
+        N'{"paper":"roll80","showLogo":true,"showTaxNumber":true,"showCommercialRegistry":false,"showQr":false,"headerText":null,"footerText":"شكراً لتعاملكم معنا"}';
+    PRINT N'أُضيف عمود organizations.receipt_template';
+END
+GO
+
+-- عرض الإيصال المحفوظ سابقاً يُنقَل إلى القالب: منظمةٌ ضبطت 58mm ثم رأت
+-- إيصالها يعود إلى 80mm بلا سبب تظنّ النظام أضاع إعدادها.
+IF EXISTS (SELECT 1 FROM sys.columns
+           WHERE object_id = OBJECT_ID('dbo.organizations') AND name = 'receipt_width_mm')
+BEGIN
+    UPDATE dbo.organizations
+    SET receipt_template = JSON_MODIFY(receipt_template, '$.paper', 'roll58')
+    WHERE receipt_width_mm < 70
+      AND JSON_VALUE(receipt_template, '$.paper') = 'roll80';
+    PRINT N'نُقل عرض الإيصال إلى القالب';
+END
+GO
+
+-- ----------------------------------------------------------------------------
+--  الحدّ الأدنى لسعر البيع
+--
+--  لم يكن ثمّة ما يمنع البيع تحت التكلفة: صلاحية pos.price_override تسمح
+--  بأي رقم، ومدير المنظمة يملكها دائماً.
+--
+--  ويبدأ صفراً للجميع (= بلا حدّ): فرضُ حدٍّ محسوبٍ من التكلفة على أصناف
+--  قائمة كان سيرفض مبيعاتٍ مشروعة صباح اليوم التالي للترقية بلا أن يفهم
+--  أحدٌ لماذا. والتاجر يضبطه حيث يريد.
+-- ----------------------------------------------------------------------------
+IF NOT EXISTS (SELECT 1 FROM sys.columns
+               WHERE object_id = OBJECT_ID('dbo.products') AND name = 'min_sale_price')
+BEGIN
+    ALTER TABLE dbo.products ADD min_sale_price DECIMAL(14,2) NOT NULL
+        CONSTRAINT df_products_min_sale_price DEFAULT 0;
+    PRINT N'أُضيف عمود products.min_sale_price';
+END
+GO
+
+-- ----------------------------------------------------------------------------
+--  فئات العملاء والمرتَّبات الدورية
+--
+--  كان مبلغ الاستحقاق على كل عميل، فرفعُ مرتَّب فئةٍ يعني تعديل ألف صفّ.
+-- ----------------------------------------------------------------------------
+IF OBJECT_ID('dbo.customer_categories', 'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.customer_categories (
+      id UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
+      organization_id UNIQUEIDENTIFIER NOT NULL REFERENCES dbo.organizations(id) ON DELETE CASCADE,
+      name NVARCHAR(80) NOT NULL,
+      period_amount DECIMAL(18,2) NOT NULL DEFAULT 0,
+      unspent_expires BIT NOT NULL DEFAULT 1,
+      is_active BIT NOT NULL DEFAULT 1,
+      created_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+      CONSTRAINT uq_customer_categories_name UNIQUE (organization_id, name)
+    );
+    PRINT N'أُنشئ جدول customer_categories';
+END
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.security_policies WHERE name = 'CustomerCategoriesPolicy')
+   AND OBJECT_ID('dbo.customer_categories', 'U') IS NOT NULL
+EXEC('
+CREATE SECURITY POLICY Security.CustomerCategoriesPolicy
+  ADD FILTER PREDICATE Security.fn_OrgOnlyPredicate(organization_id) ON dbo.customer_categories,
+  ADD BLOCK PREDICATE Security.fn_OrgOnlyPredicate(organization_id) ON dbo.customer_categories AFTER INSERT
+  WITH (STATE = ON);');
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.columns
+               WHERE object_id = OBJECT_ID('dbo.customers') AND name = 'category_id')
+BEGIN
+    ALTER TABLE dbo.customers ADD category_id UNIQUEIDENTIFIER NULL
+        CONSTRAINT FK_customers_category REFERENCES dbo.customer_categories(id);
+    PRINT N'أُضيف عمود customers.category_id';
+END
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.columns
+               WHERE object_id = OBJECT_ID('dbo.customers') AND name = 'entitlement_override')
+BEGIN
+    ALTER TABLE dbo.customers ADD entitlement_override DECIMAL(18,2) NULL;
+    PRINT N'أُضيف عمود customers.entitlement_override';
+END
+GO
+
+-- ----------------------------------------------------------------------------
+--  صورة صاحب البطاقة
+--
+--  بطاقةٌ بلا رقم سرّي يحميها شيءٌ واحد: أن يعرف الكاشير أن حاملها صاحبها.
+-- ----------------------------------------------------------------------------
+IF NOT EXISTS (SELECT 1 FROM sys.columns
+               WHERE object_id = OBJECT_ID('dbo.customers') AND name = 'photo_url')
+BEGIN
+    ALTER TABLE dbo.customers ADD photo_url NVARCHAR(400) NULL;
+    PRINT N'أُضيف عمود customers.photo_url';
+END
+GO
+
+-- ----------------------------------------------------------------------------
+--  سلف المنتسبين
+--
+--  السلفة مالٌ يُقرَض لا يُعطى، ويُستردّ من المرتَّب بقسطٍ تحدّده الإدارة.
+-- ----------------------------------------------------------------------------
+IF OBJECT_ID('dbo.customer_advances', 'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.customer_advances (
+      id UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
+      organization_id UNIQUEIDENTIFIER NOT NULL REFERENCES dbo.organizations(id) ON DELETE CASCADE,
+      customer_id UNIQUEIDENTIFIER NOT NULL REFERENCES dbo.customers(id),
+      amount DECIMAL(18,2) NOT NULL,
+      installment_amount DECIMAL(18,2) NOT NULL DEFAULT 0,
+      issued_on DATE NOT NULL,
+      note NVARCHAR(300) NULL,
+      is_cancelled BIT NOT NULL DEFAULT 0,
+      created_by UNIQUEIDENTIFIER NULL REFERENCES dbo.app_users(id),
+      created_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+      CONSTRAINT ck_customer_advances_amount CHECK (amount > 0)
+    );
+    PRINT N'أُنشئ جدول customer_advances';
+END
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.security_policies WHERE name = 'CustomerAdvancesPolicy')
+   AND OBJECT_ID('dbo.customer_advances', 'U') IS NOT NULL
+EXEC('
+CREATE SECURITY POLICY Security.CustomerAdvancesPolicy
+  ADD FILTER PREDICATE Security.fn_OrgOnlyPredicate(organization_id) ON dbo.customer_advances,
+  ADD BLOCK PREDICATE Security.fn_OrgOnlyPredicate(organization_id) ON dbo.customer_advances AFTER INSERT
+  WITH (STATE = ON);');
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.columns
+               WHERE object_id = OBJECT_ID('dbo.customer_wallet_transactions') AND name = 'advance_id')
+   AND OBJECT_ID('dbo.customer_advances', 'U') IS NOT NULL
+BEGIN
+    ALTER TABLE dbo.customer_wallet_transactions ADD advance_id UNIQUEIDENTIFIER NULL
+        CONSTRAINT FK_wallet_tx_advance REFERENCES dbo.customer_advances(id);
+    PRINT N'أُضيف عمود customer_wallet_transactions.advance_id';
+END
+GO
+
+-- ----------------------------------------------------------------------------
 --  فهارس الأداء — ملف منفصل لأنه يُنفَّذ ويُعاد بلا خطر
 -- ----------------------------------------------------------------------------
 PRINT N'لا تنسَ تنفيذ docs\INDEXES.sql على هذه القاعدة أيضاً.';
