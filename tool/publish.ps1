@@ -54,6 +54,7 @@ $api = Join-Path $root 'backend\KineticEnterprise.Api'
 
 function Step($n, $t) { Write-Host "`n[$n] $t" -ForegroundColor Cyan }
 function Ok($t) { Write-Host "    $t" -ForegroundColor Green }
+function Warn($t) { Write-Host "    $t" -ForegroundColor Yellow }
 
 if ($ApiUrl -and $ApiUrl -notmatch '^https://') {
     if (-not $AllowInsecure) {
@@ -199,7 +200,7 @@ $toolOut = Join-Path $Output 'tool'
 New-Item -ItemType Directory -Path $toolOut | Out-Null
 foreach ($f in @('server_setup.ps1', 'setup_staging.ps1', 'backup.ps1',
                  'deploy_update.ps1', 'schema_check.ps1', 'api_test.ps1',
-                 'install_local.ps1')) {
+                 'install_local.ps1', 'runner_setup.ps1')) {
     $p = Join-Path $root "tool\$f"
     if (Test-Path $p) { Copy-Item $p $toolOut; Ok $f }
 }
@@ -314,8 +315,28 @@ Ok 'README-النشر.txt'
 
 # ── 8. ضغط ──────────────────────────────────────────────────────────────
 Step 8 'ضغط الحزمة'
-$zip = "$Output.zip"
+
+# اسمٌ مؤرَّخ لا اسمٌ ثابت: kinetic_pkg_2026-08-29_1226.zip
+#
+# كانت الحزمة تُسمّى publish.zip دائماً، فلا يُميَّز جديدُها من قديمها إلا
+# بقراءة تاريخ الملف. ووقع ذلك فعلاً: بناءٌ فشل صامتاً فبقيت حزمة الأمس
+# مكانها، ورُفعت على أنها الجديدة ولم يلاحظ أحد.
+#
+# والاسم يحمل kinetic_pkg لأنه ما يُعرَف به على الخادم — و«publish» اسمٌ
+# عامّ يصطدم بأي مجلد نشر آخر عند فكّه.
+$stamp = Get-Date -Format 'yyyy-MM-dd_HHmm'
+$zip = Join-Path (Split-Path -Parent $Output) "kinetic_pkg_$stamp.zip"
 if (Test-Path $zip) { Remove-Item $zip -Force }
+
+# والحزم الأقدم من ثلاث تُزال: مجلدٌ فيه عشرون حزمة يجعل اختيار الصحيحة
+# تخميناً، وكلٌّ منها يشغل خمسين ميغابايت.
+Get-ChildItem -Path (Split-Path -Parent $Output) -Filter 'kinetic_pkg_*.zip' -ErrorAction SilentlyContinue |
+    Sort-Object LastWriteTime -Descending |
+    Select-Object -Skip 3 |
+    ForEach-Object {
+        Remove-Item $_.FullName -Force -ErrorAction SilentlyContinue
+        Warn "أُزيلت حزمة قديمة: $($_.Name)"
+    }
 
 # ZipFile بدل Compress-Archive: الأخير يقرأ كل ملف على حدة فيتعثّر بأي ملف
 # يقفله برنامج آخر لحظتها (المضاد للفيروسات يفحص مخرجات البناء فور كتابتها).
@@ -343,4 +364,5 @@ $sizeMb = [math]::Round((Get-Item $zip).Length / 1MB, 1)
 Ok "$zip ($sizeMb ميغابايت)"
 
 Write-Host "`nتمّت الحزمة. ارفع الملف التالي إلى السيرفر:" -ForegroundColor Green
-Write-Host "    $zip`n" -ForegroundColor White
+Write-Host "    $zip" -ForegroundColor White
+Write-Host "    بُنيت: $(Get-Date -Format 'yyyy-MM-dd HH:mm')`n" -ForegroundColor DarkGray
