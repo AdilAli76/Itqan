@@ -421,6 +421,8 @@ class _ProductFormDialogState extends ConsumerState<_ProductFormDialog> {
       TextEditingController(text: (widget.product?['costPrice'] as num?)?.toString() ?? '0');
   late final _saleController =
       TextEditingController(text: (widget.product?['salePrice'] as num?)?.toString() ?? '0');
+  late final _minSaleController =
+      TextEditingController(text: (widget.product?['minSalePrice'] as num?)?.toString() ?? '0');
   late final _reorderController =
       TextEditingController(text: (widget.product?['reorderLevel'] as num?)?.toString() ?? '0');
 
@@ -456,6 +458,7 @@ class _ProductFormDialogState extends ConsumerState<_ProductFormDialog> {
     _skuController.dispose();
     _barcodeController.dispose();
     _costController.dispose();
+    _minSaleController.dispose();
     _saleController.dispose();
     _reorderController.dispose();
     _subUnitNameController.dispose();
@@ -582,11 +585,31 @@ class _ProductFormDialogState extends ConsumerState<_ProductFormDialog> {
                   ],
                 ),
                 const SizedBox(height: 12),
-                TextFormField(
-                  controller: _reorderController,
-                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                  decoration: const InputDecoration(labelText: 'حد إعادة الطلب'),
-                  validator: _numberValidator,
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextFormField(
+                        controller: _minSaleController,
+                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                        decoration: const InputDecoration(
+                          labelText: 'الحدّ الأدنى للبيع',
+                          // الصفر حيادٌ لا قيمةٌ ناقصة — وقولُه هنا يمنع من
+                          // يظنّه إلزامياً فيكتب رقماً عشوائياً.
+                          helperText: 'صفر = بلا حدّ. لا يتجاوزه أحد',
+                        ),
+                        validator: _minSaleValidator,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: TextFormField(
+                        controller: _reorderController,
+                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                        decoration: const InputDecoration(labelText: 'حد إعادة الطلب'),
+                        validator: _numberValidator,
+                      ),
+                    ),
+                  ],
                 ),
                 const SizedBox(height: 4),
                 SwitchListTile(
@@ -688,6 +711,22 @@ class _ProductFormDialogState extends ConsumerState<_ProductFormDialog> {
     );
   }
 
+  /// الحدّ الأدنى — ولا يزيد على سعر البيع.
+  ///
+  /// <para>حدٌّ فوق السعر المعلَن يرفض **كل** بيعٍ بالسعر العادي، فيبدو
+  /// الصنف معطوباً بلا سبب ظاهر. والفحص هنا لحظة الحفظ لا عند أوّل زبون.</para>
+  String? _minSaleValidator(String? value) {
+    final base = _numberValidator(value);
+    if (base != null) return base;
+
+    final floor = double.tryParse(value ?? '') ?? 0;
+    final sale = double.tryParse(_saleController.text) ?? 0;
+    if (floor > 0 && sale > 0 && floor > sale) {
+      return 'الحدّ الأدنى أعلى من سعر البيع — كل بيع سيُرفض';
+    }
+    return null;
+  }
+
   String? _numberValidator(String? v) {
     if (v == null || v.trim().isEmpty) return 'حقل إلزامي';
     return double.tryParse(v) == null ? 'قيمة غير صحيحة' : null;
@@ -735,6 +774,7 @@ class _ProductFormDialogState extends ConsumerState<_ProductFormDialog> {
       'categoryId': _categoryId,
       'supplierId': _supplierId,
       'costPrice': double.parse(_costController.text),
+      'minSalePrice': double.parse(_minSaleController.text),
       'salePrice': double.parse(_saleController.text),
       'reorderLevel': double.parse(_reorderController.text),
       'trackExpiry': _trackExpiry,

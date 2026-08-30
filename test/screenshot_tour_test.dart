@@ -97,6 +97,25 @@ void main() {
       (call) async => call.method == 'readAll' ? <String, String>{} : null,
     );
 
+    // وقناة الطباعة كذلك: شاشة قالب الإيصال تعرض معاينة PDF حقيقية،
+    // ومكتبة printing تسأل النظام عن قدرات الطابعة أوّل ما تُبنى. الردّ
+    // بقدرات صفرية يكفي — المعاينة تُبنى ولا تُطبع في الاختبار.
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
+      const MethodChannel('net.nfet.printing'),
+      (call) async => call.method == 'printingInfo'
+          ? <String, dynamic>{
+              'directPrint': false,
+              'dynamicLayout': false,
+              'canPrint': false,
+              'canConvertHtml': false,
+              'canShare': false,
+              'canRaster': false,
+              'canListPrinters': false,
+            }
+          : null,
+    );
+
     final outDir = Directory('test/screenshots');
     if (!outDir.existsSync()) outDir.createSync(recursive: true);
     // اعتراض طبقة النقل مرّة واحدة لكل الجولة.
@@ -177,6 +196,77 @@ void main() {
       }
     });
   }
+
+  // ── جولة ثانية بإصدار المحفظة ──────────────────────────────────────
+  //
+  // `/pos` يُرجع شاشتين مختلفتين حسب الإصدار، وشاشة المحفظة — وهي إصدارٌ
+  // كامل يُباع — كانت خارج التصوير تماماً. وتبديلُ عيّنة المنظمة وحدها
+  // يكفي: البقية تُقرأ كما هي.
+  group('المحفظة', () {
+    setUp(() {
+      fixtureAdapter?.overrides['/organizations/me'] = 'organizations_me_wallet.json';
+    });
+    tearDown(() {
+      fixtureAdapter?.overrides.remove('/organizations/me');
+    });
+
+    for (final device in kTourDevices) {
+      for (final screen in kWalletTourScreens) {
+        testWidgets('${device.label} ${screen.route} — ${screen.label}', (tester) async {
+          tester.view.physicalSize = device.size;
+          tester.view.devicePixelRatio = 1.0;
+          addTearDown(tester.view.reset);
+
+          await tester.pumpWidget(
+            ProviderScope(
+              overrides: [
+                myPermissionsProvider.overrideWith((ref) async => const UserPermissions(
+                      role: 'super_admin',
+                      isSuperAdmin: true,
+                      codes: {},
+                    )),
+              ],
+              child: MaterialApp(
+                debugShowCheckedModeBanner: false,
+                theme: AppTheme.build(const AppColors()),
+                locale: const Locale('ar'),
+                supportedLocales: const [Locale('ar'), Locale('en')],
+                localizationsDelegates: const [
+                  GlobalMaterialLocalizations.delegate,
+                  GlobalWidgetsLocalizations.delegate,
+                  GlobalCupertinoLocalizations.delegate,
+                ],
+                home: Directionality(
+                  textDirection: TextDirection.rtl,
+                  child: buildScreenForRoute(screen.route),
+                ),
+              ),
+            ),
+          );
+
+          await tester.pump();
+          try {
+            await tester.pumpAndSettle(const Duration(milliseconds: 100));
+          } on FlutterError {
+            for (var i = 0; i < 12; i++) {
+              await tester.pump(const Duration(milliseconds: 100));
+            }
+          }
+
+          final error = tester.takeException();
+          if (error != null) {
+            kTourFindings.add('محفظة ${device.label} ← ${screen.route}: $error');
+          }
+
+          final name = screen.route.replaceAll('/', '').replaceAll('-', '_');
+          await expectLater(
+            find.byType(MaterialApp),
+            matchesGoldenFile('screenshots/wallet_${device.slug}__$name.png'),
+          );
+        });
+      }
+    }
+  });
 
   tearDownAll(() {
     final missing = fixtureAdapter?.missing ?? const <String>{};

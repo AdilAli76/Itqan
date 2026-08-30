@@ -55,11 +55,26 @@ const kTourScreens = [
   TourScreen('/reorder', 'إعادة الطلب'),
   TourScreen('/expenses', 'المصروفات'),
   TourScreen('/accounting', 'المحاسبة'),
+  TourScreen('/supplier-invoices', 'فواتير الموردين'),
+  TourScreen('/receipt-designer', 'قالب الإيصال'),
+  TourScreen('/payroll', 'المرتَّبات والسلف'),
+  TourScreen('/platform', 'لوحة المنصّة'),
   TourScreen('/platform/organizations', 'الشركات المشترَكة'),
   TourScreen('/platform/organizations/new', 'إنشاء منظمة جديدة'),
 ];
 
 /// استثناءات رُصدت أثناء الجولة — تُجمَع ولا تُفشل، فتُصوَّر الشاشة بعطبها.
+/// شاشات تختلف كلّياً في إصدار المحفظة — تُصوَّر بجولةٍ ثانية.
+///
+/// <para><b>الثغرة التي تسدّها:</b> `/pos` يُرجع `WalletPosScreen` لإصدار
+/// المحفظة و`PosScreen` لغيره. وعيّنة المنظمة إصدارها قياسي، فنقطة بيع
+/// المحفظة — وهي شاشة إصدارٍ كامل يُباع — لم تكن مصوَّرةً قطّ.</para>
+const kWalletTourScreens = [
+  TourScreen('/pos', 'نقطة بيع المحفظة'),
+  TourScreen('/payroll', 'المرتَّبات والسلف'),
+  TourScreen('/customers', 'المنتسبون'),
+];
+
 final List<String> kTourFindings = [];
 
 /// يستبدل طبقة نقل Dio بمُعترِض يخدم العيّنات الملتقطة.
@@ -80,6 +95,13 @@ class FixtureAdapter implements HttpClientAdapter {
   final Directory _dir;
   Map<String, String> _index = {};
 
+  /// تجاوزٌ مؤقّت لمسارٍ بعينه — لتصوير إصدارٍ آخر بنفس العيّنات.
+  ///
+  /// <para>إصدار المحفظة يُبدّل شاشة نقطة البيع كاملةً (راجع
+  /// `posScreenForEdition`)، وشاشاتُه كانت خارج الجولة تماماً لأن عيّنة
+  /// المنظمة إصدارها قياسي. فتُبدَّل عيّنة المنظمة وحدها ويُعاد التصوير.</para>
+  final Map<String, String> overrides = {};
+
   /// المسارات التي طُلبت ولا عيّنة لها — تُطبع في نهاية الجولة.
   final Set<String> missing = {};
 
@@ -94,7 +116,7 @@ class FixtureAdapter implements HttpClientAdapter {
     final path = options.path.split('?').first;
     final key = path.startsWith('/') ? path : '/$path';
 
-    final fileName = _index[key];
+    final fileName = overrides[key] ?? _index[key];
     if (fileName != null) {
       final file = File('${_dir.path}/$fileName');
       if (file.existsSync()) {

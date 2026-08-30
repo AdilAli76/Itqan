@@ -83,24 +83,37 @@ class _AppSidebarState extends ConsumerState<AppSidebar> {
               children: [
                 Flexible(
                   child: Text(
-                    branding?.displayName ?? 'Kinetic Enterprise',
+                    branding?.displayName ?? 'إتقان ERP',
                     style: AppTextStyles.headlineMd(),
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
-                if (branding?.logoUrl != null) ...[
-                  const SizedBox(width: 10),
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(6),
-                    child: AuthedImage(
-                      path: branding!.logoUrl!,
-                      width: 28,
-                      height: 28,
-                      fit: BoxFit.cover,
-                      errorWidget: const Icon(Icons.hub_outlined, size: 24),
-                    ),
-                  ),
-                ],
+                const SizedBox(width: 10),
+                // شعار المنظمة إن رفعته، وإلا شعار المنتج — لا أيقونة
+                // عامّة. والسقوط على الأصل المحلي يجعل الشريط يحمل هويةً
+                // ولو انقطعت الشبكة أو حُذف الملف من الخادم.
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(6),
+                  child: branding?.logoUrl != null
+                      ? AuthedImage(
+                          path: branding!.logoUrl!,
+                          width: 32,
+                          height: 32,
+                          fit: BoxFit.cover,
+                          errorWidget: Image.asset(
+                            'assets/branding/itqan_logo.png',
+                            width: 32,
+                            height: 32,
+                            fit: BoxFit.cover,
+                          ),
+                        )
+                      : Image.asset(
+                          'assets/branding/itqan_logo.png',
+                          width: 32,
+                          height: 32,
+                          fit: BoxFit.cover,
+                        ),
+                ),
               ],
             ),
           ),

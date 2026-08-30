@@ -1,5 +1,5 @@
 name: kinetic_enterprise
-description: نظام Kinetic Enterprise ERP - النسخة التجارية الليبية
+description: منظومة إتقان ERP - النسخة التجارية العربية المتكاملة
 publish_to: 'none'
 version: 1.0.0+1
 
@@ -80,6 +80,7 @@ flutter:
   # عليه.
   assets:
     - assets/sounds/
+    - assets/branding/
 
   #
   # كان هنا إعلان assets/icons/ لمجلد غير موجود ولا يشير إليه أي كود، فكان

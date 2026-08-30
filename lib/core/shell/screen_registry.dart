@@ -16,6 +16,9 @@ import '../../features/settings/presentation/settings_screen.dart';
 import '../../features/stock_transfer/presentation/stock_transfer_screen.dart';
 import '../../features/stock_count/presentation/stock_count_screen.dart';
 import '../../features/accounting/presentation/accounting_screen.dart';
+import '../../features/purchasing/presentation/supplier_invoices_screen.dart';
+import '../../features/settings/presentation/receipt_designer_screen.dart';
+import '../../features/payroll/presentation/payroll_screen.dart';
 import '../../features/expenses/presentation/expenses_screen.dart';
 import '../../features/barcode_designer/presentation/barcode_designer_screen.dart';
 import '../../features/support/presentation/support_screen.dart';
@@ -25,6 +28,7 @@ import '../../features/pharmacy/presentation/prescriptions_screen.dart';
 import '../../features/platform/presentation/create_organization_screen.dart';
 import '../../features/pos/presentation/wallet_pos_screen.dart';
 import '../../features/platform/presentation/platform_organizations_screen.dart';
+import '../../features/platform/presentation/platform_dashboard_screen.dart';
 
 /// يقابل تماماً قائمة GoRoute السابقة في app_router.dart — لكن بدل أن يستبدل
 /// كل مسار الصفحة كلها، يبني الودجت التي يعرضها AppShell داخل تبويب. أي
@@ -70,10 +74,16 @@ Widget buildScreenForRoute(String route) {
       return const StockCountScreen();
     case '/accounting':
       return const AccountingScreen();
+    case '/supplier-invoices':
+      return const SupplierInvoicesScreen();
     case '/expenses':
       return const ExpensesScreen();
     case '/barcode-designer':
       return const BarcodeDesignerScreen();
+    case '/receipt-designer':
+      return const ReceiptDesignerScreen();
+    case '/payroll':
+      return const PayrollScreen();
     case '/support':
       return const SupportScreen();
     case '/reorder':
@@ -82,6 +92,8 @@ Widget buildScreenForRoute(String route) {
       return const MedicineReferenceScreen();
     case '/prescriptions':
       return const PrescriptionsScreen();
+    case '/platform':
+      return const PlatformDashboardScreen();
     case '/platform/organizations':
       return const PlatformOrganizationsScreen();
     case '/platform/organizations/new':

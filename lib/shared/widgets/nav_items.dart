@@ -64,6 +64,7 @@ const _inventoryGroup = NavGroup(
     NavItem(Icons.sync_alt_outlined, 'تحويل المخزون بين الفروع', '/stock-transfer'),
     NavItem(Icons.fact_check_outlined, 'الجرد الدوري', '/stock-count'),
     NavItem(Icons.qr_code_outlined, 'تخصيص ملصق الباركود', '/barcode-designer'),
+    NavItem(Icons.receipt_outlined, 'قالب الإيصال', '/receipt-designer'),
   ],
 );
 
@@ -98,6 +99,15 @@ const _systemGroup = NavGroup(
 
 /// المجموعات بالترتيب المعروض. مالك المنصة وحده يرى "إنشاء منظمة جديدة"،
 /// وتُضاف داخل مجموعة النظام بدل أن تكون عنصراً سائباً في آخر القائمة.
+/// إصدارٌ على شكل المحفظة — بطاقات وأرصدة بلا بضاعة.
+///
+/// <para>يقابل `Editions.IsWalletShaped` في الخادم. والقائمتان تُقرآن معاً:
+/// إصدارٌ يُضاف هنا ولا يُضاف هناك يُخفي شاشةً يسمح بها الخادم.</para>
+bool _isWalletShaped(String edition) => edition == 'wallet' || edition == 'wallet_plus';
+
+/// أفي هذا الإصدار دفترٌ محاسبي؟ — يقابل وحدة `accounting` في الخادم.
+bool _hasAccounting(String edition) => edition == 'enterprise' || edition == 'wallet_plus';
+
 List<NavGroup> navGroupsFor({required bool isPlatformAdmin, String edition = 'standard'}) => [
       NavGroup(icon: _dashboard.icon, label: _dashboard.label, items: const [_dashboard]),
       _salesGroup,
@@ -105,7 +115,7 @@ List<NavGroup> navGroupsFor({required bool isPlatformAdmin, String edition = 'st
       // جرد ولا ملصقات باركود. إخفاء المجموعة هنا لا في كل واجهة على حدة —
       // ثلاثة مواضع تعرض هذه القائمة (الشريط الجانبي والعلوي ولوحة
       // الأوامر)، وإخفاء يُنفَّذ في اثنين يترك الشاشة قابلة للفتح من الثالث.
-      if (edition != 'wallet') _inventoryGroup,
+      if (!_isWalletShaped(edition)) _inventoryGroup,
       // مجموعة تظهر لإصدار الصيدليات وحده — النظام يُباع لبقالة ومحل قطع
       // غيار، ودفتر الوصفات في قائمتهم بند لا معنى له.
       if (edition == 'pharmacy')
@@ -114,18 +124,41 @@ List<NavGroup> navGroupsFor({required bool isPlatformAdmin, String edition = 'st
           label: 'الصيدلية',
           items: [kPrescriptionsItem],
         ),
-      // المحاسبة لإصدار المؤسسات وحده — بقّالة بفرع واحد لا تحتاج ميزان
-      // مراجعة، وشجرة حسابات في قائمتها بند يُربك ولا يُفيد. والترشيح هنا
-      // لا في كل واجهة: ثلاثة مواضع تعرض هذه القائمة.
-      if (edition == 'enterprise')
+      // المرتَّبات والسلف لإصدارات المحفظة وحدها: جهةٌ تصرف على منتسبيها
+      // تحتاجهما، ومتجرٌ يبيع بضاعة لا معنى لهما في قائمته.
+      if (_isWalletShaped(edition))
         const NavGroup(
+          icon: Icons.account_balance_wallet_outlined,
+          label: 'المرتَّبات',
+          items: [
+            NavItem(Icons.payments_outlined, 'المرتَّبات والسلف', '/payroll'),
+          ],
+        ),
+      // المحاسبة لمن اشتراها — بقّالة بفرع واحد لا تحتاج ميزان مراجعة،
+      // وشجرة حسابات في قائمتها بند يُربك ولا يُفيد. والترشيح هنا لا في كل
+      // واجهة: ثلاثة مواضع تعرض هذه القائمة.
+      if (_hasAccounting(edition))
+        NavGroup(
           icon: Icons.account_balance_outlined,
           label: 'المحاسبة',
-          items: [NavItem(Icons.account_tree_outlined, 'دليل الحسابات', '/accounting')],
+          items: [
+            const NavItem(Icons.account_tree_outlined, 'دليل الحسابات', '/accounting'),
+            // فواتير الموردين مع المحاسبة لا مع المشتريات: هي مستندٌ
+            // محاسبي يُفرغ «وردت ولم تُفوتَر» إلى «الموردون».
+            //
+            // لكنها تحتاج **الاثنتين**: منظمةٌ بلا مشتريات لا استلامَ عندها
+            // تُفوتره، فالشاشة تفتح فارغةً أبداً. وشاشةٌ لا تمتلئ يوماً
+            // أسوأ من شاشةٍ غائبة — يظنّها المستخدم معطوبة.
+            if (!_isWalletShaped(edition))
+              const NavItem(Icons.receipt_long_outlined, 'فواتير الموردين', '/supplier-invoices'),
+          ],
         ),
-      // المصروفات في كل الإصدارات عدا المحفظة: الإيجار والرواتب مصروفات
-      // كل نشاط، وبلا تسجيلها يقول تقرير الأرباح ربحاً ليس ربحاً. أما إصدار
-      // المحفظة فجهةٌ تصرف على منتسبيها لا تُدير محلاً بمصروفاته.
+      // المصروفات في كل الإصدارات عدا المحفظة البسيطة: الإيجار والرواتب
+      // مصروفات كل نشاط، وبلا تسجيلها يقول تقرير الأرباح ربحاً ليس ربحاً.
+      // أما إصدار المحفظة فجهةٌ تصرف على منتسبيها لا تُدير محلاً بمصروفاته.
+      //
+      // ومحفظةٌ **بمحاسبة** تحتاجها: دفترٌ يقيّد ما دخل ولا يقيّد ما صُرف
+      // ليس دفتراً.
       if (edition != 'wallet')
         const NavGroup(
           icon: Icons.payments_outlined,
@@ -140,11 +173,27 @@ List<NavGroup> navGroupsFor({required bool isPlatformAdmin, String edition = 'st
         label: _systemGroup.label,
         items: [
           ..._systemGroup.items,
+          // نشرة الدواء تبقى هنا: محتوى منصّةٍ يُدار مرّةً، لا عملُ مشغّلٍ
+          // يومي.
           if (isPlatformAdmin) kMedicineReferenceItem,
-          if (isPlatformAdmin) kPlatformManageItem,
-          if (isPlatformAdmin) kPlatformNavItem,
         ],
       ),
+      // ── المنصّة ────────────────────────────────────────────────────
+      //
+      // مجموعةٌ مستقلّة لا بنودٌ مدسوسة في آخر «النظام» بجانب الإعدادات.
+      // مالك المنصّة **مشغّلٌ لا مستأجر**: عملُه إدارة عملاء واشتراكات، لا
+      // ضبط إعدادات منظمةٍ واحدة. وخلطُهما جعله يدخل كأي مدير فيجد ثلاثة
+      // بنودٍ زائدة، ولا يرى حال أعماله كمشغّل في أي شاشة.
+      if (isPlatformAdmin)
+        const NavGroup(
+          icon: Icons.hub_outlined,
+          label: 'المنصّة',
+          items: [
+            NavItem(Icons.dashboard_outlined, 'لوحة المنصّة', '/platform'),
+            kPlatformManageItem,
+            kPlatformNavItem,
+          ],
+        ),
     ];
 
 /// يُسقط من القائمة الوحدات التي يحجبها الخادم كلياً عن هذا المستخدم.

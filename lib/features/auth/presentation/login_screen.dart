@@ -72,20 +72,20 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
           // بعرض النموذج كاملاً.
           Align(
             alignment: AlignmentDirectional.centerStart,
-            child: Container(
-              width: 56,
-              height: 56,
-              decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.primary,
-                borderRadius: BorderRadius.circular(12),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(14),
+              child: Image.asset(
+                'assets/branding/itqan_logo.png',
+                width: 64,
+                height: 64,
+                fit: BoxFit.cover,
               ),
-              child: const Icon(Icons.hub_outlined, color: Colors.white),
             ),
           ),
           const SizedBox(height: 20),
           Text('تسجيل الدخول', style: AppTextStyles.displayLg()),
           const SizedBox(height: 4),
-          Text('نظام Kinetic Enterprise لإدارة الموارد', style: AppTextStyles.bodyMd()),
+          Text('منظومة إتقان ERP لإدارة الموارد والمؤسسات', style: AppTextStyles.bodyMd()),
           const SizedBox(height: 32),
           Text('البريد الإلكتروني أو اسم المستخدم', style: AppTextStyles.labelMd()),
           const SizedBox(height: 6),
@@ -322,12 +322,26 @@ class _BrandPanel extends StatelessWidget {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Icon(Icons.hub_outlined, color: Colors.white.withValues(alpha: 0.92), size: 48),
-                const SizedBox(height: 20),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(24),
+                  child: Image.asset(
+                    'assets/branding/itqan_logo.png',
+                    width: 100,
+                    height: 100,
+                    fit: BoxFit.cover,
+                  ),
+                ),
+                const SizedBox(height: 24),
                 Text(
-                  'إدارة موحّدة لكل فروعك\nمن لوحة تحكم واحدة',
+                  'إتقان في الحسابات..\nوسرعة في العمليات',
                   textAlign: TextAlign.center,
                   style: AppTextStyles.headlineLg(color: Colors.white),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  'إدارة موحّدة وذكية لكل فروعك ومستودعاتك',
+                  textAlign: TextAlign.center,
+                  style: AppTextStyles.bodyMd(color: Colors.white.withValues(alpha: 0.85)),
                 ),
               ],
             ),

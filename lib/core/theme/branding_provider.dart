@@ -27,7 +27,12 @@ class OrganizationBranding {
 
   /// إصدار المحفظة: بطاقات وأرصدة بلا بضاعة. نقطة البيع تُدخِل مبلغاً،
   /// ولا كتالوج ولا مخزون ولا مشتريات.
-  bool get isWallet => edition == 'wallet';
+  /// إصدارٌ على شكل المحفظة — بطاقات وأرصدة بلا بضاعة.
+  ///
+  /// <para>يشمل `wallet_plus` (المحفظة ومعها المحاسبة): هو محفظةٌ في كل
+  /// سلوكه، والفارق دفترٌ لا شكلُ شاشة. ويقابل `Editions.IsWalletShaped`
+  /// في الخادم — والقائمتان تُقرآن معاً.</para>
+  bool get isWallet => edition == 'wallet' || edition == 'wallet_plus';
 
   /// إصدار الصيدليات: نشرة الدواء مربوطة بالأصناف وتُعرض لحظة الصرف.
   ///
@@ -38,7 +43,7 @@ class OrganizationBranding {
   bool get isPharmacy => edition == 'pharmacy';
 
   static const fallback = OrganizationBranding(
-    displayName: 'Kinetic Enterprise',
+    displayName: 'منظومة إتقان ERP',
     logoUrl: null,
     colors: AppColors(),
     currencySymbol: 'د.ل',

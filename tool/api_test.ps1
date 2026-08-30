@@ -9,16 +9,68 @@
 #
 #  التشغيل:
 #      powershell -ExecutionPolicy Bypass -File tool\api_test.ps1
-#      powershell -ExecutionPolicy Bypass -File tool\api_test.ps1 -BaseUrl http://localhost:5000/api
+#
+#  العنوان يُشتقّ تلقائياً من موقع IIS باسم Kinetic. ولتجاوز ذلك:
+#      ... -BaseUrl https://erp.droob-albayan.ly/api
+#      ... -SiteName KineticStaging
 #
 #  يكتب بيانات تجريبية في القاعدة (أصناف وفواتير باسم يبدأ بـ TEST-).
 #  لا تُشغّله على قاعدة إنتاج.
 # =============================================================================
 
 param(
-    [string]$BaseUrl = "http://localhost:5000/api",
-    [string]$Email = ""
+    # يُشتقّ من الموقع في IIS إن وُجد، وإلا منفذ التطوير — راجع
+    # Resolve-BaseUrl أدناه.
+    [string]$BaseUrl = "",
+    [string]$Email = "",
+    # اسم موقع IIS الذي يُشتقّ منه العنوان حين لا يُمرَّر BaseUrl.
+    [string]$SiteName = "Kinetic"
 )
+
+<#
+.SYNOPSIS
+    يستنتج عنوان الـAPI من موقع IIS، وإلا يسقط على منفذ التطوير.
+
+.DESCRIPTION
+    كان الافتراضي localhost:5000 دائماً — وهو عنوان `dotnet run` في
+    التطوير. والسكربت يُشحن داخل حزمة النشر ليُشغَّل على خادمٍ يعمل تحت
+    IIS على المنفذ 80، فكان كل من يشغّله هناك يصطدم بـ«السيرفر لا يستجيب»
+    ويظنّ النظام معطَّلاً وهو يعمل.
+#>
+function Resolve-BaseUrl([string]$Site) {
+    if (-not (Get-Module -ListAvailable -Name WebAdministration)) { return $null }
+    try {
+        Import-Module WebAdministration -ErrorAction Stop
+        $binding = Get-WebBinding -Name $Site -ErrorAction Stop |
+            Sort-Object { if ($_.protocol -eq 'https') { 0 } else { 1 } } |
+            Select-Object -First 1
+        if (-not $binding) { return $null }
+
+        # bindingInformation صيغتها  IP:Port:Host
+        $parts = $binding.bindingInformation -split ':'
+        if ($parts.Count -lt 2) { return $null }
+        $port = $parts[1]
+        # المضيف قد يكون فارغاً (ربط بكل العناوين) — localhost يفي حينها.
+        $hostName = if ($parts.Count -ge 3 -and $parts[2]) { $parts[2] } else { 'localhost' }
+
+        $scheme = $binding.protocol
+        $suffix = if (($scheme -eq 'http' -and $port -eq '80') -or
+                      ($scheme -eq 'https' -and $port -eq '443')) { '' } else { ":$port" }
+        return "${scheme}://${hostName}${suffix}/api"
+    } catch {
+        return $null
+    }
+}
+
+if (-not $BaseUrl) {
+    $BaseUrl = Resolve-BaseUrl $SiteName
+    if ($BaseUrl) {
+        Write-Host "  العنوان مُشتقٌّ من موقع IIS «$SiteName»: $BaseUrl" -ForegroundColor DarkGray
+    } else {
+        $BaseUrl = "http://localhost:5000/api"
+        Write-Host "  لا موقع IIS باسم «$SiteName» — يُجرَّب منفذ التطوير: $BaseUrl" -ForegroundColor DarkGray
+    }
+}
 
 $ErrorActionPreference = 'Continue'
 $script:Pass = 0
@@ -144,7 +196,26 @@ if ($ping.Status -eq 0) {
     exit 1
 }
 Check "السيرفر يستجيب" ($ping.Status -ne 0) ""
-Check "نقطة نهاية محمية ترفض بلا توكن (401)" ($ping.Status -eq 401) "رجعت $($ping.Status) — نقطة نهاية مكشوفة!"
+
+# 404 ليس كشفاً بل عنوانٌ خاطئ.
+#
+# كان الفحص يعدّ كل ما ليس 401 «نقطة نهاية مكشوفة!» — فمن يضرب موقعاً آخر
+# في IIS (أو مساراً بلا /api) يرى إنذاراً أمنياً كاذباً ويطارده، بينما
+# المشكلة أن التطبيق ليس على هذا العنوان أصلاً. وإنذارٌ كاذب واحد يكفي
+# ليُهمَل الحقيقي بعده.
+if ($ping.Status -eq 404) {
+    Check "نقطة نهاية محمية ترفض بلا توكن (401)" $false `
+        ("رجعت 404 — التطبيق ليس على $BaseUrl. " +
+         "غالباً موقع IIS آخر يجيب على هذا المنفذ. تحقّق بـ: " +
+         "Import-Module WebAdministration; Get-Website | Select Name,State,PhysicalPath")
+    Write-Host ""
+    Write-Host "  أوقفت الاختبار: العنوان خاطئ لا النظام معطَّل." -ForegroundColor Yellow
+    Write-Host "  مرّر العنوان الصحيح بـ -BaseUrl، أو -SiteName لاسم موقع آخر." -ForegroundColor Yellow
+    exit 1
+}
+
+Check "نقطة نهاية محمية ترفض بلا توكن (401)" ($ping.Status -eq 401) `
+    "رجعت $($ping.Status) — نقطة نهاية مكشوفة!"
 
 if (-not $Email -and $env:KINETIC_TEST_EMAIL) { $Email = $env:KINETIC_TEST_EMAIL }
 if (-not $Email) { $Email = Read-Host "  البريد الإلكتروني" }
@@ -648,6 +719,126 @@ if ($fefoProduct.Status -notin 200,201) {
 }
 
 # -----------------------------------------------------------------------------
+Section "٥.٧ فئات العملاء وصرف المرتَّبات"
+
+# العطب الذي يمسكه هذا القسم: مبلغ الاستحقاق كان رقماً على كل عميل،
+# فجهةٌ تصرف على ألف منتسب في ثلاث فئات ترفع مرتب الفئة بتعديل ألف صفّ.
+#
+# وأخطر ما يُفحَص هنا **منع الصرف المزدوج**: زرٌّ يُضغط مرّتين، أو خدمة
+# تعمل على خادمين، كانا سيُضاعفان المرتَّب على ألف بطاقة — والمال الخارج
+# لا يعود.
+
+$catA = Api POST "/customer-categories" -Token $token -Body @{
+    name = "فئة أ $stamp"; periodAmount = 100; unspentExpires = $true
+}
+Check "فئة يسقط رصيدها أُنشئت" ($catA.Status -in 200,201) `
+    "حالة $($catA.Status) — $($catA.Body.message)"
+
+$catB = Api POST "/customer-categories" -Token $token -Body @{
+    name = "فئة ب $stamp"; periodAmount = 50; unspentExpires = $false
+}
+Check "فئة يتراكم رصيدها أُنشئت" ($catB.Status -in 200,201) "حالة $($catB.Status)"
+
+# اسمٌ مكرَّر يجعل اختيار الصحيحة تخميناً.
+$dupCat = Api POST "/customer-categories" -Token $token -Body @{
+    name = "فئة أ $stamp"; periodAmount = 100; unspentExpires = $true
+}
+Check "فئة باسم مكرَّر تُرفض" ($dupCat.Status -eq 409) "حالة $($dupCat.Status)"
+
+$negCat = Api POST "/customer-categories" -Token $token -Body @{
+    name = "فئة سالبة $stamp"; periodAmount = -5; unspentExpires = $true
+}
+Check "مرتَّب سالب يُرفض" ($negCat.Status -eq 400) "حالة $($negCat.Status)"
+
+if ($catA.Status -notin 200,201 -or $catB.Status -notin 200,201) {
+    Skipped "صرف المرتَّبات" "تعذّر تجهيز الفئات"
+} else {
+    # ── ثلاثة منتسبين: عاديّ، ومُعدَّل، وموقوف ──────────────────────────
+    $m1 = Api POST "/customers" -Token $token -Body @{
+        fullName = "منتسب عادي $stamp"; accountModel = "entitlement"; categoryId = $catA.Body.id
+    }
+    $m2 = Api POST "/customers" -Token $token -Body @{
+        fullName = "منتسب معدَّل $stamp"; accountModel = "entitlement"
+        categoryId = $catA.Body.id; entitlementOverride = 250
+    }
+    $m3 = Api POST "/customers" -Token $token -Body @{
+        fullName = "منتسب موقوف $stamp"; accountModel = "entitlement"
+        categoryId = $catA.Body.id; entitlementOverride = 0
+    }
+    # ورصيدٌ مدفوع مسبقاً — لا تمسّه المنحة أبداً.
+    $prepaid = Api POST "/customers" -Token $token -Body @{
+        fullName = "زبون مدفوع مسبقاً $stamp"; accountModel = "prepaid"; categoryId = $catA.Body.id
+    }
+
+    $ready = ($m1.Status -in 200,201) -and ($m2.Status -in 200,201) -and ($m3.Status -in 200,201)
+    Check "المنتسبون أُنشئوا بفئاتهم" $ready "حالات: $($m1.Status) $($m2.Status) $($m3.Status)"
+
+    if (-not $ready) {
+        Skipped "صرف المرتَّبات" "تعذّر إنشاء المنتسبين"
+    } else {
+        # ── المعاينة قبل الصرف ──────────────────────────────────────────
+        $preview = Api GET "/customer-categories/disburse/preview?categoryId=$($catA.Body.id)" -Token $token
+        Check "معاينة الصرف تُقرأ" ($preview.Status -eq 200) "حالة $($preview.Status)"
+        Check "المعاينة تعدّ الموقوفين على حدة" ([int]$preview.Body.suspended -ge 1) `
+            "موقوفون $($preview.Body.suspended) — خلطُهم بالمدفوع يُخفيهم"
+        Check "المعاينة تحسب التعديل الفردي" ([double]$preview.Body.totalAmount -ge 350) `
+            "المجموع $($preview.Body.totalAmount) — المتوقّع 100 + 250 على الأقلّ"
+
+        # ── الصرف ───────────────────────────────────────────────────────
+        $pay = Api POST "/customer-categories/disburse" -Token $token -Body @{
+            categoryId = $catA.Body.id
+        }
+        Check "الصرف يمرّ" ($pay.Status -eq 200) "حالة $($pay.Status) — $($pay.Body.message)"
+        Check "الموقوف لم يُصرف له" ([int]$pay.Body.skipped -ge 1) `
+            "متخطّى $($pay.Body.skipped) — التعديل بصفر قرارٌ صريح بالإيقاف"
+
+        if ($pay.Status -eq 200) {
+            $b1 = Api GET "/customers/$($m1.Body.id)/wallet" -Token $token
+            $b2 = Api GET "/customers/$($m2.Body.id)/wallet" -Token $token
+            $b3 = Api GET "/customers/$($m3.Body.id)/wallet" -Token $token
+
+            Check "المنتسب العادي قبض مرتَّب فئته" `
+                ([Math]::Abs([double]$b1.Body.walletBalance - 100) -lt 0.01) "رصيده $($b1.Body.walletBalance)"
+            Check "التعديل الفردي يَجُبّ الفئة" `
+                ([Math]::Abs([double]$b2.Body.walletBalance - 250) -lt 0.01) "رصيده $($b2.Body.walletBalance)"
+            Check "الموقوف رصيده صفر" `
+                ([Math]::Abs([double]$b3.Body.walletBalance) -lt 0.01) "رصيده $($b3.Body.walletBalance)"
+
+            if ($prepaid.Status -in 200,201) {
+                $bp = Api GET "/customers/$($prepaid.Body.id)/wallet" -Token $token
+                Check "الرصيد المدفوع مسبقاً لم يمسّه المرتَّب" `
+                    ([Math]::Abs([double]$bp.Body.walletBalance) -lt 0.01) `
+                    "رصيده $($bp.Body.walletBalance) — شحنُه يعني صرف مالٍ لمن دفع ماله"
+            }
+
+            # ── الصرف مرّتين في الدورة نفسها ────────────────────────────
+            $again = Api POST "/customer-categories/disburse" -Token $token -Body @{
+                categoryId = $catA.Body.id
+            }
+            Check "الصرف الثاني لا يدفع شيئاً" `
+                ($again.Status -eq 200 -and [int]$again.Body.customersPaid -eq 0) `
+                "دُفع لـ$($again.Body.customersPaid) — المضاعفة على ألف بطاقة لا تعود"
+
+            $b1After = Api GET "/customers/$($m1.Body.id)/wallet" -Token $token
+            Check "الرصيد لم يتضاعف" `
+                ([Math]::Abs([double]$b1After.Body.walletBalance - 100) -lt 0.01) `
+                "رصيده $($b1After.Body.walletBalance) — المتوقّع 100 كما هو"
+        }
+
+        # ── رفع مرتب الفئة يسري على القادم لا الماضي ────────────────────
+        $raise = Api PUT "/customer-categories/$($catA.Body.id)" -Token $token -Body @{
+            name = "فئة أ $stamp"; periodAmount = 300; unspentExpires = $true
+        }
+        Check "رفع مرتب الفئة يمرّ" ($raise.Status -in 200,204) "حالة $($raise.Status)"
+
+        $b1AfterRaise = Api GET "/customers/$($m1.Body.id)/wallet" -Token $token
+        Check "رفع المرتب لا يمسّ ما صُرف" `
+            ([Math]::Abs([double]$b1AfterRaise.Body.walletBalance - 100) -lt 0.01) `
+            "رصيده $($b1AfterRaise.Body.walletBalance) — تعديل الماضي يجعل الكشف لا يطابق ما قُبض"
+    }
+}
+
+# -----------------------------------------------------------------------------
 Section "٥.٣ أنماط بطاقة المحفظة"
 
 # العطب الذي يمسكه هذا القسم: الرقم السرّي كان إلزامياً دائماً بلا بديل،
@@ -888,8 +1079,15 @@ Section "٥.٥ المحاسبة — الترحيل الآلي"
 # القيد غير المتوازن يُفسد ميزان المراجعة إلى الأبد: لا يظهر في أي شاشة بيع،
 # ولا يُكتشف إلا يوم يُقفل الحساب فلا يُعرف أي قيدٍ من آلاف القيود سببه.
 
+# إصدار المنظمة يُقرأ أولاً: مالك المنصّة يمرّ من حاجز الوحدة بلا فحص،
+# فتنجح القراءة وبذرُ الدليل ثم تفشل كل فحوصات الترحيل الآلي بلا سببٍ
+# ظاهر — وقد وقع ذلك فعلاً. وقول السبب مرّةً أصدق من أربعة إخفاقات
+# متتالية يطاردها من يقرؤها.
+$orgEdition = (Api GET "/organizations/me" -Token $token).Body.edition
 $chart = Api GET "/accounting/accounts" -Token $token
-if ($chart.Status -eq 403) {
+if ($orgEdition -and $orgEdition -ne 'enterprise') {
+    Skipped "المحاسبة" "إصدار المنظمة «$orgEdition» لا «enterprise» — الترحيل الآلي معطَّل بحكم التصميم"
+} elseif ($chart.Status -eq 403) {
     Skipped "المحاسبة" "وحدة accounting غير مفعّلة لهذه المنظمة (إصدار المؤسسات وحده)"
 } elseif ($chart.Status -ne 200) {
     Skipped "المحاسبة" "تعذّرت قراءة دليل الحسابات (حالة $($chart.Status))"
@@ -1074,8 +1272,8 @@ if ($sup.Status -notin 200,201) {
     Check "سداد بصفر يُرفض" ($bad.Status -eq 400) "حالة $($bad.Status)"
 
     $st1 = Api GET "/suppliers/$supId/statement" -Token $token
-    Check "الرصيد يُشتقّ ويَنقص بالسداد" ([decimal]$st1.Body.balance -eq 60) `
-        "المعروض $($st1.Body.balance) والمتوقَّع 60 (افتتاحي 100 − سداد 40)"
+    Check "الرصيد يُشتقّ ويَنقص بالسداد" ([decimal]$st1.Body.walletBalance -eq 60) `
+        "المعروض $($st1.Body.walletBalance) والمتوقَّع 60 (افتتاحي 100 − سداد 40)"
     Check "الدفعة تظهر في الكشف" (@($st1.Body.payments).Count -eq 1) `
         "عدد الدفعات $(@($st1.Body.payments).Count)"
 
@@ -1323,6 +1521,334 @@ if ($tb.Status -eq 200) {
         "مدين $($tb.Body.totalDebit) ودائن $($tb.Body.totalCredit) — الاختلال يعني قيداً دخل من خارج النظام"
 }
 
+}
+
+# -----------------------------------------------------------------------------
+Section "٣.١ الحدّ الأدنى لسعر البيع"
+
+# العطب الذي يمسكه هذا القسم: صلاحية pos.price_override تسمح بأي سعر، ولا
+# شيء كان يمنع البيع **تحت التكلفة**. ومدير المنظمة يملك الصلاحية دائماً،
+# فالحماية بالصلاحية وحدها لا تحمي شيئاً.
+#
+# والحدّ مطلق: يُختبَر هنا بحسابٍ يملك تجاوز السعر — فإن مرّ البيع تحته كان
+# الحدّ زينة.
+
+if (-not $canManageInventory) {
+    Skipped "الحدّ الأدنى للسعر" "يتطلّب إنشاء صنف"
+} else {
+    $floorProduct = Api POST "/products" -Token $token -Body @{
+        sku = "TEST-FLOOR-$stamp"; name = "صنف حدّ أدنى $stamp"
+        salePrice = 100; costPrice = 60; minSalePrice = 70
+        unitBase = "piece"; tracksStock = $true; reorderLevel = 0
+    }
+    Check "صنف بحدٍّ أدنى أُنشئ" ($floorProduct.Status -in 200,201) "حالة $($floorProduct.Status)"
+
+    if ($floorProduct.Status -in 200,201) {
+        Api POST "/products/$($floorProduct.Body.id)/stock-adjustments" -Token $token -Body @{
+            branchId = $branchId; quantityDelta = 50
+        } | Out-Null
+
+        # البيع بالسعر المعلَن يمرّ.
+        $okSale = Api POST "/invoices" -Token $token -Body @{
+            branchId = $branchId; paymentMethod = "cash"
+            lines = @(@{ productId = $floorProduct.Body.id; quantity = 1 })
+        }
+        Check "البيع بسعر الكتالوج يمرّ" ($okSale.Status -in 200,201) `
+            "حالة $($okSale.Status) — $($okSale.Body.message)"
+
+        # وفوق الحدّ يمرّ.
+        $aboveFloor = Api POST "/invoices" -Token $token -Body @{
+            branchId = $branchId; paymentMethod = "cash"
+            lines = @(@{ productId = $floorProduct.Body.id; quantity = 1; unitPrice = 80 })
+        }
+        Check "خصمٌ يبقى فوق الحدّ يمرّ" ($aboveFloor.Status -in 200,201) `
+            "حالة $($aboveFloor.Status) — $($aboveFloor.Body.message)"
+
+        # وتحته يُرفض — ولو كان الحساب يملك تجاوز السعر.
+        $belowFloor = Api POST "/invoices" -Token $token -Body @{
+            branchId = $branchId; paymentMethod = "cash"
+            lines = @(@{ productId = $floorProduct.Body.id; quantity = 1; unitPrice = 65 })
+        }
+        Check "البيع تحت الحدّ مرفوض" ($belowFloor.Status -eq 400) `
+            "حالة $($belowFloor.Status) — قبولها تعني أن الحدّ زينة"
+        Check "الرسالة تُسمّي الحدّ" ($belowFloor.Body.message -match '70') `
+            "«$($belowFloor.Body.message)» — بلا الرقم يجرّب الكاشير أرقاماً أمام زبون"
+
+        # وتحت التكلفة يُرفض من باب أولى.
+        $belowCost = Api POST "/invoices" -Token $token -Body @{
+            branchId = $branchId; paymentMethod = "cash"
+            lines = @(@{ productId = $floorProduct.Body.id; quantity = 1; unitPrice = 10 })
+        }
+        Check "البيع تحت التكلفة مرفوض" ($belowCost.Status -eq 400) "حالة $($belowCost.Status)"
+
+        # صنفٌ بلا حدّ (صفر) يبقى حرّاً — الحدّ ميزة اختيارية لا قيدٌ مفروض.
+        $freeProduct = Api POST "/products" -Token $token -Body @{
+            sku = "TEST-NOFLOOR-$stamp"; name = "صنف بلا حدّ $stamp"
+            salePrice = 100; costPrice = 60; minSalePrice = 0
+            unitBase = "piece"; tracksStock = $true; reorderLevel = 0
+        }
+        if ($freeProduct.Status -in 200,201) {
+            Api POST "/products/$($freeProduct.Body.id)/stock-adjustments" -Token $token -Body @{
+                branchId = $branchId; quantityDelta = 20
+            } | Out-Null
+            $cheap = Api POST "/invoices" -Token $token -Body @{
+                branchId = $branchId; paymentMethod = "cash"
+                lines = @(@{ productId = $freeProduct.Body.id; quantity = 1; unitPrice = 5 })
+            }
+            Check "صنف بحدٍّ صفر يبقى حرّاً" ($cheap.Status -in 200,201) `
+                "حالة $($cheap.Status) — الحدّ اختياري لا مفروض"
+        }
+    }
+}
+
+# -----------------------------------------------------------------------------
+Section "٥.٦ فاتورة المورّد ومطابقتها بالاستلام"
+
+# العطب الذي يمسكه هذا القسم: الدَّين للمورّد كان يُنشَأ من ورقة أمين المخزن
+# بتكلفة أمر الشراء — أي بالسعر المتّفق عليه لا بالسعر المُطالَب به. فإن رفع
+# المورّد سعره لم يكن ثمّة موضعٌ يُظهر الفرق: يُدفَع ما تقوله ورقته ويبقى
+# الميزان يقول رقماً آخر إلى الأبد.
+#
+# ويُختبَر الطريق كاملاً: أمر شراء ← استلام ← فاتورة بسعرٍ أعلى ← ترحيل.
+
+$siChart = Api GET "/accounting/accounts" -Token $token
+if ($siChart.Status -ne 200) {
+    Skipped "فاتورة المورّد" "وحدة accounting غير مفعّلة (حالة $($siChart.Status))"
+} elseif (-not $canManageInventory) {
+    Skipped "فاتورة المورّد" "يتطلّب إنشاء صنف ومورّد"
+} else {
+
+$siSupplier = Api POST "/suppliers" -Token $token -Body @{
+    name = "مورّد فاتورة $stamp"
+}
+$siProduct = Api POST "/products" -Token $token -Body @{
+    sku = "TEST-SI-$stamp"; name = "صنف فاتورة مورّد $stamp"
+    salePrice = 50; costPrice = 20
+    unitBase = "piece"; tracksStock = $true; reorderLevel = 0
+}
+
+if ($siSupplier.Status -notin 200,201 -or $siProduct.Status -notin 200,201) {
+    Skipped "فاتورة المورّد" "تعذّر تجهيز المورّد أو الصنف"
+} else {
+    # lines لا items، والمسار /receive لا /receipts — راجع
+    # CreatePurchaseOrderRequest و ReceivePurchaseOrderRequest.
+    $siOrder = Api POST "/purchase-orders" -Token $token -Body @{
+        branchId = $branchId; supplierId = $siSupplier.Body.id
+        lines = @(@{ productId = $siProduct.Body.id; quantity = 10; unitCost = 20 })
+    }
+    Check "أمر شراء أُنشئ" ($siOrder.Status -in 200,201) `
+        "حالة $($siOrder.Status) — $($siOrder.Body.message)"
+
+    if ($siOrder.Status -in 200,201) {
+        # الأمر يُعتمَد قبل أن يُستلَم: مسوّدة لا تُستلَم بحكم التصميم.
+        $ordered = Api POST "/purchase-orders/$($siOrder.Body.id)/order" -Token $token -Body @{}
+        Check "أمر الشراء اعتُمد" ($ordered.Status -in 200,204) "حالة $($ordered.Status)"
+
+        $siReceipt = Api POST "/purchase-orders/$($siOrder.Body.id)/receive" -Token $token -Body @{
+            supplierNoteNumber = "SN-$stamp"
+            receivedOn = (Get-Date).ToString('yyyy-MM-dd')
+            lines = @(@{ productId = $siProduct.Body.id; quantity = 10 })
+        }
+        Check "الاستلام سُجّل" ($siReceipt.Status -in 200,201,204) `
+            "حالة $($siReceipt.Status) — $($siReceipt.Body.message)"
+
+        # ── ما لم يُفوتر بعد ────────────────────────────────────────────────
+        $uninvoiced = Api GET "/supplier-invoices/uninvoiced?supplierId=$($siSupplier.Body.id)" -Token $token
+        Check "الوارد غير المُفوتر يُقرأ" ($uninvoiced.Status -eq 200) "حالة $($uninvoiced.Status)"
+
+        $line = @($uninvoiced.Body) | Select-Object -First 1
+        if (-not $line) {
+            Skipped "مطابقة الفاتورة" "لا سطر استلام غير مُفوتر — تحقّق من تسجيل الاستلام"
+        } else {
+            Check "سطر الاستلام يحمل ما وصل" ([double]$line.quantity -eq 10 -and [double]$line.unitCost -eq 20) `
+                "كمية $($line.quantity) بسعر $($line.unitCost)"
+
+            # ── فاتورة بسعرٍ أعلى: 10 × 22 = 220 مقابل 200 وصلت ─────────────
+            $siInvoice = Api POST "/supplier-invoices" -Token $token -Body @{
+                branchId = $branchId; supplierId = $siSupplier.Body.id
+                invoiceNumber = "INV-$stamp"
+                invoiceDate = (Get-Date).ToString('yyyy-MM-dd')
+                totalAmount = 220
+                lines = @(@{
+                    purchaseReceiptItemId = $line.purchaseReceiptItemId
+                    quantity = 10; unitCost = 22
+                })
+            }
+            Check "فاتورة المورّد أُنشئت مسوّدة" `
+                ($siInvoice.Status -in 200,201 -and $siInvoice.Body.status -eq 'draft') `
+                "حالة $($siInvoice.Status) — $($siInvoice.Body.message)"
+
+            if ($siInvoice.Status -in 200,201) {
+                $ml = @($siInvoice.Body.lines) | Select-Object -First 1
+                Check "المطابقة تحسب فرق السعر" ([Math]::Abs([double]$ml.unitCostVariance - 2) -lt 0.01) `
+                    "فرق الوحدة $($ml.unitCostVariance) — المتوقّع 2"
+                Check "المطابقة تحسب فرق المبلغ" ([Math]::Abs([double]$ml.amountVariance - 20) -lt 0.01) `
+                    "فرق المبلغ $($ml.amountVariance) — المتوقّع 20"
+
+                # سطرٌ فُوتر مرّة لا يُفوتر ثانية: الازدواج يُضاعف الدَّين صامتاً.
+                $dup = Api POST "/supplier-invoices" -Token $token -Body @{
+                    branchId = $branchId; supplierId = $siSupplier.Body.id
+                    invoiceNumber = "INV-DUP-$stamp"
+                    invoiceDate = (Get-Date).ToString('yyyy-MM-dd')
+                    totalAmount = 220
+                    lines = @(@{
+                        purchaseReceiptItemId = $line.purchaseReceiptItemId
+                        quantity = 10; unitCost = 22
+                    })
+                }
+                Check "تفويتر السطر مرّتين مرفوض" ($dup.Status -eq 400) `
+                    "حالة $($dup.Status) — قبولها يُضاعف الدَّين للمورّد"
+
+                # ── الترحيل ────────────────────────────────────────────────
+                $posted = Api POST "/supplier-invoices/$($siInvoice.Body.id)/post" -Token $token -Body @{}
+                Check "الفاتورة رُحّلت" ($posted.Status -eq 200 -and $posted.Body.status -eq 'posted') `
+                    "حالة $($posted.Status) — $($posted.Body.message)"
+
+                if ($posted.Status -eq 200) {
+                    $siJournal = Api GET "/accounting/journal" -Token $token
+                    $siEntry = @($siJournal.Body) | Where-Object { $_.sourceId -eq $siInvoice.Body.id } | Select-Object -First 1
+
+                    if (-not $siEntry) {
+                        Check "قيد الفاتورة موجود" $false "لم يُعثر على قيدٍ مصدره الفاتورة"
+                    } else {
+                        $d = ($siEntry.lines | Measure-Object -Property debit -Sum).Sum
+                        $c = ($siEntry.lines | Measure-Object -Property credit -Sum).Sum
+                        Check "قيد فاتورة المورّد متوازن" ([Math]::Abs($d - $c) -lt 0.01) "مدين $d ودائن $c"
+
+                        # 2104 «وردت ولم تُفوتَر» يُفرَّغ بقيمة ما وصل (200) لا
+                        # بقيمة الفاتورة — وإلا بقي فيه رصيدٌ وهمي لا يُصفَّر.
+                        $grni = $siEntry.lines | Where-Object { $_.accountCode -eq '2104' } | Select-Object -First 1
+                        Check "«وردت ولم تُفوتَر» يُفرَّغ بقيمة ما وصل" `
+                            ($grni -and [Math]::Abs([double]$grni.debit - 200) -lt 0.01) `
+                            "مدين $($grni.debit) — المتوقّع 200"
+
+                        # 2101 «الموردون» يُقيَّد بإجمالي الفاتورة لا بما وصل.
+                        $pay = $siEntry.lines | Where-Object { $_.accountCode -eq '2101' } | Select-Object -First 1
+                        Check "الدَّين للمورّد بقيمة فاتورته" `
+                            ($pay -and [Math]::Abs([double]$pay.credit - 220) -lt 0.01) `
+                            "دائن $($pay.credit) — المتوقّع 220"
+
+                        # 3103 «فروق أسعار المشتريات» يحمل الفرق ظاهراً لا مدفوناً.
+                        $var = $siEntry.lines | Where-Object { $_.accountCode -eq '3103' } | Select-Object -First 1
+                        Check "الفرق على حساب فروق الأسعار" `
+                            ($var -and [Math]::Abs([double]$var.debit - 20) -lt 0.01) `
+                            "مدين $($var.debit) — المتوقّع 20؛ غيابه يعني أن الفرق دُفن في مكانٍ ما"
+                    }
+
+                    # الترحيل مرّتين يُنشئ دَيناً مضاعفاً.
+                    $rePost = Api POST "/supplier-invoices/$($siInvoice.Body.id)/post" -Token $token -Body @{}
+                    Check "ترحيل الفاتورة مرّتين مرفوض" ($rePost.Status -eq 400) "حالة $($rePost.Status)"
+                }
+            }
+        }
+    }
+}
+
+}
+
+# -----------------------------------------------------------------------------
+Section "٦.١ الإسناد الجماعي — ما لا تعرضه الشاشة لا يُقبَل"
+
+# العطب الذي يمسكه هذا القسم: أربعة متحكّمات كانت تربط الكيان كاملاً من
+# الطلب. فمن يملك صلاحية الإدارة يرسل حقولاً لا تعرضها أي شاشة ويحرسها
+# الخادم في مسارات أخرى — ومنها بصمة الرقم السرّي.
+#
+# والعزل بين المنظمات لا يحمي من هذا: الفاعل داخل منظمته.
+
+$maName = "زبون إسناد $stamp"
+$maCustomer = Api POST "/customers" -Token $token -Body @{
+    fullName = $maName
+    accountModel = "prepaid"
+    creditLimit = 0
+    creditDays = 0
+    entitlementCeiling = 0
+    # ── ما يجب ألّا يُقبَل ──────────────────────────────────────────────
+    id = "dddddddd-dddd-dddd-dddd-dddddddddddd"
+    pinHash = '$2a$11$abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ012'
+    dailyCap = 999999
+    isDeleted = $true
+    loyaltyPoints = 5000
+}
+Check "إنشاء العميل يمرّ" ($maCustomer.Status -in 200,201) `
+    "حالة $($maCustomer.Status) — $($maCustomer.Body.message)"
+
+if ($maCustomer.Status -in 200,201) {
+    Check "المعرّف المُرسَل يُتجاهَل" `
+        ($maCustomer.Body.id -ne 'dddddddd-dddd-dddd-dddd-dddddddddddd') `
+        "المعرّف $($maCustomer.Body.id) — قبولُه يجعل العميل يختار مفاتيح الجدول"
+
+    # الحقل الأخطر: بصمةٌ يعرف صاحبها رقمها تتجاوز مسار إصدار البطاقة كلّه.
+    Check "بصمة الرقم السرّي لا تُقبَل من الطلب" ($maCustomer.Body.hasPin -ne $true) `
+        "hasPin = $($maCustomer.Body.hasPin) — قبولها يعني رقماً سرّياً يضعه المُرسِل"
+
+    Check "السقف اليومي لا يتجاوز سقف المنظمة" `
+        ([double]$maCustomer.Body.effectiveDailyCap -lt 999999) `
+        "السقف الفعّال $($maCustomer.Body.effectiveDailyCap)"
+
+    # isDeleted = true كان سيُنشئ زبوناً محذوفاً لا يظهر ولا يُحذَف.
+    $maRead = Api GET "/customers/$($maCustomer.Body.id)" -Token $token
+    Check "الزبون لم يُولَد محذوفاً" ($maRead.Status -eq 200) "حالة $($maRead.Status)"
+}
+
+$maProduct = Api POST "/products" -Token $token -Body @{
+    sku = "TEST-MA-$stamp"; name = "صنف إسناد $stamp"
+    salePrice = 10; costPrice = 5; minSalePrice = 0
+    unitBase = "piece"; tracksStock = $true; reorderLevel = 0
+    unitConversionFactor = 1
+    # ── ما يجب ألّا يُقبَل ──────────────────────────────────────────────
+    id = "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee"
+    isDeleted = $true
+    lastCountedAt = "2030-01-01T00:00:00"
+}
+Check "إنشاء الصنف يمرّ" ($maProduct.Status -in 200,201) "حالة $($maProduct.Status)"
+
+if ($maProduct.Status -in 200,201) {
+    Check "معرّف الصنف المُرسَل يُتجاهَل" `
+        ($maProduct.Body.id -ne 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee') `
+        "المعرّف $($maProduct.Body.id)"
+    Check "الصنف لم يُولَد محذوفاً" ($maProduct.Body.isDeleted -ne $true) `
+        "isDeleted = $($maProduct.Body.isDeleted)"
+    # تاريخ جردٍ مزوَّر يُخفي الصنف من قائمة «لم يُجرَد منذ».
+    Check "تاريخ آخر جرد لا يُقبَل من الطلب" `
+        ($null -eq $maProduct.Body.lastCountedAt) `
+        "lastCountedAt = $($maProduct.Body.lastCountedAt)"
+}
+
+# -----------------------------------------------------------------------------
+Section "٦.٢ الإنشاء السريع — حقولٌ ناقصة تصل بافتراضاتها"
+
+# العطب الذي يمسكه هذا القسم: نقطة البيع تُنشئ زبوناً بالاسم والهاتف
+# وحدهما، وشاشة المشتريات تُنشئ صنفاً بستّة حقول وهي أمام المورّد.
+#
+# وحين استُبدل ربطُ الكيان بعقدٍ صريح كاد الناقص يصل **صفراً** بدل افتراض
+# الكيان: accountModel فارغاً يُرفَض الطلب كلّه، و unitConversionFactor
+# صفراً يجعل كل تحويل وحدةٍ قسمةً على صفر.
+
+$quickCustomer = Api POST "/customers" -Token $token -Body @{
+    fullName = "زبون سريع $stamp"
+}
+Check "زبون سريع بالاسم وحده يمرّ" ($quickCustomer.Status -in 200,201) `
+    "حالة $($quickCustomer.Status) — $($quickCustomer.Body.message)"
+if ($quickCustomer.Status -in 200,201) {
+    Check "نموذج حسابه «مدفوع مسبقاً» افتراضاً" `
+        ($quickCustomer.Body.accountModel -eq 'prepaid') `
+        "النموذج $($quickCustomer.Body.accountModel)"
+}
+
+$quickProduct = Api POST "/products" -Token $token -Body @{
+    name = "صنف سريع $stamp"
+    sku = "TEST-QUICK-$stamp"
+    costPrice = 5; salePrice = 10
+    unitBase = "piece"; tracksStock = $true; reorderLevel = 0
+}
+Check "صنف سريع بستّة حقول يمرّ" ($quickProduct.Status -in 200,201) `
+    "حالة $($quickProduct.Status) — $($quickProduct.Body.message)"
+if ($quickProduct.Status -in 200,201) {
+    Check "معامل تحويل الوحدة واحدٌ لا صفر" `
+        ([double]$quickProduct.Body.unitConversionFactor -eq 1) `
+        "المعامل $($quickProduct.Body.unitConversionFactor) — الصفر يجعل كل تحويل قسمةً على صفر"
+    Check "يتتبّع المخزون افتراضاً" ($quickProduct.Body.tracksStock -eq $true) `
+        "tracksStock = $($quickProduct.Body.tracksStock)"
 }
 
 # -----------------------------------------------------------------------------

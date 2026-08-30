@@ -5,7 +5,7 @@ class AppConstants {
   ///
   /// «احتياطي» لأن كل منظمة تعرض اسمها هي (White-Labeling، راجع
   /// branding_provider). وهذا ما يظهر قبل تحميل هويّتها وفي شاشة الدخول.
-  static const String appNameFallback = 'Droop';
+  static const String appNameFallback = 'إتقان ERP';
   static const Locale locale = Locale('ar');
   static const TextDirection direction = TextDirection.rtl;
 

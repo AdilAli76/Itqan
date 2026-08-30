@@ -1,6 +1,6 @@
 // ignore_for_file: avoid_print
 //
-// ux_audit.dart — مدقّق جماليات وتجربة المستخدم لنظام Kinetic Enterprise ERP
+// ux_audit.dart — مدقّق جماليات وتجربة المستخدم لنظام إتقان ERP
 //
 // الغرض: قياس آلي — لا انطباعي — لمدى استيفاء واجهة النظام لشروط منظومة ERP
 // حديثة: هوية بصرية متّسقة، تخطيط مستجيب، حالات واجهة كاملة، سهولة استخدام،
@@ -1269,7 +1269,7 @@ void _printReport(
 ) {
   final line = '=' * 74;
   print('\n$line');
-  print('  تدقيق جماليات وتجربة المستخدم — Kinetic Enterprise ERP   (v$kVersion)');
+  print('  تدقيق جماليات وتجربة المستخدم — إتقان ERP   (v$kVersion)');
   print('  $fileCount ملف Dart · ${results.length} قاعدة · '
       '${DateTime.now().toString().split('.').first}');
   print(line);
