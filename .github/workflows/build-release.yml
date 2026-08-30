@@ -24,6 +24,13 @@ jobs:
 
   build:
     needs: verify
+    # صلاحية الكتابة صراحةً — بلا هذا يردّ إنشاءُ الإصدار 403.
+    #
+    # رمز الوظيفة يقرأ فقط افتراضاً على هذا المستودع، وهو الافتراض السليم:
+    # سيرٌ لا يكتب لا يُعطى قلماً. لكن هذا السير يكتب شيئاً واحداً — إصدار
+    # ومرفقه — فتُطلَب الصلاحية هنا لا تُفتَح للمستودع كلّه.
+    permissions:
+      contents: write
     # ويندوز إلزامي لا تفضيل: الخادم يُنشر win-x64، والنشر المستقلّ عن
     # المنصّة يُنتج ملفات لا تعمل على IIS كما هو مضبوط.
     runs-on: windows-latest
@@ -72,15 +79,10 @@ jobs:
           "PKG=$($pkg.Name)" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
           "SHA=$h"           | Out-File $env:GITHUB_ENV -Append -Encoding utf8
 
-      - name: إرفاق بالإصدار
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            kinetic_pkg_*.zip
-            kinetic_pkg_*.zip.sha256
-
+      # الأثر يُحفظ قبل الإرفاق وبـalways: الحزمة بُنيت في عشرين دقيقة،
+      # ولا يصحّ أن تضيع لأن خطوةً بعدها ردّت 403.
       - name: حفظ الحزمة كأثر
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: kinetic_pkg
@@ -88,6 +90,14 @@ jobs:
             kinetic_pkg_*.zip
             kinetic_pkg_*.zip.sha256
           retention-days: 30
+
+      - name: إرفاق بالإصدار
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            kinetic_pkg_*.zip
+            kinetic_pkg_*.zip.sha256
 
       # ⚠ لا علامة هروب (`) داخل نصٍّ مزدوج القوسين في PowerShell.
       #

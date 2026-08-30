@@ -39,6 +39,9 @@ concurrency:
 jobs:
   deploy:
     runs-on: [self-hosted, windows, kinetic]
+    # يقرأ مرفَق الإصدار ولا يكتب شيئاً على GitHub.
+    permissions:
+      contents: read
     timeout-minutes: 30
     environment: ${{ inputs.target }}
 
