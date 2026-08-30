@@ -1,0 +1,14 @@
+{
+  "template": {
+    "paper": "roll80",
+    "showLogo": true,
+    "showTaxNumber": true,
+    "showCommercialRegistry": false,
+    "showQr": true,
+    "headerText": "طرابلس — شارع الجمهورية · 0910000000",
+    "footerText": "الاسترجاع خلال ٣ أيام بالفاتورة"
+  },
+  "taxNumber": "1120459873",
+  "commercialRegistry": "CR-2019-4471",
+  "logoUrl": null
+}

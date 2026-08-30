@@ -1,0 +1,37 @@
+{
+  "items": [
+    {
+      "id": "0e8f4702-e5f7-41ca-8354-845adb8b298e",
+      "name": "أموكسيسيلين 250 مجم شراب",
+      "activeIngredient": "Amoxicillin",
+      "strength": "250 مجم/5 مل",
+      "form": "شراب",
+      "indications": "التهابات بكتيرية في الجهاز التنفسي والأذن والمسالك البولية.",
+      "contraindications": "حساسية البنسلين أو السيفالوسبورين.",
+      "cautions": "يُكمَل الكورس كاملاً. الجرعة حسب وزن الطفل.",
+      "sideEffects": "إسهال، غثيان، طفح جلدي.",
+      "requiresPrescription": true,
+      "isDeleted": false,
+      "createdAt": "2026-08-24T10:13:51.3464992",
+      "updatedAt": "2026-08-24T10:13:51.3464992"
+    },
+    {
+      "id": "b6550a88-6260-4155-91da-2687c4a08578",
+      "name": "باراسيتامول 500 مجم",
+      "activeIngredient": "Paracetamol",
+      "strength": "500 مجم",
+      "form": "أقراص",
+      "indications": "خافض للحرارة ومسكّن للألم الخفيف والمتوسط.",
+      "contraindications": "فرط الحساسية للمادة. القصور الكبدي الشديد.",
+      "cautions": "يُتجنّب مع كحوليات أو قصور كلوي/كبدي. لا يُتجاوز 4 جم يومياً.",
+      "sideEffects": "غثيان، طفح جلدي، وسميّة كبدية عند الجرعات العالية.",
+      "requiresPrescription": false,
+      "isDeleted": false,
+      "createdAt": "2026-08-24T10:13:51.3464992",
+      "updatedAt": "2026-08-24T10:13:51.3464992"
+    }
+  ],
+  "totalCount": 2,
+  "page": 1,
+  "pageSize": 50
+}

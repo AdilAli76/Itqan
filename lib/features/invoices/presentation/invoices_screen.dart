@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../../../core/network/api_client.dart';
-import '../../../core/printing/print_settings_provider.dart';
+import '../../../core/printing/receipt_template.dart';
 import '../../../core/printing/receipt_printer.dart';
 import '../../../core/responsive/adaptive_scaffold.dart';
 import '../../../core/theme/app_colors.dart';
@@ -403,12 +403,14 @@ class _InvoiceDetailDialogState extends ConsumerState<_InvoiceDetailDialog> {
   Future<void> _printReceipt(Map<String, dynamic> invoice) async {
     final branding = ref.read(brandingProvider).valueOrNull;
     try {
-      final widthMm = await ref.read(receiptWidthMmProvider.future);
+      final template = await ref.read(receiptTemplateProvider.future);
+      final logoBytes = await ref.read(receiptLogoProvider.future);
       await printInvoiceReceipt(
         invoice: invoice,
-        orgName: branding?.displayName ?? 'Kinetic Enterprise',
+        orgName: branding?.displayName ?? 'إتقان ERP',
         currencySymbol: branding?.currencySymbol ?? 'د.ل',
-        widthMm: widthMm,
+        template: template,
+        logoBytes: logoBytes,
       );
     } catch (_) {
       if (mounted) {

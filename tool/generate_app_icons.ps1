@@ -1,167 +1,183 @@
-﻿# =============================================================================
-#  مولّد أيقونات Kinetic ERP — يُنتج كل مقاسات أندرويد المطلوبة كصور PNG حقيقية.
+﻿#  =============================================================================
+#   مولّد أيقونات إتقان ERP — يشتقّ كل المقاسات من شعار المنتج الواحد.
 #
-#  الهوية: "Kinetic Ink & Amber" — نفس لوحة lib/core/theme/app_colors.dart
-#  الشكل:  عقدة مركزية + أربع عقد فرعية موصولة بها = "إدارة موحّدة لكل فروعك
-#          من لوحة تحكم واحدة" (نفس رسالة شاشة الدخول ونفس Icons.hub_outlined).
+#   كان يرسم أيقونةً تركيبية بالكود (عقدة مركزية وأربع فروع) قبل أن يوجد
+#   شعار. فلمّا صار للمنتج شعار حقيقي بقيت الأيقونات القديمة في مكانها،
+#   وظهر شعار فلاتر الافتراضي في تبويب المتصفّح — لأن web/ لم يكن في نطاق
+#   المولّد أصلاً.
 #
-#  التشغيل:  powershell -ExecutionPolicy Bypass -File tool\generate_app_icons.ps1
-#  الأيقونات مولَّدة ومرفوعة في المستودع؛ أعِد تشغيل هذا الملف فقط عند تغيير
-#  الهوية البصرية.
-# =============================================================================
+#   والمصدر الآن ملفٌّ واحد: assets/branding/itqan_logo.png. تغييرُه وإعادة
+#   تشغيل هذا السكربت يُحدّث الهوية في كل مكان دفعةً واحدة — بدل تحديث
+#   أحدها ونسيان البقية، وهو ما وقع فعلاً.
+#
+#   التشغيل:
+#       powershell -ExecutionPolicy Bypass -File tool\generate_app_icons.ps1
+#  =============================================================================
+
+[CmdletBinding()]
+param(
+    [string]$Source,
+    <#
+      منطقة الشعار داخل الصورة المصدر: "س،ص،الضلع".
+
+      ولماذا قصٌّ لا استعمالُ الصورة كما هي: ملف الهوية بطاقةُ عرضٍ تحوي
+      الدرعَ واسمَ المنتج ومحاكاةَ أيقونة. واستعمالها كاملةً في أيقونة
+      32 بكسل يُنتج لطخةً لا يُقرأ منها شيء — وهو ما ظهر أوّل مرّة.
+      الأيقونة هي **الدرع وحده**.
+    #>
+    [string]$LogoCrop = '295,212,440'
+)
 
 Add-Type -AssemblyName System.Drawing
 
 $ErrorActionPreference = 'Stop'
-$root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$res  = Join-Path $root 'android\app\src\main\res'
+$OutputEncoding = [Console]::OutputEncoding = [Text.Encoding]::UTF8
 
-# ---- لوحة الألوان (مطابقة لـ AppColors) ----
-$inkDark   = [System.Drawing.Color]::FromArgb(255, 0x0B, 0x25, 0x40)  # primary
-$inkLight  = [System.Drawing.Color]::FromArgb(255, 0x12, 0x35, 0x54)  # primaryDark
-$amber     = [System.Drawing.Color]::FromArgb(255, 0xC8, 0x95, 0x2B)  # secondary
-$amberSoft = [System.Drawing.Color]::FromArgb(255, 0xF3, 0xE3, 0xC2)  # secondaryLight
-$white     = [System.Drawing.Color]::White
+$root = Split-Path -Parent $PSScriptRoot
+if (-not $Source) { $Source = Join-Path $root 'assets\branding\itqan_logo.png' }
 
-# مسار مستطيل بزوايا دائرية
-function Get-RoundedPath([single]$x, [single]$y, [single]$w, [single]$h, [single]$r) {
-    $p = New-Object System.Drawing.Drawing2D.GraphicsPath
-    $d = $r * 2
-    $p.AddArc($x, $y, $d, $d, 180, 90)
-    $p.AddArc($x + $w - $d, $y, $d, $d, 270, 90)
-    $p.AddArc($x + $w - $d, $y + $h - $d, $d, $d, 0, 90)
-    $p.AddArc($x, $y + $h - $d, $d, $d, 90, 90)
-    $p.CloseFigure()
-    return $p
+if (-not (Test-Path $Source)) {
+    throw "لا شعار في $Source — ضع الشعار هناك أو مرّر -Source."
 }
 
-# رسم الشعار: box = طول ضلع المربع المخصّص للشعار، (cx,cy) مركزه.
-# كل الأبعاد نسبية إلى box حتى يبقى الشعار متطابقاً في كل المقاسات.
-function Draw-Glyph($g, [single]$cx, [single]$cy, [single]$box, $nodeColor, $linkColor) {
-    # المسافة أكبر من مجموع نصفي القطرين بفارق واضح، وإلا اختفت خطوط الوصل
-    # تحت العقد نفسها ولم يبقَ من معنى "الربط" شيء.
-    $dist   = $box * 0.355   # مسافة العقدة الفرعية من المركز
-    $rNode  = $box * 0.098   # نصف قطر العقدة الفرعية
-    $rHub   = $box * 0.155   # نصف قطر العقدة المركزية
-    $stroke = $box * 0.058   # سماكة خط الوصل
+function Step($t) { Write-Host "`n$t" -ForegroundColor Cyan }
+function Ok($t)   { Write-Host "    $t" -ForegroundColor Green }
 
-    $pen = New-Object System.Drawing.Pen($linkColor, $stroke)
-    $pen.StartCap = [System.Drawing.Drawing2D.LineCap]::Round
-    $pen.EndCap   = [System.Drawing.Drawing2D.LineCap]::Round
+# لون الخلفية للأيقونات المعتِمة (maskable وأندرويد): يُقرأ من بكسل الزاوية
+# في الشعار نفسه لا يُكتب ثابتاً — شعارٌ يُستبدل بخلفية أخرى يُنتج حينها
+# إطاراً بلون غريب حوله.
+$original = [System.Drawing.Image]::FromFile($Source)
+$probe = New-Object System.Drawing.Bitmap($original)
+$background = $probe.GetPixel(0, 0)
+$probe.Dispose()
+Ok "المصدر: $Source ($($original.Width)×$($original.Height))"
 
-    # أربع عقد على الأقطار (45°, 135°, 225°, 315°)
-    $angles = @(45, 135, 225, 315)
-    $pts = @()
-    foreach ($a in $angles) {
-        $rad = $a * [Math]::PI / 180.0
-        $pts += ,@([single]($cx + $dist * [Math]::Cos($rad)), [single]($cy + $dist * [Math]::Sin($rad)))
-    }
+# اقتصاص الدرع مرّةً واحدة — كل المقاسات تُشتقّ منه.
+$parts = $LogoCrop -split ','
+if ($parts.Count -ne 3) { throw "صيغة LogoCrop يجب أن تكون 'س،ص،الضلع'" }
+$cropX = [int]$parts[0]; $cropY = [int]$parts[1]; $cropSide = [int]$parts[2]
 
-    # الخطوط أولاً ثم العقد فوقها، حتى تُخفي العقد نهايات الخطوط
-    foreach ($p in $pts) {
-        $g.DrawLine($pen, $cx, $cy, $p[0], $p[1])
-    }
+$sourceImage = New-Object System.Drawing.Bitmap($cropSide, $cropSide)
+$cg = [System.Drawing.Graphics]::FromImage($sourceImage)
+$cg.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+$cg.DrawImage($original,
+    (New-Object System.Drawing.Rectangle(0, 0, $cropSide, $cropSide)),
+    (New-Object System.Drawing.Rectangle($cropX, $cropY, $cropSide, $cropSide)),
+    [System.Drawing.GraphicsUnit]::Pixel)
+$cg.Dispose()
+$original.Dispose()
+Ok "اقتُصّ الشعار: ($cropX، $cropY) بضلع $cropSide"
+Ok ("لون الخلفية المستنتَج: #{0:X2}{1:X2}{2:X2}" -f $background.R, $background.G, $background.B)
 
-    $brushNode = New-Object System.Drawing.SolidBrush($nodeColor)
-    foreach ($p in $pts) {
-        $g.FillEllipse($brushNode, $p[0] - $rNode, $p[1] - $rNode, $rNode * 2, $rNode * 2)
-    }
-    $g.FillEllipse($brushNode, $cx - $rHub, $cy - $rHub, $rHub * 2, $rHub * 2)
+<#
+.SYNOPSIS
+    يرسم الشعار في مربّع بالمقاس المطلوب.
 
-    $pen.Dispose()
-    $brushNode.Dispose()
-}
+.PARAMETER Inset
+    نسبة الهامش حول الشعار (0 = يملأ المربّع).
+    أيقونات maskable في أندرويد تُقصّ دائرياً، فشعارٌ يملأ المربّع تُقصّ
+    أطرافه. و20٪ هامش هو ما توصي به مواصفة المنطقة الآمنة.
 
-# mode: legacy | round | foreground | monochrome | store | splash
-function New-IconFile([int]$size, [string]$mode, [string]$outPath) {
-    $bmp = New-Object System.Drawing.Bitmap($size, $size, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+.PARAMETER Transparent
+    خلفية شفّافة بدل لون الشعار — للأيقونات التي يضع النظام خلفيتها.
+#>
+function Save-Icon([string]$Path, [int]$Size, [double]$Inset = 0, [switch]$Transparent) {
+    $bmp = New-Object System.Drawing.Bitmap($Size, $Size)
     $g = [System.Drawing.Graphics]::FromImage($bmp)
-    $g.SmoothingMode     = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
-    $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
-    $g.PixelOffsetMode   = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
-    $g.Clear([System.Drawing.Color]::Transparent)
+    try {
+        $g.SmoothingMode     = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
+        # HighQualityBicubic لا Default: تصغير 1024 إلى 32 بالافتراضي يُنتج
+        # حوافّ مسنّنة تظهر بوضوح في تبويب المتصفّح.
+        $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+        $g.PixelOffsetMode   = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
 
-    $s = [single]$size
-    $glyphBox = $s * 0.74
-    $nodeColor = $amber
-    $linkColor = $amberSoft
-
-    if ($mode -eq 'legacy' -or $mode -eq 'round' -or $mode -eq 'store') {
-        # خلفية متدرّجة قطرياً بين درجتي الكحلي
-        $rect = New-Object System.Drawing.RectangleF(0, 0, $s, $s)
-        $grad = New-Object System.Drawing.Drawing2D.LinearGradientBrush($rect, $inkLight, $inkDark, 45.0)
-
-        if ($mode -eq 'round') {
-            $g.FillEllipse($grad, 0, 0, $s - 1, $s - 1)
-        } elseif ($mode -eq 'store') {
-            # متجر Google Play يطبّق قناعه الخاص — الصورة تُسلَّم مربعة كاملة
-            $g.FillRectangle($grad, 0, 0, $s, $s)
-        } else {
-            $inset = $s * 0.055
-            $path = Get-RoundedPath $inset $inset ($s - $inset * 2) ($s - $inset * 2) ($s * 0.215)
-            $g.FillPath($grad, $path)
-            $path.Dispose()
+        if (-not $Transparent) {
+            $brush = New-Object System.Drawing.SolidBrush($background)
+            $g.FillRectangle($brush, 0, 0, $Size, $Size)
+            $brush.Dispose()
         }
-        $grad.Dispose()
+
+        $margin = [int]([Math]::Round($Size * $Inset / 2))
+        $inner = $Size - ($margin * 2)
+        $g.DrawImage($sourceImage, $margin, $margin, $inner, $inner)
+
+        $dir = Split-Path -Parent $Path
+        if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Force $dir | Out-Null }
+        $bmp.Save($Path, [System.Drawing.Imaging.ImageFormat]::Png)
     }
-
-    if ($mode -eq 'splash') {
-        # شعار شاشة الإقلاع: بلا خلفية (الخلفية الكحلية تأتي من الـ layer-list
-        # أو من windowSplashScreenBackground)، والشعار يشغل القماش كاملاً.
-        $glyphBox = $s * 0.94
+    finally {
+        $g.Dispose()
+        $bmp.Dispose()
     }
-
-    if ($mode -eq 'foreground' -or $mode -eq 'monochrome') {
-        # الأيقونة التكيّفية: القماش 108 وحدة والمرئي منه 72 فقط، فيُصغَّر
-        # الشعار إلى ما يعادل حجمه في الأيقونة التقليدية داخل المنطقة الآمنة.
-        $glyphBox = $s * 0.50
-        if ($mode -eq 'monochrome') {
-            # أيقونات أندرويد 13 المموّهة: النظام يلوّنها بنفسه، فتُرسَم بالأبيض
-            $nodeColor = $white
-            $linkColor = $white
-        }
-    }
-
-    Draw-Glyph $g ($s / 2.0) ($s / 2.0) $glyphBox $nodeColor $linkColor
-
-    $dir = Split-Path -Parent $outPath
-    if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Force $dir | Out-Null }
-    $bmp.Save($outPath, [System.Drawing.Imaging.ImageFormat]::Png)
-    $g.Dispose()
-    $bmp.Dispose()
-    Write-Output ("  {0,-52} {1}x{1}" -f (Resolve-Path -Relative $outPath), $size)
 }
 
-# ---- كثافات أندرويد: التقليدية 48dp والتكيّفية 108dp ----
-$densities = @(
-    @{ Name = 'mdpi';    Legacy = 48;  Adaptive = 108; Splash = 120 },
-    @{ Name = 'hdpi';    Legacy = 72;  Adaptive = 162; Splash = 180 },
-    @{ Name = 'xhdpi';   Legacy = 96;  Adaptive = 216; Splash = 240 },
-    @{ Name = 'xxhdpi';  Legacy = 144; Adaptive = 324; Splash = 360 },
-    @{ Name = 'xxxhdpi'; Legacy = 192; Adaptive = 432; Splash = 480 }
-)
+# ── الويب ────────────────────────────────────────────────────────────────
+Step '[1] أيقونات الويب'
 
-Write-Output 'أيقونات التشغيل (mipmap):'
-foreach ($d in $densities) {
-    $dir = Join-Path $res ('mipmap-' + $d.Name)
-    New-IconFile $d.Legacy   'legacy'     (Join-Path $dir 'ic_launcher.png')
-    New-IconFile $d.Legacy   'round'      (Join-Path $dir 'ic_launcher_round.png')
-    New-IconFile $d.Adaptive 'foreground' (Join-Path $dir 'ic_launcher_foreground.png')
-    New-IconFile $d.Adaptive 'monochrome' (Join-Path $dir 'ic_launcher_monochrome.png')
+$web = Join-Path $root 'web'
+Save-Icon (Join-Path $web 'favicon.png') 32
+Ok 'favicon.png (32)'
+
+Save-Icon (Join-Path $web 'icons\Icon-192.png') 192
+Save-Icon (Join-Path $web 'icons\Icon-512.png') 512
+Ok 'Icon-192.png · Icon-512.png'
+
+# maskable بهامش: نظام التشغيل يقصّها دائرياً عند التثبيت على الشاشة.
+Save-Icon (Join-Path $web 'icons\Icon-maskable-192.png') 192 -Inset 0.20
+Save-Icon (Join-Path $web 'icons\Icon-maskable-512.png') 512 -Inset 0.20
+Ok 'Icon-maskable-192.png · Icon-maskable-512.png (بهامش 20٪)'
+
+# ── أندرويد ──────────────────────────────────────────────────────────────
+Step '[2] أيقونات أندرويد'
+
+$res = Join-Path $root 'android\app\src\main\res'
+$launcherSizes = @{
+    'mipmap-mdpi'    = 48
+    'mipmap-hdpi'    = 72
+    'mipmap-xhdpi'   = 96
+    'mipmap-xxhdpi'  = 144
+    'mipmap-xxxhdpi' = 192
+}
+foreach ($entry in $launcherSizes.GetEnumerator() | Sort-Object Value) {
+    Save-Icon (Join-Path $res "$($entry.Key)\ic_launcher.png") $entry.Value
+}
+Ok "ic_launcher — $($launcherSizes.Count) كثافات"
+
+# شعار شاشة البدء بخلفية شفّافة: الخلفية يحدّدها launch_background.xml،
+# ورسمُها هنا يُنتج مربّعاً ظاهراً فوقها.
+$splashSizes = @{
+    'drawable-mdpi'    = 120
+    'drawable-hdpi'    = 180
+    'drawable-xhdpi'   = 240
+    'drawable-xxhdpi'  = 360
+    'drawable-xxxhdpi' = 480
+}
+foreach ($entry in $splashSizes.GetEnumerator() | Sort-Object Value) {
+    Save-Icon (Join-Path $res "$($entry.Key)\splash_logo.png") $entry.Value -Transparent
+}
+Ok "splash_logo — $($splashSizes.Count) كثافات (خلفية شفّافة)"
+
+# ── ويندوز ───────────────────────────────────────────────────────────────
+Step '[3] أيقونة ويندوز'
+
+$icoPath = Join-Path $root 'windows\runner\resources\app_icon.ico'
+if (Test-Path (Split-Path -Parent $icoPath)) {
+    # ICO متعدّد المقاسات يحتاج مكتبة خارجية؛ و256 وحده يكفي ويندوز 10/11
+    # فهو يُصغّره عند الحاجة.
+    $tmp = Join-Path $env:TEMP 'itqan_icon_256.png'
+    Save-Icon $tmp 256
+
+    $bmp = [System.Drawing.Bitmap]::FromFile($tmp)
+    $icon = [System.Drawing.Icon]::FromHandle($bmp.GetHicon())
+    $fs = [System.IO.File]::Create($icoPath)
+    try { $icon.Save($fs) } finally { $fs.Dispose(); $icon.Dispose(); $bmp.Dispose() }
+    Remove-Item $tmp -Force -ErrorAction SilentlyContinue
+    Ok 'app_icon.ico (256)'
+} else {
+    Write-Host '    لا مجلد windows\runner\resources — تُخطّى' -ForegroundColor DarkGray
 }
 
-Write-Output 'شعار شاشة الإقلاع (drawable):'
-foreach ($d in $densities) {
-    $dir = Join-Path $res ('drawable-' + $d.Name)
-    New-IconFile $d.Splash 'splash' (Join-Path $dir 'splash_logo.png')
-}
+$sourceImage.Dispose()
 
-# الأصل وأيقونة المتجر خارج assets/ عن قصد: مجلد assets/icons مُعلَن في
-# pubspec.yaml، فأي ملف فيه يُحزَم داخل كل APK — وهذان الملفان للتصميم
-# والنشر فقط ولا يقرأهما التطبيق أبداً.
-Write-Output 'الأصل عالي الدقة وأيقونة المتجر:'
-$brand = Join-Path $root 'docs\branding'
-New-IconFile 1024 'legacy' (Join-Path $brand 'app_icon_1024.png')
-New-IconFile 512  'store'  (Join-Path $brand 'play_store_512.png')
-
-Write-Output 'تم.'
+Write-Host "`nتمّت الأيقونات. أعِد بناء الويب والأندرويد لتظهر." -ForegroundColor Green
+Write-Host ""

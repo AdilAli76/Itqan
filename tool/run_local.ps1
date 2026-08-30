@@ -52,6 +52,18 @@ function Invoke-Sql {
     $conn.Open()
     try {
         $text = if ($File) { Get-Content -LiteralPath $File -Raw -Encoding UTF8 } else { $Query }
+
+        # ملف المخطط مكتوب ليُنفَّذ وحده على سيرفر إنتاج (راجع DEPLOYMENT.md §ب)
+        # فيحمل اسم القاعدة مكتوباً فيه: CREATE DATABASE ثم USE ثم ALTER DATABASE.
+        # تنفيذه كما هو من هنا كان يُبطل معنى -Database تماماً: تُنشأ قاعدة
+        # التجربة فارغة، ثم يقفز المخطط إلى KineticEnterprise فيكتب كل الجداول
+        # فيها — أي في قاعدة التطوير الحقيقية — ويغيّر مستوى توافقها أيضاً.
+        # لذا تُعاد الأسطر الثلاثة إلى القاعدة المطلوبة هنا فقط، بلا تعديل
+        # الملف الذي يعتمد عليه النشر.
+        $text = [regex]::Replace($text, '(?im)^\s*CREATE\s+DATABASE\s+KineticEnterprise\s*;\s*$', '')
+        $text = [regex]::Replace($text, '(?im)^\s*USE\s+KineticEnterprise\s*;\s*$', "USE [$Db];")
+        $text = [regex]::Replace($text, '(?im)^\s*ALTER\s+DATABASE\s+KineticEnterprise\s+', "ALTER DATABASE [$Db] ")
+
         # SqlClient لا يفهم GO — هو فاصل دفعات في أدوات مايكروسوفت لا أمر SQL.
         # تقسيم النص عليه هو ما يجعل ملف المخطط ينفَّذ كما ينفَّذ في SSMS.
         $batches = [regex]::Split($text, '(?im)^\s*GO\s*$')

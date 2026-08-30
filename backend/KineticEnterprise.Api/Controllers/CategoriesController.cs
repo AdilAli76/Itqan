@@ -1,4 +1,4 @@
-using System.IdentityModel.Tokens.Jwt;
+﻿using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -14,6 +14,16 @@ namespace KineticEnterprise.Api.Controllers;
 /// DATABASE_TABLES_GUIDE.md §5.2) — ليس جدولاً مالياً/مخزونياً بحد ذاته،
 /// فالحذف الفعلي مقبول هنا، ويُمنع فقط إن كان صنف ما لا يزال مرتبطاً به.
 /// </summary>
+[RequireModule("inventory")]
+
+/// <summary>
+/// ما يُقبَل عند إنشاء تصنيف أو تعديله — الاسم وأبوه لا أكثر.
+///
+/// <para>كان الكيان يُربَط كاملاً فيقبل <c>id</c> من الطلب. راجع
+/// <c>SaveCustomerRequest</c> للمبدأ نفسه.</para>
+/// </summary>
+public record SaveCategoryRequest(string Name, Guid? ParentId);
+
 [ApiController]
 [Route("api/categories")]
 [Authorize]
@@ -30,9 +40,17 @@ public class CategoriesController : ControllerBase
 
     [HttpPost]
     [RequirePermission("categories.manage")]
-    public async Task<ActionResult<ProductCategory>> Create(ProductCategory category)
+    public async Task<ActionResult<ProductCategory>> Create(SaveCategoryRequest request)
     {
-        category.OrganizationId = Guid.Parse(User.FindFirstValue("organization_id")!);
+        if (string.IsNullOrWhiteSpace(request.Name))
+            return BadRequest(new { message = "اسم التصنيف إلزامي" });
+
+        var category = new ProductCategory
+        {
+            OrganizationId = Guid.Parse(User.FindFirstValue("organization_id")!),
+            Name = request.Name.Trim(),
+            ParentId = request.ParentId,
+        };
         _db.ProductCategories.Add(category);
         await _db.SaveChangesAsync();
         return CreatedAtAction(nameof(GetAll), new { }, category);
@@ -40,8 +58,11 @@ public class CategoriesController : ControllerBase
 
     [HttpPut("{id:guid}")]
     [RequirePermission("categories.manage")]
-    public async Task<IActionResult> Update(Guid id, ProductCategory update)
+    public async Task<IActionResult> Update(Guid id, SaveCategoryRequest update)
     {
+        if (string.IsNullOrWhiteSpace(update.Name))
+            return BadRequest(new { message = "اسم التصنيف إلزامي" });
+
         var category = await _db.ProductCategories.FindAsync(id);
         if (category is null) return NotFound();
 

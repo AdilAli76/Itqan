@@ -1,7 +1,13 @@
 import 'package:fl_chart/fl_chart.dart';
+import '../../../core/printing/report_printer.dart';
+import '../../../core/theme/branding_provider.dart';
+import '../../../core/time/app_clock.dart';
+import 'report_card.dart';
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
+import '../../../core/network/api_client.dart';
 import '../../../core/responsive/adaptive_scaffold.dart';
 import '../../../core/responsive/breakpoints.dart';
 import '../../../core/theme/app_colors.dart';
@@ -12,6 +18,7 @@ import '../../../shared/widgets/stat_card.dart';
 import '../data/reports_providers.dart';
 import '../../../shared/widgets/skeleton.dart';
 import '../../../core/auth/permissions.dart';
+import '../../../shared/widgets/app_surface.dart';
 
 // ux-audit: ignore UX-03 — صفوف التقارير ناتج تجميع (GROUP BY) لا سجلات
 // خام: عددها محكوم بعدد الفئات أو الفروع أو الأيام في الفترة المختارة.
@@ -65,17 +72,163 @@ class ReportsScreen extends ConsumerWidget {
                 .toList(),
           ),
           const SizedBox(height: 20),
-          Text('المبيعات', style: AppTextStyles.headlineMd()),
-          const SizedBox(height: 12),
-          const _SalesSection(),
-          const SizedBox(height: 32),
-          Text('المخزون', style: AppTextStyles.headlineMd()),
-          const SizedBox(height: 12),
-          const _InventorySection(),
+          // بطاقاتٌ تُطوى لا أقسامٌ متتالية: التقارير صارت أربعة وتزيد،
+          // فمن يريد أعمار الديون كان يمرّ على المبيعات والمخزون كلّها.
+          // والأوّل مفتوح: شاشةٌ كلّها مطويّة تحتاج نقرةً لترى أي رقم.
+          ReportCard(
+            title: 'المبيعات',
+            subtitle: 'الإيراد والفواتير والمرتجعات',
+            icon: Icons.trending_up,
+            initiallyExpanded: true,
+            onPrint: () => _printSales(ref, period),
+            child: const _SalesSection(),
+          ),
+          ReportCard(
+            title: 'المخزون',
+            subtitle: 'النواقص والأكثر حركةً',
+            icon: Icons.inventory_2_outlined,
+            onPrint: () => _printInventory(ref),
+            child: const _InventorySection(),
+          ),
+          ReportCard(
+            title: 'المصروفات',
+            subtitle: 'ما خرج، بالبند',
+            icon: Icons.payments_outlined,
+            onPrint: () => _printExpenses(ref, period),
+            child: const _ExpensesSection(),
+          ),
+          ReportCard(
+            title: 'أعمار الديون',
+            subtitle: 'ما على العملاء وكم تأخّر',
+            icon: Icons.schedule_outlined,
+            onPrint: () => _printDebtAging(ref),
+            child: const _DebtAgingSection(),
+          ),
+          // القسم يُخفي نفسه لغير إصدار المؤسسات — راجع _ValuationSection.
+          const _ValuationSection(),
         ],
       ),
     );
   }
+}
+
+/// اسم المنشأة على كل تقرير — ورقةٌ بلا اسم لا تُعرَف لمن هي.
+String _orgNameOf(WidgetRef ref) =>
+    ref.read(brandingProvider).valueOrNull?.displayName ?? 'إتقان ERP';
+
+Future<void> _printSales(WidgetRef ref, ReportPeriod period) async {
+  final summary = await ref.read(salesSummaryProvider.future);
+  final top = List<Map<String, dynamic>>.from(summary['topProducts'] as List? ?? const []);
+
+  await printReport(
+    title: 'تقرير المبيعات — ${period.label}',
+    orgName: _orgNameOf(ref),
+    from: period.fromDate,
+    to: AppClock.now(),
+    facts: [
+      ('إجمالي المبيعات', _currencyFormat.format((summary['totalRevenue'] as num?) ?? 0)),
+      ('عدد الفواتير', _integerFormat.format(summary['totalInvoices'] ?? 0)),
+      ('متوسط الفاتورة',
+          _currencyFormat.format((summary['averageInvoiceValue'] as num?) ?? 0)),
+      ('المرتجعات', _currencyFormat.format((summary['totalReturns'] as num?) ?? 0)),
+    ],
+    columns: const ['الصنف', 'الكمية المباعة', 'الإيراد'],
+    rows: [
+      for (final row in top)
+        [
+          '${row['productName'] ?? row['name'] ?? '—'}',
+          _integerFormat.format((row['quantitySold'] as num?) ?? (row['quantity'] as num?) ?? 0),
+          _currencyFormat.format((row['revenue'] as num?) ?? 0),
+        ],
+    ],
+    note: 'المرتجعات مطروحة من الإيراد أعلاه.',
+  );
+}
+
+Future<void> _printInventory(WidgetRef ref) async {
+  final data = await ref.read(inventorySummaryProvider.future);
+  final low = List<Map<String, dynamic>>.from(data['lowStockItems'] as List? ?? const []);
+
+  await printReport(
+    title: 'تقرير المخزون',
+    orgName: _orgNameOf(ref),
+    to: AppClock.now(),
+    facts: [
+      ('قيمة المخزون', _currencyFormat.format((data['totalInventoryValue'] as num?) ?? 0)),
+      ('تحت حدّ الطلب', _integerFormat.format(data['lowStockCount'] ?? 0)),
+      ('قاربت الانتهاء', _integerFormat.format(data['nearExpiryCount'] ?? 0)),
+      ('منتهية الصلاحية', _integerFormat.format(data['expiredCount'] ?? 0)),
+      ('خسارة المنتهي', _currencyFormat.format((data['expiredLossValue'] as num?) ?? 0)),
+    ],
+    columns: const ['الصنف', 'المتاح', 'حدّ الطلب'],
+    rows: [
+      for (final row in low)
+        [
+          '${row['productName'] ?? '—'}',
+          _integerFormat.format((row['quantity'] as num?) ?? 0),
+          _integerFormat.format((row['reorderLevel'] as num?) ?? 0),
+        ],
+    ],
+    note: 'الأرصدة لحظة الطباعة — راجع شاشة المخزون للأحدث.',
+  );
+}
+
+Future<void> _printExpenses(WidgetRef ref, ReportPeriod period) async {
+  final data = await ref.read(expensesSummaryProvider.future);
+  final byCategory = List<Map<String, dynamic>>.from(data['byCategory'] as List? ?? const []);
+
+  await printReport(
+    title: 'تقرير المصروفات — ${period.label}',
+    orgName: _orgNameOf(ref),
+    from: period.fromDate,
+    to: AppClock.now(),
+    facts: [
+      ('إجمالي المصروفات', _currencyFormat.format((data['totalExpenses'] as num?) ?? 0)),
+      ('عدد المصروفات', _integerFormat.format(data['expenseCount'] ?? 0)),
+      ('متوسط المصروف', _currencyFormat.format((data['averageExpense'] as num?) ?? 0)),
+    ],
+    columns: const ['البند', 'العدد', 'المبلغ'],
+    rows: [
+      for (final row in byCategory)
+        [
+          '${row['category'] ?? '—'}',
+          _integerFormat.format((row['count'] as num?) ?? 0),
+          _currencyFormat.format((row['amount'] as num?) ?? 0),
+        ],
+    ],
+    // بتاريخ الصرف لا الإدخال — راجع Expense.SpentOn.
+    note: 'المصروفات محسوبة بتاريخ الصرف الفعلي لا بتاريخ إدخالها.',
+  );
+}
+
+Future<void> _printDebtAging(WidgetRef ref) async {
+  final data = await ref.read(debtAgingProvider.future);
+  final rows = List<Map<String, dynamic>>.from(data['items'] as List? ?? const []);
+
+  await printReport(
+    title: 'تقرير أعمار الديون',
+    orgName: _orgNameOf(ref),
+    to: AppClock.now(),
+    facts: [
+      ('عدد المدينين', _integerFormat.format(rows.length)),
+      ('إجمالي المستحقّ', _currencyFormat.format((data['totalOutstanding'] as num?) ?? 0)),
+      // «لم يحن بعد» رقمٌ يُسأل عنه: دَينٌ في مهلته ليس متأخّراً،
+      // وخلطُه بالمتأخّر يُضخّم المشكلة ويُربك القرار.
+      ('لم يحن موعده', _currencyFormat.format((data['notYetDue'] as num?) ?? 0)),
+    ],
+    columns: const ['العميل', 'الهاتف', 'المستحقّ', 'التأخّر (يوم)', 'المرحلة'],
+    rows: [
+      for (final row in rows)
+        [
+          '${row['customerName'] ?? '—'}',
+          '${row['phone'] ?? '—'}',
+          _currencyFormat.format((row['totalOutstanding'] as num?) ?? 0),
+          _integerFormat.format((row['daysOverdue'] as num?) ?? 0),
+          '${row['stage'] ?? '—'}',
+        ],
+    ],
+    note: 'الدَّين محسوبٌ من دفتر الفواتير — راجع كشف العميل للتفصيل.',
+  );
 }
 
 class _PeriodChip extends StatelessWidget {
@@ -197,9 +350,14 @@ class _SalesSection extends ConsumerWidget {
               ],
             ),
             const SizedBox(height: 16),
+            // المصروفات على نفس الرسم: تقريرُ إيرادٍ بلا مصروف يقول رقماً
+            // يظنّه التاجر ربحاً وليس كذلك. وتُقرأ بلا انتظارها — فشلُ
+            // تحميلها يُنقص خطّاً ولا يمنع رؤية المبيعات.
             _RevenueChart(
               revenueByDay: List<Map<String, dynamic>>.from(summary['revenueByDay'] as List? ?? []),
               from: period.fromDate,
+              expensesByDay: List<Map<String, dynamic>>.from(
+                  ref.watch(expensesSummaryProvider).valueOrNull?['byDay'] as List? ?? const []),
             ),
             const SizedBox(height: 16),
             AppDataTable(
@@ -245,9 +403,22 @@ class _SalesSection extends ConsumerWidget {
 }
 
 class _RevenueChart extends StatelessWidget {
-  const _RevenueChart({required this.revenueByDay, required this.from});
+  const _RevenueChart({
+    required this.revenueByDay,
+    required this.from,
+    this.expensesByDay = const [],
+  });
+
   final List<Map<String, dynamic>> revenueByDay;
   final DateTime from;
+
+  /// المصروفات اليومية — خطٌّ ثانٍ على نفس الرسم.
+  ///
+  /// <para><b>ولماذا على نفس الرسم لا في رسمٍ مجاور:</b> ما يهمّ ليس أيّ
+  /// الخطّين أعلى، بل **المسافة بينهما** — وهي لا تُقاس بالعين بين رسمين
+  /// بمقياسين مختلفين. وخطُّ مبيعاتٍ وحده يصعد فيُفرح، وقد تكون المصروفات
+  /// صعدت معه أكثر.</para>
+  final List<Map<String, dynamic>> expensesByDay;
 
   @override
   Widget build(BuildContext context) {
@@ -258,12 +429,49 @@ class _RevenueChart extends StatelessWidget {
       byDate[_dayFormat.format(date)] = (point['revenue'] as num?)?.toDouble() ?? 0;
     }
 
-    final dayCount = DateTime.now().difference(from).inDays + 1;
+    final expenseByDate = <String, double>{};
+    for (final point in expensesByDay) {
+      final date = DateTime.tryParse(point['date'] as String? ?? '');
+      if (date == null) continue;
+      expenseByDate[_dayFormat.format(date)] = (point['amount'] as num?)?.toDouble() ?? 0;
+    }
+
+    // تاريخ بداية بعد اليوم يُنتج عدداً سالباً، وList.generate بعدد سالب
+    // يرمي RangeError **فتسقط شاشة التقارير كلّها** — لا رسماً فارغاً بل
+    // شاشة بيضاء. ويقع فعلاً بمن يختار تاريخاً في المستقبل من منتقي المدى.
+    //
+    // (كشفته جولة اللقطات حين ثُبِّت وقتها قبل تواريخ العيّنات.)
+    final dayCount = AppClock.now().difference(from).inDays + 1;
+    if (dayCount <= 0) {
+      return Container(
+        height: 240,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AppColors.border),
+        ),
+        child: Text('تاريخ البداية بعد اليوم — اختر مدى منتهياً.',
+            style: AppTextStyles.bodyMd(color: AppColors.textSecondary)),
+      );
+    }
+
     final spots = List.generate(dayCount, (i) {
       final day = from.add(Duration(days: i));
       return FlSpot(i.toDouble(), byDate[_dayFormat.format(day)] ?? 0);
     });
-    final maxRevenue = spots.map((s) => s.y).fold<double>(0, (a, b) => a > b ? a : b);
+    final expenseSpots = expenseByDate.isEmpty
+        ? <FlSpot>[]
+        : List.generate(dayCount, (i) {
+            final day = from.add(Duration(days: i));
+            return FlSpot(i.toDouble(), expenseByDate[_dayFormat.format(day)] ?? 0);
+          });
+
+    // المقياس يشمل الخطّين: مقياسٌ على الإيراد وحده يقصّ قمم المصروفات
+    // فتبدو أصغر ممّا هي — وهو تضليلٌ بالرسم لا خطأ في الرقم.
+    final maxRevenue = [...spots, ...expenseSpots]
+        .map((s) => s.y)
+        .fold<double>(0, (a, b) => a > b ? a : b);
     final labelStep = (dayCount / 5).ceil().clamp(1, dayCount).toDouble();
     final primary = Theme.of(context).colorScheme.primary;
 
@@ -333,6 +541,18 @@ class _RevenueChart extends StatelessWidget {
                   ),
                 ),
                 lineBarsData: [
+                  if (expenseSpots.isNotEmpty)
+                    LineChartBarData(
+                      spots: expenseSpots,
+                      isCurved: true,
+                      curveSmoothness: 0.25,
+                      color: AppColors.warning,
+                      barWidth: 2,
+                      // متقطّعٌ لا مصمت: يُميَّز عن خطّ الإيراد بلا اعتمادٍ
+                      // على اللون وحده — ومن لا يميّز الألوان يقرأ الرسم.
+                      dashArray: const [6, 4],
+                      dotData: const FlDotData(show: false),
+                    ),
                   LineChartBarData(
                     spots: spots,
                     isCurved: false,
@@ -468,4 +688,394 @@ class _InventorySection extends ConsumerWidget {
       CurrencyBadge(amount: (item['estimatedLossValue'] as num?)?.toDouble() ?? 0),
     ];
   }
+}
+
+// ---------------------------------------------------------------------------
+// أعمار الديون
+// ---------------------------------------------------------------------------
+
+/// من يدين، بكم، ومنذ متى — مرتّباً بأولوية التحصيل.
+///
+/// الشرائح أفقية قبل الجدول: مدير يريد أولاً أن يعرف **كم مالٍ عالق وكم
+/// منه قديم**، ثم من هم. عرض الأسماء أولاً يجعله يقرأ عشرين سطراً ليصل إلى
+/// رقم واحد.
+// ---------------------------------------------------------------------------
+// المصروفات
+// ---------------------------------------------------------------------------
+
+class _ExpensesSection extends ConsumerWidget {
+  const _ExpensesSection();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final async = ref.watch(expensesSummaryProvider);
+
+    return async.when(
+      loading: () => const TableSkeleton(),
+      error: (err, _) => _ErrorBox(
+        message: 'تعذّر تحميل تقرير المصروفات',
+        onRetry: () => ref.invalidate(expensesSummaryProvider),
+      ),
+      data: (data) {
+        final crossAxisCount =
+            Breakpoints.isDesktop(context) ? 3 : (Breakpoints.isTablet(context) ? 2 : 1);
+        final total = (data['totalExpenses'] as num?)?.toDouble() ?? 0;
+        final byCategory =
+            List<Map<String, dynamic>>.from(data['byCategory'] as List? ?? const []);
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            GridView.count(
+              crossAxisCount: crossAxisCount,
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              mainAxisSpacing: 16,
+              crossAxisSpacing: 16,
+              mainAxisExtent: 168,
+              children: [
+                StatCard(
+                  label: 'إجمالي المصروفات',
+                  value: '${_currencyFormat.format(total)} د.ل',
+                  icon: Icons.payments_outlined,
+                  accentColor: AppColors.warning,
+                ),
+                StatCard(
+                  label: 'عدد المصروفات',
+                  value: _integerFormat.format(data['expenseCount'] ?? 0),
+                  icon: Icons.receipt_outlined,
+                ),
+                StatCard(
+                  label: 'متوسط المصروف',
+                  value: '${_currencyFormat.format((data['averageExpense'] as num?) ?? 0)} د.ل',
+                  icon: Icons.calculate_outlined,
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            AppDataTable(
+              title: 'المصروفات بالبند',
+              columns: const [AppColumn('البند'), AppColumn('العدد'), AppColumn('المبلغ')],
+              rows: byCategory
+                  .map((c) => [
+                        Text(c['category'] as String? ?? ''),
+                        Text(_integerFormat.format((c['count'] as num?) ?? 0)),
+                        CurrencyBadge(amount: (c['amount'] as num?)?.toDouble() ?? 0),
+                      ])
+                  .toList(),
+              emptyMessage: 'لا مصروفات في هذه المدّة',
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _DebtAgingSection extends ConsumerWidget {
+  const _DebtAgingSection();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final agingAsync = ref.watch(debtAgingProvider);
+
+    return agingAsync.when(
+      loading: () => const TableSkeleton(),
+      error: (_, __) => _ErrorBox(
+        message: 'تعذّر تحميل أعمار الديون',
+        onRetry: () => ref.invalidate(debtAgingProvider),
+      ),
+      data: (report) {
+        final items = List<Map<String, dynamic>>.from(report['items'] as List? ?? []);
+        if (items.isEmpty) {
+          return AppSurface(
+            padding: const EdgeInsets.all(24),
+            child: Center(
+              child: Text('لا ديون مستحقّة على أي عميل.',
+                  style: AppTextStyles.bodyMd(color: AppColors.textSecondary)),
+            ),
+          );
+        }
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              children: [
+                _bucket('الإجمالي', report['totalOutstanding'], AppColors.textPrimary),
+                _bucket('لم يحن أجله', report['notYetDue'], AppColors.textSecondary),
+                _bucket('1–30 يوماً', report['days1To30'], AppColors.warning),
+                _bucket('31–60', report['days31To60'], AppColors.warning),
+                _bucket('61–90', report['days61To90'], AppColors.danger),
+                // أكثر من تسعين يوماً هو الرقم الذي يُقرَّر عنده أن الدَّين
+                // قد لا يُحصَّل أصلاً — فيُفرَد بلونه.
+                _bucket('أكثر من 90', report['over90'], AppColors.danger),
+              ],
+            ),
+            const SizedBox(height: 16),
+            AppDataTable(
+              title: 'المدينون (${items.length})',
+              columns: const [
+                AppColumn('العميل'),
+                AppColumn('الهاتف'),
+                AppColumn('المستحقّ'),
+                AppColumn('التأخّر'),
+                AppColumn('المرحلة'),
+                AppColumn('آخر تذكير'),
+                AppColumn(''),
+              ],
+              rows: items.map((r) => _row(context, ref, r)).toList(),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _bucket(String label, Object? value, Color color) {
+    final amount = (value as num?)?.toDouble() ?? 0;
+    return AppSurface(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(label, style: AppTextStyles.labelMd(color: AppColors.textMuted)),
+          const SizedBox(height: 4),
+          Text(NumberFormat('#,##0.00', 'en').format(amount),
+              style: AppTextStyles.headlineMd(color: color)),
+        ],
+      ),
+    );
+  }
+
+  List<Widget> _row(BuildContext context, WidgetRef ref, Map<String, dynamic> r) {
+    final days = (r['daysOverdue'] as num?)?.toInt() ?? 0;
+    final stage = (r['stage'] as num?)?.toInt() ?? 0;
+    final lastAt = r['lastReminderAt'] != null
+        ? DateTime.tryParse(r['lastReminderAt'] as String)
+        : null;
+    final lastStage = (r['lastReminderStage'] as num?)?.toInt();
+
+    return [
+      Text(r['customerName'] as String? ?? '-'),
+      Text(r['phone'] as String? ?? '-'),
+      CurrencyBadge(amount: (r['totalOutstanding'] as num?)?.toDouble() ?? 0),
+      Text(
+        days == 0 ? 'في الموعد' : 'منذ $days يوماً',
+        style: AppTextStyles.bodyMd(
+            color: days == 0
+                ? AppColors.textSecondary
+                : (days > 60 ? AppColors.danger : AppColors.warning)),
+      ),
+      Text(stage == 0 ? '-' : 'المرحلة $stage',
+          style: AppTextStyles.labelMd(
+              color: stage >= 3 ? AppColors.danger : AppColors.textSecondary)),
+      // المرحلة الأخيرة مع تاريخها: من ذُكِّر ثلاث مرّات ولم يسدّد حالة
+      // مختلفة تماماً عمّن لم يُطالَب قطّ، والعمودان معاً هما ما يُظهر ذلك.
+      Text(
+        lastAt == null
+            ? 'لم يُذكَّر'
+            : '${lastStage ?? "-"} — ${DateFormat('yyyy-MM-dd').format(lastAt)}',
+        style: AppTextStyles.labelMd(
+            color: lastAt == null ? AppColors.textMuted : AppColors.textSecondary),
+      ),
+      // التسجيل بعد المطالبة لا قبلها: الزرّ لا يُرسل شيئاً — النظام لا يملك
+      // قناة إرسال — بل يوثّق أن إنساناً طالَب فعلاً. راجع DebtReminder.
+      IconButton(
+        tooltip: 'تسجيل تذكير',
+        icon: const Icon(Icons.campaign_outlined, size: 18),
+        onPressed: stage == 0
+            ? null
+            : () => _recordReminder(context, ref, r['customerId'] as String,
+                r['customerName'] as String? ?? ''),
+      ),
+    ];
+  }
+
+  Future<void> _recordReminder(
+      BuildContext context, WidgetRef ref, String customerId, String name) async {
+    final note = await showDialog<String>(
+      context: context,
+      builder: (_) => _ReminderNoteDialog(customerName: name),
+    );
+    if (note == null) return;
+
+    try {
+      await ApiClient.instance.dio.post(
+        '/customers/$customerId/debt-reminders',
+        data: {'note': note.trim().isEmpty ? null : note.trim()},
+      );
+      ref.invalidate(debtAgingProvider);
+      if (context.mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('سُجِّل التذكير')));
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text((e is DioException && e.response?.data is Map && (e.response!.data as Map)['message'] is String)
+                    ? (e.response!.data as Map)['message'] as String
+                    : 'تعذّر تسجيل التذكير')));
+      }
+    }
+  }
+}
+
+/// نافذة التسجيل — تسأل عمّا حدث لا عمّا سيحدث.
+class _ReminderNoteDialog extends StatefulWidget {
+  const _ReminderNoteDialog({required this.customerName});
+  final String customerName;
+
+  @override
+  State<_ReminderNoteDialog> createState() => _ReminderNoteDialogState();
+}
+
+class _ReminderNoteDialogState extends State<_ReminderNoteDialog> {
+  final _controller = TextEditingController();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text('تسجيل تذكير — ${widget.customerName}'),
+      content: SizedBox(
+        width: 380,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              'سجّل بعد أن تُطالِب فعلاً. المرحلة تُحسب من عمر الدَّين ولا '
+              'تُختار — وإلا فقد السلّم معناه.',
+              style: AppTextStyles.bodyMd(color: AppColors.textSecondary),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _controller,
+              autofocus: true,
+              maxLength: 300,
+              decoration: const InputDecoration(
+                labelText: 'ملاحظة (اختياري)',
+                hintText: 'مثال: اتصال هاتفي — وعد بالسداد نهاية الأسبوع',
+              ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('إلغاء')),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, _controller.text),
+          child: const Text('تسجيل'),
+        ),
+      ],
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// قيمة المخزون بالتكلفة الحقيقية — إصدار المؤسسات
+// ---------------------------------------------------------------------------
+
+/// من الدفتر لا من سعر تكلفة الصنف.
+///
+/// **لماذا يُعرَض الفارق:** سعر التكلفة على الصنف رقم واحد يُكتب فوقه عند كل
+/// استلام، فمخزونٌ اشتُري على ثلاث دفعات بأسعار مختلفة كان يُقيَّم بسعر
+/// آخرها كلّه. عرض القيمتين جنباً إلى جنب يجعل الفرق مفهوماً بدل أن يبدو
+/// رقماً تغيّر بلا سبب.
+///
+/// ويُخفي نفسه كاملاً حين يردّ الخادم 403 (وحدة `valuation` غير مملوكة):
+/// عرض «تعذّر التحميل» لمن لا يملك الوحدة يدفعه إلى الدعم بلا سبب.
+class _ValuationSection extends ConsumerWidget {
+  const _ValuationSection();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final valuationAsync = ref.watch(inventoryValuationProvider);
+
+    return valuationAsync.when(
+      loading: () => const SizedBox.shrink(),
+      error: (_, __) => const SizedBox.shrink(),
+      data: (report) {
+        final items = List<Map<String, dynamic>>.from(report['items'] as List? ?? []);
+        if (items.isEmpty) return const SizedBox.shrink();
+
+        final real = (report['totalValue'] as num?)?.toDouble() ?? 0;
+        final legacy = (report['legacyValue'] as num?)?.toDouble() ?? 0;
+        final gap = real - legacy;
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const SizedBox(height: 32),
+            Text('قيمة المخزون بالتكلفة', style: AppTextStyles.headlineMd()),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              children: [
+                _card('القيمة الفعلية (من الدفتر)', real, AppColors.textPrimary),
+                _card('التقدير السابق (سعر التكلفة)', legacy, AppColors.textSecondary),
+                _card(gap >= 0 ? 'فرق زائد' : 'فرق ناقص', gap.abs(),
+                    gap.abs() < 0.005 ? AppColors.textMuted : AppColors.warning),
+              ],
+            ),
+            const SizedBox(height: 16),
+            AppDataTable(
+              title: 'الأصناف (${items.length})',
+              columns: const [
+                AppColumn('الصنف'),
+                AppColumn('الكمية'),
+                AppColumn('متوسط التكلفة'),
+                AppColumn('سعر الصنف'),
+                AppColumn('الشحنات'),
+                AppColumn('القيمة'),
+              ],
+              rows: items.map((i) {
+                final avg = (i['averageCost'] as num?)?.toDouble() ?? 0;
+                final listed = (i['productCostPrice'] as num?)?.toDouble() ?? 0;
+                final drifted = (avg - listed).abs() > 0.005;
+                return [
+                  Text(i['productName'] as String? ?? '-'),
+                  Text('${i['quantity']} ${i['unitBase'] ?? ''}'),
+                  Text(NumberFormat('#,##0.00', 'en').format(avg),
+                      style: AppTextStyles.bodyMd(
+                          color: drifted ? AppColors.warning : AppColors.textPrimary)),
+                  Text(NumberFormat('#,##0.00', 'en').format(listed),
+                      style: AppTextStyles.bodyMd(color: AppColors.textSecondary)),
+                  // عدد الشحنات التي بقي منها شيء: صنفٌ من سبع شحنات بأسعار
+                  // مختلفة هو حيث يكون التقدير القديم أبعد ما يكون عن الحقيقة.
+                  Text('${i['lotCount'] ?? 0}',
+                      style: AppTextStyles.labelMd(color: AppColors.textMuted)),
+                  CurrencyBadge(amount: (i['totalValue'] as num?)?.toDouble() ?? 0),
+                ];
+              }).toList(),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _card(String label, double value, Color color) => AppSurface(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(label, style: AppTextStyles.labelMd(color: AppColors.textMuted)),
+            const SizedBox(height: 4),
+            Text(NumberFormat('#,##0.00', 'en').format(value),
+                style: AppTextStyles.headlineMd(color: color)),
+          ],
+        ),
+      );
 }

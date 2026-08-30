@@ -55,10 +55,24 @@ class AppColors {
 
   static _Neutrals _active = _Neutrals.light;
 
+  /// لوح خلفية الفرع الحالي — راجع [BranchPalettes].
+  static String _palette = BranchPalettes.defaultPalette;
+
   /// تُستدعى من MaterialApp.builder عند كل تغيّر في السمة.
   static void applyBrightness(Brightness brightness) {
-    _active = brightness == Brightness.dark ? _Neutrals.dark : _Neutrals.light;
+    final base = brightness == Brightness.dark ? _Neutrals.dark : _Neutrals.light;
+    _active = BranchPalettes._tint(base, _palette);
   }
+
+  /// يضبط لوح الفرع ويُعيد بناء الألوان المحايدة عليه.
+  ///
+  /// <para>يُستدعى بعد تسجيل الدخول حين يُعرَف فرع المستخدم.</para>
+  static void applyBranchPalette(String? palette) {
+    _palette = BranchPalettes.normalize(palette);
+    applyBrightness(_active.brightness);
+  }
+
+  static String get branchPalette => _palette;
 
   static Brightness get brightness => _active.brightness;
 
@@ -186,4 +200,68 @@ class _Neutrals {
     info: Color(0xFF6FB3DE),
     infoBg: Color(0xFF152833),
   );
+}
+
+/// ألواح خلفية الفروع.
+///
+/// **ما تغيّره وما لا تغيّره:** تُزيح الأسطح والحدود نحو لون خفيف، وتُبقي
+/// **ألوان العلامة التجارية كما هي**. فرعٌ يختار لوحاً دافئاً يظلّ يعرض
+/// هوية شركته لا هوية أخرى — وإلا صار لكل فرع علامة، وهو نقيض
+/// White-Labeling الذي بُني عليه النظام (ARCHITECTURE.md §2.1).
+///
+/// **ولماذا على الفرع لا على المستخدم:** تفضيل السطوع (نهاري/ليلي) شخصيٌّ
+/// ويُحفَظ محلياً (راجع ThemeModeNotifier). أما اللوح فيميّز **المكان**:
+/// موظف ينتقل بين فرعين يعرف من اللون أين هو الآن، وهو ما يمنع إدخال بيانات
+/// في الفرع الخطأ — الخطأ الأشيع في الأنظمة متعدّدة الفروع.
+class BranchPalettes {
+  static const defaultPalette = 'default';
+
+  /// المعرّف ← (الاسم المعروض، اللون المُزيح).
+  static const options = <String, (String, Color)>{
+    defaultPalette: ('محايد', Color(0x00000000)),
+    'warm': ('دافئ', Color(0xFFB07D3A)),
+    'cool': ('بارد', Color(0xFF3A6FB0)),
+    'green': ('أخضر', Color(0xFF3A8F6A)),
+    'slate': ('رمادي', Color(0xFF5B6472)),
+  };
+
+  static String normalize(String? value) =>
+      value != null && options.containsKey(value) ? value : defaultPalette;
+
+  static String labelOf(String? value) => options[normalize(value)]!.$1;
+
+  /// شدّة الإزاحة صغيرة عمداً (7٪ نهاراً و12٪ ليلاً).
+  ///
+  /// لوحٌ يصبغ الشاشة يُتعب العين في وردية كاملة ويُضعف تباين النصّ المضبوط
+  /// بعناية. المطلوب تمييز لا تلوين — يُلاحَظ عند الانتقال بين فرعين ولا
+  /// يُلاحَظ بعد دقيقة عمل.
+  static _Neutrals _tint(_Neutrals base, String palette) {
+    final key = normalize(palette);
+    if (key == defaultPalette) return base;
+
+    final tint = options[key]!.$2;
+    final strength = base.brightness == Brightness.dark ? 0.12 : 0.07;
+    Color mix(Color c) => Color.lerp(c, tint, strength) ?? c;
+
+    return _Neutrals(
+      brightness: base.brightness,
+      paper: mix(base.paper),
+      surface: mix(base.surface),
+      surfaceAlt: mix(base.surfaceAlt),
+      border: mix(base.border),
+      // النصوص وألوان الحالة (نجاح/تحذير/خطر) لا تُمسّ: تباين النصّ مضبوط،
+      // والأحمر الذي يميل إلى الأخضر يفقد معناه قبل أن يكسب جمالاً.
+      textPrimary: base.textPrimary,
+      textSecondary: base.textSecondary,
+      textMuted: base.textMuted,
+      success: base.success,
+      successBg: base.successBg,
+      warning: base.warning,
+      warningBg: base.warningBg,
+      danger: base.danger,
+      dangerBg: base.dangerBg,
+      info: base.info,
+      infoBg: base.infoBg,
+    );
+  }
 }

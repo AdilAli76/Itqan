@@ -1,4 +1,4 @@
-using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.EntityFrameworkCore;
 using KineticEnterprise.Api.Models;
 
 namespace KineticEnterprise.Api.Data;
@@ -17,7 +17,10 @@ public class AppDbContext : DbContext
     public DbSet<Supplier> Suppliers => Set<Supplier>();
     public DbSet<Sponsor> Sponsors => Set<Sponsor>();
     public DbSet<ProductCategory> ProductCategories => Set<ProductCategory>();
+    public DbSet<Attachment> Attachments => Set<Attachment>();
     public DbSet<StockLevel> StockLevels => Set<StockLevel>();
+    public DbSet<StockLedgerEntry> StockLedgerEntries => Set<StockLedgerEntry>();
+    public DbSet<Warehouse> Warehouses => Set<Warehouse>();
     public DbSet<StockTransfer> StockTransfers => Set<StockTransfer>();
     public DbSet<StockTransferItem> StockTransferItems => Set<StockTransferItem>();
     public DbSet<StockCount> StockCounts => Set<StockCount>();
@@ -28,13 +31,34 @@ public class AppDbContext : DbContext
     public DbSet<CustomerPinAttempt> CustomerPinAttempts => Set<CustomerPinAttempt>();
     public DbSet<Invoice> Invoices => Set<Invoice>();
     public DbSet<InvoiceItem> InvoiceItems => Set<InvoiceItem>();
+    public DbSet<InvoiceItemBatch> InvoiceItemBatches => Set<InvoiceItemBatch>();
+    public DbSet<MedicineReference> MedicineReferences => Set<MedicineReference>();
+    public DbSet<Prescription> Prescriptions => Set<Prescription>();
     public DbSet<InvoicePayment> InvoicePayments => Set<InvoicePayment>();
+    public DbSet<DebtReminder> DebtReminders => Set<DebtReminder>();
     public DbSet<NotificationItem> Notifications => Set<NotificationItem>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
+
+    // ── المحاسبة ────────────────────────────────────────────────────────
+    public DbSet<Expense> Expenses => Set<Expense>();
+    public DbSet<SupplierPayment> SupplierPayments => Set<SupplierPayment>();
+
+    public DbSet<Account> Accounts => Set<Account>();
+    public DbSet<JournalEntry> JournalEntries => Set<JournalEntry>();
+    public DbSet<JournalEntryLine> JournalEntryLines => Set<JournalEntryLine>();
+    public DbSet<AccountMapping> AccountMappings => Set<AccountMapping>();
+    public DbSet<FiscalClosing> FiscalClosings => Set<FiscalClosing>();
+    public DbSet<BankAccount> BankAccounts => Set<BankAccount>();
+    public DbSet<CustomerCategory> CustomerCategories => Set<CustomerCategory>();
+    public DbSet<CustomerAdvance> CustomerAdvances => Set<CustomerAdvance>();
+    public DbSet<SupplierInvoice> SupplierInvoices => Set<SupplierInvoice>();
+    public DbSet<SupplierInvoiceLine> SupplierInvoiceLines => Set<SupplierInvoiceLine>();
     public DbSet<Permission> Permissions => Set<Permission>();
     public DbSet<RolePermission> RolePermissions => Set<RolePermission>();
     public DbSet<PurchaseOrder> PurchaseOrders => Set<PurchaseOrder>();
     public DbSet<PurchaseOrderItem> PurchaseOrderItems => Set<PurchaseOrderItem>();
+    public DbSet<PurchaseReceipt> PurchaseReceipts => Set<PurchaseReceipt>();
+    public DbSet<PurchaseReceiptItem> PurchaseReceiptItems => Set<PurchaseReceiptItem>();
     public DbSet<PlatformOrganizationRecord> PlatformOrganizations => Set<PlatformOrganizationRecord>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -52,6 +76,8 @@ public class AppDbContext : DbContext
         modelBuilder.Entity<Sponsor>().ToTable("sponsors");
         modelBuilder.Entity<ProductCategory>().ToTable("product_categories");
         modelBuilder.Entity<StockLevel>().ToTable("stock_levels");
+        modelBuilder.Entity<StockLedgerEntry>().ToTable("stock_ledger_entries");
+        modelBuilder.Entity<Warehouse>().ToTable("warehouses");
         modelBuilder.Entity<StockTransfer>().ToTable("stock_transfers");
         modelBuilder.Entity<StockTransferItem>().ToTable("stock_transfer_items");
         modelBuilder.Entity<StockCount>().ToTable("stock_counts");
@@ -76,14 +102,36 @@ public class AppDbContext : DbContext
             // بصيغة الخاصية يجعل الفهرس يشير إلى عمود غير موجود.
             .HasFilter("[client_request_id] IS NOT NULL");
         modelBuilder.Entity<InvoiceItem>().ToTable("invoice_items");
+        modelBuilder.Entity<InvoiceItemBatch>().ToTable("invoice_item_batches");
+        modelBuilder.Entity<MedicineReference>().ToTable("medicine_reference");
+        modelBuilder.Entity<Prescription>().ToTable("prescriptions");
         modelBuilder.Entity<InvoicePayment>().ToTable("invoice_payments");
+        modelBuilder.Entity<DebtReminder>().ToTable("debt_reminders");
         modelBuilder.Entity<NotificationItem>().ToTable("notifications");
         modelBuilder.Entity<AuditLog>().ToTable("audit_logs");
+        // بلا ToTable كان الكيان **خارج فحص المخطّط تماماً** — ولهذا لم
+        // يكتشف أحد أن جدول attachments غائب من ملف المخطّط وموجود في
+        // الترحيل وحده. الثقب في الفحص هو ما أخفى الثقب في المخطّط.
+        modelBuilder.Entity<Attachment>().ToTable("attachments");
+        modelBuilder.Entity<Expense>().ToTable("expenses");
+        modelBuilder.Entity<SupplierPayment>().ToTable("supplier_payments");
+        modelBuilder.Entity<Account>().ToTable("accounts");
+        modelBuilder.Entity<JournalEntry>().ToTable("journal_entries");
+        modelBuilder.Entity<JournalEntryLine>().ToTable("journal_entry_lines");
+        modelBuilder.Entity<AccountMapping>().ToTable("account_mappings");
+        modelBuilder.Entity<FiscalClosing>().ToTable("fiscal_closings");
+        modelBuilder.Entity<BankAccount>().ToTable("bank_accounts");
+        modelBuilder.Entity<CustomerCategory>().ToTable("customer_categories");
+        modelBuilder.Entity<CustomerAdvance>().ToTable("customer_advances");
+        modelBuilder.Entity<SupplierInvoice>().ToTable("supplier_invoices");
+        modelBuilder.Entity<SupplierInvoiceLine>().ToTable("supplier_invoice_lines");
         modelBuilder.Entity<Permission>().ToTable("permissions").HasKey(p => p.Code);
         modelBuilder.Entity<RolePermission>().ToTable("role_permissions")
             .HasKey(rp => new { rp.OrganizationId, rp.Role, rp.PermissionCode });
         modelBuilder.Entity<PurchaseOrder>().ToTable("purchase_orders");
         modelBuilder.Entity<PurchaseOrderItem>().ToTable("purchase_order_items");
+        modelBuilder.Entity<PurchaseReceipt>().ToTable("purchase_receipts");
+        modelBuilder.Entity<PurchaseReceiptItem>().ToTable("purchase_receipt_items");
         modelBuilder.Entity<PlatformOrganizationRecord>().ToTable("platform_organizations");
 
         modelBuilder.Entity<Invoice>()
@@ -95,6 +143,11 @@ public class AppDbContext : DbContext
             .HasMany(i => i.Payments)
             .WithOne()
             .HasForeignKey(p => p.InvoiceId);
+
+        modelBuilder.Entity<InvoiceItem>()
+            .HasMany(i => i.Batches)
+            .WithOne()
+            .HasForeignKey(b => b.InvoiceItemId);
 
         modelBuilder.Entity<StockTransfer>()
             .HasMany(t => t.Items)
@@ -124,6 +177,8 @@ public class AppDbContext : DbContext
         // License.EnabledModulesJson مقابل عمود enabled_modules، وكانت خامدة
         // لأن لا شيء استعلم عن Licenses قبل بناء LicensesController الآن.
         modelBuilder.Entity<Organization>().Property(o => o.BarcodeTemplateJson).HasColumnName("barcode_template");
+        // ونفسها لقالب الإيصال: ReceiptTemplateJson ← receipt_template.
+        modelBuilder.Entity<Organization>().Property(o => o.ReceiptTemplateJson).HasColumnName("receipt_template");
         modelBuilder.Entity<License>().Property(l => l.EnabledModulesJson).HasColumnName("enabled_modules");
 
         // خطأ حقيقي ثانٍ كان يُسقِط GetMyOrganization/GetSettings بـ 500 دائماً
@@ -132,6 +187,14 @@ public class AppDbContext : DbContext
         // يرفض قراءة عمود DECIMAL عبر GetDouble() مباشرة (InvalidCastException)
         // بصرف النظر عن قيمة الصف. التحويل الصريح هنا يخبر EF بقراءته كـ
         // decimal ثم تحويله لـ double بدل محاولة قراءته مباشرة كـ double.
+        // ── المحاسبة ────────────────────────────────────────────────────
+        modelBuilder.Entity<AccountMapping>().HasKey(m => new { m.OrganizationId, m.Role });
+
+        modelBuilder.Entity<JournalEntry>()
+            .HasMany(e => e.Lines)
+            .WithOne()
+            .HasForeignKey(l => l.JournalEntryId);
+
         modelBuilder.Entity<Organization>().Property(o => o.ReceiptWidthMm)
             .HasConversion(d => (decimal)d, d => (double)d);
     }

@@ -9,6 +9,7 @@ import '../../../core/theme/app_text_styles.dart';
 import '../../../shared/widgets/data_table_widget.dart';
 import '../../branches/data/branches_providers.dart';
 import '../data/stock_count_providers.dart';
+import 'field_count_screen.dart';
 import '../../../shared/widgets/filter_chip_button.dart';
 import '../../../shared/widgets/skeleton.dart';
 import '../../../core/auth/permissions.dart';
@@ -20,6 +21,7 @@ import '../../../shared/widgets/app_surface.dart';
 
 const _statusLabels = {
   'open': 'قيد العد',
+  'pending_review': 'بانتظار اعتماد الفروقات',
   'reconciled': 'مُعتمَد',
   'cancelled': 'ملغى',
 };
@@ -45,6 +47,12 @@ Widget _statusTag(String status) {
     case 'cancelled':
       fg = AppColors.danger;
       bg = AppColors.dangerBg;
+      break;
+    // تحذيري لا محايد: جردٌ ينتظر قراراً ليس حالةً عادية يُمرّ عليها، بل
+    // عملٌ متوقّف على شخص — واللون هو ما يجعله ظاهراً في القائمة.
+    case 'pending_review':
+      fg = AppColors.warning;
+      bg = AppColors.warningBg;
       break;
     default:
       fg = AppColors.info;
@@ -167,9 +175,19 @@ class StockCountScreen extends ConsumerWidget {
       builder: (_) => const _PickBranchDialog(),
     );
     if (branchId == null) return;
+    if (!context.mounted) return;
+
+    final options = await showDialog<Map<String, dynamic>>(
+      context: context,
+      builder: (_) => const _CountOptionsDialog(),
+    );
+    if (options == null) return;
 
     try {
-      final response = await ApiClient.instance.dio.post('/stock-counts', data: {'branchId': branchId});
+      final response = await ApiClient.instance.dio.post('/stock-counts', data: {
+        'branchId': branchId,
+        ...options,
+      });
       ref.invalidate(stockCountsProvider);
       if (context.mounted) {
         await showDialog<bool>(
@@ -377,6 +395,18 @@ class _StockCountDetailDialogState extends ConsumerState<_StockCountDetailDialog
         ],
         if (status == 'open') ...[
           const SizedBox(height: 12),
+          // الوضع الميداني أولاً وبعرض كامل: هذه الشاشة جدولٌ يُقرأ على مكتب،
+          // والعدّ يقع بين الرفوف. من يمسك جهازاً بيد وصندوقاً بالأخرى لا
+          // يتصفّح جدولاً — راجع FieldCountScreen.
+          SizedBox(
+            height: 52,
+            child: FilledButton.icon(
+              onPressed: _working ? null : _startFieldMode,
+              icon: const Icon(Icons.barcode_reader),
+              label: const Text('ابدأ العدّ بالمسح'),
+            ),
+          ),
+          const SizedBox(height: 12),
           Row(
             children: [
               Expanded(
@@ -387,12 +417,47 @@ class _StockCountDetailDialogState extends ConsumerState<_StockCountDetailDialog
               ),
               const SizedBox(width: 10),
               Expanded(
+                // «إنهاء العدّ» لا «اعتماد»: الزرّ لم يعد يطبّق شيئاً على
+                // المخزون — يُسلّم العدّ لمن يبتّ في فروقاته. وتسميته باسم
+                // فعله هي ما يمنع الضغط الآلي.
                 child: FilledButton(
-                  onPressed: _working ? null : () => _finish('reconcile', 'تم اعتماد الجرد وتحديث المخزون'),
+                  onPressed: _working ? null : _submitCount,
                   child: _working
                       ? const SizedBox(
                           width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-                      : const Text('اعتماد الجرد'),
+                      : const Text('إنهاء العدّ'),
+                ),
+              ),
+            ],
+          ),
+        ],
+        if (status == 'pending_review') ...[
+          const SizedBox(height: 12),
+          _ReviewBanner(count: count),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: _working ? null : () => _finish('cancel', 'تم إلغاء الجرد'),
+                  child: const Text('إلغاء الجرد'),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: _working ? null : _requestRecount,
+                  child: const Text('إعادة العدّ'),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: FilledButton(
+                  onPressed: _working ? null : () => _finish('approve', 'اعتُمدت الفروقات وحُدّث المخزون'),
+                  child: _working
+                      ? const SizedBox(
+                          width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                      : const Text('اعتماد الفروقات'),
                 ),
               ),
             ],
@@ -417,6 +482,77 @@ class _StockCountDetailDialogState extends ConsumerState<_StockCountDetailDialog
     }
   }
 
+  /// يفتح الوضع الميداني.
+  ///
+  /// شاشة كاملة لا حوار: الحوار يترك الجدول خلفه فيغري بالعودة إليه، وهذه
+  /// عمليةٌ يقف فيها العامل بين الرفوف حتى ينتهي.
+  Future<void> _startFieldMode() async {
+    final done = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(builder: (_) => FieldCountScreen(countId: widget.countId)),
+    );
+    ref.invalidate(stockCountDetailProvider(widget.countId));
+    // إنهاء العدّ يقع داخل الشاشة الميدانية نفسها، فتُغلق هذه معها بنفس
+    // النتيجة — وإلا بقي المستخدم أمام جرد انتهى.
+    if (done == true && mounted) Navigator.pop(context, true);
+  }
+
+  /// إنهاء العدّ. الخادم يقرّر الوجهة: بلا فروقات يُعتمد فوراً، ومعها ينتقل
+  /// إلى المراجعة — فالرسالة تُشتقّ من ردّه لا تُفترض هنا.
+  Future<void> _submitCount() async {
+    setState(() {
+      _working = true;
+      _error = null;
+    });
+    try {
+      final res = await ApiClient.instance.dio.post('/stock-counts/${widget.countId}/submit');
+      final data = res.data as Map<String, dynamic>?;
+      final varianceCount = (data?['varianceCount'] as num?)?.toInt() ?? 0;
+      ref.invalidate(stockCountDetailProvider(widget.countId));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(varianceCount == 0
+              ? 'لا فروقات — اعتُمد الجرد مباشرةً'
+              : 'انتهى العدّ: $varianceCount صنفاً بفروقات تنتظر الاعتماد'),
+        ));
+        Navigator.pop(context, true);
+      }
+    } catch (e) {
+      setState(() => _error = _dioErrorMessage(e, 'تعذّر إنهاء العدّ'));
+    } finally {
+      if (mounted) setState(() => _working = false);
+    }
+  }
+
+  Future<void> _requestRecount() async {
+    final reason = await showDialog<String>(
+      context: context,
+      builder: (_) => const _RecountReasonDialog(),
+    );
+    if (reason == null || reason.trim().isEmpty) return;
+
+    setState(() {
+      _working = true;
+      _error = null;
+    });
+    try {
+      await ApiClient.instance.dio.post(
+        '/stock-counts/${widget.countId}/recount',
+        data: {'reason': reason.trim()},
+      );
+      ref.invalidate(stockCountDetailProvider(widget.countId));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('أُعيد الجرد إلى العدّ — الكميات المعدودة صُفِّرت')),
+        );
+        Navigator.pop(context, true);
+      }
+    } catch (e) {
+      setState(() => _error = _dioErrorMessage(e, 'تعذّر طلب إعادة العدّ'));
+    } finally {
+      if (mounted) setState(() => _working = false);
+    }
+  }
+
   Future<void> _finish(String action, String successMessage) async {
     setState(() {
       _working = true;
@@ -434,5 +570,202 @@ class _StockCountDetailDialogState extends ConsumerState<_StockCountDetailDialog
     } finally {
       if (mounted) setState(() => _working = false);
     }
+  }
+}
+
+/// شريط المراجعة: من عدّ، وكم صنفاً اختلف، وهل سبق أن أُعيد العدّ.
+///
+/// يسبق الأزرار لا يليها: القرار يُتخذ بعد قراءته، فوضعه تحت الزرّين كان
+/// يجعله تفسيراً لما فُعل لا أساساً له.
+class _ReviewBanner extends StatelessWidget {
+  const _ReviewBanner({required this.count});
+  final Map<String, dynamic> count;
+
+  @override
+  Widget build(BuildContext context) {
+    final items = List<Map<String, dynamic>>.from(count['items'] as List? ?? []);
+    final varianceCount = items.where((i) => ((i['variance'] as num?)?.toDouble() ?? 0) != 0).length;
+    final rounds = (count['recountRounds'] as num?)?.toInt() ?? 0;
+    final submittedBy = count['submittedByName'] as String?;
+    final reason = count['recountReason'] as String?;
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.warningBg,
+        border: Border.all(color: AppColors.warning),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            '$varianceCount صنفاً بفروقات تنتظر قراراً'
+            '${submittedBy != null ? ' — عدّها $submittedBy' : ''}',
+            style: AppTextStyles.labelMd(color: AppColors.warning),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'الاعتماد يطبّق الفروقات على المخزون فوراً. وإن كان العدّ مشكوكاً فيه فأعده.',
+            style: AppTextStyles.bodyMd(color: AppColors.textSecondary),
+          ),
+          if (rounds > 0) ...[
+            const SizedBox(height: 6),
+            // مرّتان أو أكثر ليستا دقّة بل مؤشّر على خلل في العدّ أو المخزون.
+            Text(
+              'أُعيد العدّ $rounds ${rounds == 1 ? 'مرة' : 'مرات'}'
+              '${reason != null && reason.isNotEmpty ? ' — آخر سبب: $reason' : ''}',
+              style: AppTextStyles.labelMd(color: AppColors.danger),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// سبب إعادة العدّ — إلزامي. «أعد العدّ» بلا سبب تصل العادّ بلا ما يوجّهه،
+/// فيعيد الرقم نفسه.
+class _RecountReasonDialog extends StatefulWidget {
+  const _RecountReasonDialog();
+
+  @override
+  State<_RecountReasonDialog> createState() => _RecountReasonDialogState();
+}
+
+class _RecountReasonDialogState extends State<_RecountReasonDialog> {
+  final _controller = TextEditingController();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('سبب إعادة العدّ'),
+      content: SizedBox(
+        width: 360,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              'يعود الجرد إلى العدّ، وتُصفَّر الكميات المعدودة إلى النظامية — '
+              'فيُدخَل الرقم من الرفّ من جديد لا يُؤكَّد من الشاشة.',
+              style: AppTextStyles.bodyMd(color: AppColors.textSecondary),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _controller,
+              autofocus: true,
+              maxLength: 300,
+              decoration: const InputDecoration(
+                labelText: 'السبب',
+                hintText: 'مثال: فرق كبير في الرفّ الثالث — يُعاد عدّه بحضور المشرف',
+              ),
+              onSubmitted: (v) => Navigator.pop(context, v),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('إلغاء')),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, _controller.text),
+          child: const Text('إعادة العدّ'),
+        ),
+      ],
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// خيارات الجرد: نوعه، ونطاقه
+// ---------------------------------------------------------------------------
+
+/// خطوة ثانية بعد اختيار الفرع، لا حقول مضافة إليه: اختيار الفرع قرار
+/// واحد واضح، وحشو نافذته بخيارين آخرين يجعل الثلاثة تُتخطّى معاً.
+class _CountOptionsDialog extends StatefulWidget {
+  const _CountOptionsDialog();
+
+  @override
+  State<_CountOptionsDialog> createState() => _CountOptionsDialogState();
+}
+
+class _CountOptionsDialogState extends State<_CountOptionsDialog> {
+  bool _initial = false;
+  int? _notCountedDays;
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('نطاق الجرد'),
+      content: SizedBox(
+        width: 400,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                value: _initial,
+                onChanged: (v) => setState(() => _initial = v),
+                title: const Text('جرد ابتدائي'),
+                subtitle: Text(
+                  'لإدخال مخزون قائم إلى النظام لأول مرّة. تبدأ الكميات '
+                  'بأصفار فتُدخِل ما على الرفّ فعلاً.',
+                  style: AppTextStyles.bodyMd(color: AppColors.textSecondary),
+                ),
+              ),
+              const Divider(height: 24),
+              Text('الأصناف المشمولة', style: AppTextStyles.labelMd()),
+              const SizedBox(height: 4),
+              // الجرد الموزَّع: يُعدّ ما لم يُعدّ منذ مدّة بدل إغلاق المحل
+              // يوماً كاملاً. وما لم يُعدّ قطّ يدخل دائماً.
+              Text(
+                'الجرد الموزَّع يقسّم العدّ على السنة بدل يوم واحد يُغلق فيه المحل.',
+                style: AppTextStyles.bodyMd(color: AppColors.textSecondary),
+              ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  for (final option in const [
+                    (null, 'كل الأصناف'),
+                    (30, 'لم يُعدّ منذ 30 يوماً'),
+                    (90, 'لم يُعدّ منذ 90 يوماً'),
+                    (180, 'لم يُعدّ منذ 180 يوماً'),
+                  ])
+                    ChoiceChip(
+                      label: Text(option.$2),
+                      selected: _notCountedDays == option.$1,
+                      onSelected: (_) => setState(() => _notCountedDays = option.$1),
+                    ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('إلغاء')),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, {
+            if (_initial) 'kind': 'initial',
+            if (_notCountedDays != null)
+              'notCountedSince': DateTime.now()
+                  .subtract(Duration(days: _notCountedDays!))
+                  .toIso8601String(),
+          }),
+          child: const Text('بدء الجرد'),
+        ),
+      ],
+    );
   }
 }

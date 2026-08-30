@@ -1,16 +1,39 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using KineticEnterprise.Api.Data;
+using KineticEnterprise.Api.Models;
 
 namespace KineticEnterprise.Api.Controllers;
 
-public record BrandingResponse(string DisplayName, string? LogoUrl, string PrimaryColor, string SecondaryColor, string CurrencySymbol, string NavLayout);
+public record BrandingResponse(string DisplayName, string? LogoUrl, string PrimaryColor, string SecondaryColor, string CurrencySymbol, string NavLayout, string Edition);
 public record UpdateBrandingRequest(string DisplayName, string PrimaryColor, string SecondaryColor, string NavLayout);
+public record SetLogoRequest(Guid? AttachmentId);
 
-public record OrganizationSettingsDto(string CurrencyCode, string CurrencySymbol, string Locale, decimal TaxRate, int PasswordMinLength, double ReceiptWidthMm, bool PosAllowOpenProduct);
-public record UpdateSettingsRequest(string CurrencyCode, string CurrencySymbol, string Locale, decimal TaxRate, int PasswordMinLength, double ReceiptWidthMm, bool PosAllowOpenProduct);
+public record OrganizationSettingsDto(string CurrencyCode, string CurrencySymbol, string Locale, decimal TaxRate, int PasswordMinLength, double ReceiptWidthMm, bool PosAllowOpenProduct, string CardModesAllowed, string CardModeDefault, decimal CardOpenModeDailyCap);
+public record UpdateSettingsRequest(string CurrencyCode, string CurrencySymbol, string Locale, decimal TaxRate, int PasswordMinLength, double ReceiptWidthMm, bool PosAllowOpenProduct, string? CardModesAllowed, string? CardModeDefault, decimal? CardOpenModeDailyCap);
+
+/// <summary>
+/// قالب الإيصال.
+///
+/// <para><c>Paper</c> أحد: <c>roll80</c>، <c>roll58</c>، <c>a4</c>،
+/// <c>a5</c>. والرقم الضريبي والسجلّ التجاري يُقرآن من المنظمة لا من
+/// القالب — القالب يقرّر أيُعرضان، لا ما قيمتهما.</para>
+/// </summary>
+public record ReceiptTemplateDto(
+    string Paper, bool ShowLogo, bool ShowTaxNumber, bool ShowCommercialRegistry,
+    bool ShowQr, string? HeaderText, string? FooterText);
+
+/// <summary>القالب ومعه ما يملأه — ردٌّ واحد فتطبع الشاشة بلا نداءين.</summary>
+public record ReceiptTemplateResponse(
+    ReceiptTemplateDto Template, string? TaxNumber, string? CommercialRegistry,
+    string? LogoUrl);
+
+public record UpdateReceiptTemplateRequest(
+    string Paper, bool ShowLogo, bool ShowTaxNumber, bool ShowCommercialRegistry,
+    bool ShowQr, string? HeaderText, string? FooterText,
+    string? TaxNumber, string? CommercialRegistry);
 
 public record BarcodeTemplateDto(double WidthMm, double HeightMm, bool ShowName, bool ShowPrice, bool ShowSku);
 
@@ -33,7 +56,35 @@ public class OrganizationsController : ControllerBase
         var org = await _db.Organizations.FirstOrDefaultAsync();
         if (org is null) return NotFound();
 
-        return new BrandingResponse(org.DisplayName, org.LogoUrl, org.PrimaryColor, org.SecondaryColor, org.CurrencySymbol, org.NavLayout);
+        return new BrandingResponse(org.DisplayName, org.LogoUrl, org.PrimaryColor, org.SecondaryColor, org.CurrencySymbol, org.NavLayout, org.Edition);
+    }
+
+    /// <summary>
+    /// ربط شعار مرفوع بالمنظمة. الملف يُرفع أولاً عبر POST /api/files ثم
+    /// يُمرَّر معرّفه هنا — فصلٌ يبقي منطق التخزين في مكان واحد.
+    /// </summary>
+    [HttpPut("me/logo")]
+    [Authorize(Roles = "super_admin")]
+    public async Task<IActionResult> SetLogo([FromBody] SetLogoRequest request)
+    {
+        var org = await _db.Organizations.FirstOrDefaultAsync();
+        if (org is null) return NotFound();
+
+        if (request.AttachmentId is null)
+        {
+            org.LogoUrl = null;
+        }
+        else
+        {
+            // التحقّق من وجود المرفق قبل ربطه: معرّف عشوائي كان سيُخزَّن
+            // رابطاً ميتاً يظهر أيقونة مكسورة في كل شاشة.
+            var exists = await _db.Attachments.AnyAsync(a => a.Id == request.AttachmentId);
+            if (!exists) return BadRequest(new { message = "المرفق غير موجود" });
+            org.LogoUrl = $"/api/files/{request.AttachmentId}";
+        }
+
+        await _db.SaveChangesAsync();
+        return Ok(new { logoUrl = org.LogoUrl });
     }
 
     [HttpPut("me/branding")]
@@ -71,7 +122,8 @@ public class OrganizationsController : ControllerBase
         var org = await _db.Organizations.FirstOrDefaultAsync();
         if (org is null) return NotFound();
 
-        return new OrganizationSettingsDto(org.CurrencyCode, org.CurrencySymbol, org.Locale, org.TaxRate, org.PasswordMinLength, org.ReceiptWidthMm, org.PosAllowOpenProduct);
+        return new OrganizationSettingsDto(org.CurrencyCode, org.CurrencySymbol, org.Locale, org.TaxRate, org.PasswordMinLength, org.ReceiptWidthMm, org.PosAllowOpenProduct,
+            string.Join(",", CardModeGate.AllowedModes(org)), org.CardModeDefault, org.CardOpenModeDailyCap);
     }
 
     [HttpPut("me/settings")]
@@ -103,6 +155,41 @@ public class OrganizationsController : ControllerBase
         // بيع بقيمة يكتبها الكاشير هو أوسع باب لسحب نقدية بلا بضاعة مقابلة،
         // فتغييره محصور بـ super_admin مثل بقية هذه الشاشة.
         org.PosAllowOpenProduct = request.PosAllowOpenProduct;
+
+        // أنماط البطاقة — تُحدَّث فقط إن أُرسلت: عميل قديم لا يعرف هذه الحقول
+        // يجب ألّا يمحو إعداداً بحفظه شاشة العملة.
+        if (request.CardModesAllowed is { } modesRaw)
+        {
+            var modes = modesRaw
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Where(CardModes.IsSelectable)
+                .Distinct()
+                .ToArray();
+            if (modes.Length == 0)
+            {
+                return BadRequest(new { message = "يجب السماح بنمط تحقّق واحد على الأقل" });
+            }
+            org.CardModesAllowed = string.Join(",", modes);
+
+            var fallbackDefault = request.CardModeDefault ?? org.CardModeDefault;
+            if (!modes.Contains(fallbackDefault))
+            {
+                // النمط الافتراضي يجب أن يكون من المسموح، وإلا فكل حساب جديد
+                // يسقط إلى مسارٍ لم يقصده المدير.
+                return BadRequest(new { message = "النمط الافتراضي يجب أن يكون ضمن الأنماط المسموحة" });
+            }
+            org.CardModeDefault = fallbackDefault;
+        }
+
+        if (request.CardOpenModeDailyCap is { } cap)
+        {
+            if (cap < 0)
+            {
+                return BadRequest(new { message = "السقف اليومي لا يكون سالباً" });
+            }
+            org.CardOpenModeDailyCap = cap;
+        }
+
         org.UpdatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync();
 
@@ -151,5 +238,76 @@ public class OrganizationsController : ControllerBase
         await _db.SaveChangesAsync();
 
         return NoContent();
+    }
+
+    /// <summary>
+    /// قالب الإيصال — الشكل الذي يُطبع به كل إيصال في المنظمة.
+    ///
+    /// <para>مفتوح لأي مستخدم مسجَّل: نقطة البيع تحتاجه لتطبع، وقصرُه على
+    /// المدير يجعل الكاشير عاجزاً عن الطباعة. والتعديل وحده محصور
+    /// (راجع <see cref="UpdateReceiptTemplate"/>).</para>
+    /// </summary>
+    [HttpGet("me/receipt-template")]
+    public async Task<ActionResult<ReceiptTemplateResponse>> GetReceiptTemplate()
+    {
+        var org = await _db.Organizations.FirstOrDefaultAsync();
+        if (org is null) return NotFound();
+
+        return new ReceiptTemplateResponse(
+            ParseReceiptTemplate(org), org.TaxNumber, org.CommercialRegistry, org.LogoUrl);
+    }
+
+    [HttpPut("me/receipt-template")]
+    [Authorize(Roles = "super_admin")]
+    public async Task<IActionResult> UpdateReceiptTemplate(UpdateReceiptTemplateRequest request)
+    {
+        var org = await _db.Organizations.FirstOrDefaultAsync();
+        if (org is null) return NotFound();
+
+        if (!ReceiptPapers.All.Contains(request.Paper))
+        {
+            // مقاسٌ مجهول يُنتج PDF بأبعادٍ غير متوقَّعة عند كل طباعة، ولا
+            // يكتشفه أحد إلا والورق يخرج مقصوصاً.
+            return BadRequest(new
+            {
+                message = $"مقاس غير معروف: {request.Paper} — المتاح: {string.Join(", ", ReceiptPapers.All)}",
+            });
+        }
+
+        org.TaxNumber = Trimmed(request.TaxNumber);
+        org.CommercialRegistry = Trimmed(request.CommercialRegistry);
+        org.ReceiptTemplateJson = JsonSerializer.Serialize(new ReceiptTemplateDto(
+            request.Paper, request.ShowLogo, request.ShowTaxNumber,
+            request.ShowCommercialRegistry, request.ShowQr,
+            Trimmed(request.HeaderText), Trimmed(request.FooterText)));
+
+        // العرض القديم يتبع المقاس فلا يفترق مصدرا الحقيقة: شاشةٌ تقرأ
+        // receiptWidthMm وأخرى تقرأ القالب كانتا ستطبعان بعرضين.
+        org.ReceiptWidthMm = request.Paper == ReceiptPapers.Roll58 ? 58 : 80;
+        org.UpdatedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync();
+
+        return NoContent();
+    }
+
+    private static string? Trimmed(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    /// <summary>القالب المحفوظ، أو الافتراضي إن كان النصّ تالفاً.</summary>
+    private static ReceiptTemplateDto ParseReceiptTemplate(Organization org)
+    {
+        try
+        {
+            var dto = JsonSerializer.Deserialize<ReceiptTemplateDto>(
+                org.ReceiptTemplateJson, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            if (dto is not null && ReceiptPapers.All.Contains(dto.Paper)) return dto;
+        }
+        catch (JsonException)
+        {
+            // نصّ غير صالح — يُستعمل الافتراضي أدناه بدل أن تتوقّف الطباعة.
+        }
+
+        return new ReceiptTemplateDto(
+            ReceiptPapers.Roll80, true, true, false, false, null, "شكراً لتعاملكم معنا");
     }
 }

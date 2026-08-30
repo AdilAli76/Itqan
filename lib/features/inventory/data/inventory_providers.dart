@@ -37,3 +37,23 @@ final categoriesProvider =
   final response = await ApiClient.instance.dio.get('/categories');
   return List<Map<String, dynamic>>.from(response.data as List);
 });
+
+// ---------------------------------------------------------------------------
+// قفل المخزون
+// ---------------------------------------------------------------------------
+
+/// دفعات صنف واحد — مصدر حوار القفل. عائلة لا مزوّد واحد: الحوار يُفتح لصنف
+/// بعينه، وتخزين معرّفه في حالة عامة كان يجعل فتح حوارين متتاليين يعرض
+/// الثاني دفعات الأول حتى يصل ردّه.
+final productBatchesProvider =
+    FutureProvider.autoDispose.family<List<Map<String, dynamic>>, String>((ref, productId) async {
+  final response = await ApiClient.instance.dio.get('/stock-locks/batches/$productId');
+  return List<Map<String, dynamic>>.from(response.data as List);
+});
+
+/// كل الموقوف في المنظمة — تبويب «المخزون الموقوف».
+final lockedStockProvider =
+    FutureProvider.autoDispose<List<Map<String, dynamic>>>((ref) async {
+  final response = await ApiClient.instance.dio.get('/stock-locks');
+  return List<Map<String, dynamic>>.from(response.data as List);
+});

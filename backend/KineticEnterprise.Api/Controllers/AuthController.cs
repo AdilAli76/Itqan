@@ -1,4 +1,4 @@
-using System.IdentityModel.Tokens.Jwt;
+﻿using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
 using Microsoft.AspNetCore.Mvc;
@@ -10,7 +10,13 @@ using KineticEnterprise.Api.Models;
 namespace KineticEnterprise.Api.Controllers;
 
 public record LoginRequest(string EmailOrUsername, string Password);
-public record LoginResponse(string Token, string Role, Guid OrganizationId, Guid? BranchId, string FullName);
+public record LoginResponse(
+    string Token, string Role, Guid OrganizationId, Guid? BranchId, string FullName,
+    /// لوح خلفية فرع المستخدم — راجع Branch.ThemePalette.
+    ///
+    /// يُرسَل مع الدخول لا بطلب ثانٍ: الشاشة الأولى يجب أن تظهر بلوحها
+    /// الصحيح، لا أن تومض بالمحايد ثم تتبدّل أمام المستخدم.
+    string BranchPalette);
 
 [ApiController]
 [Route("api/auth")]
@@ -70,6 +76,10 @@ public class AuthController : ControllerBase
             // ادّعاء قصير مكرَّر "role" خصيصاً للواجهة، بلا مساس بمنطق التصريح
             // في الباك اند الذي يبقى يعتمد على ClaimTypes.Role كما هو.
             new(ClaimTypes.Role, user.Role),
+            // الاسم في التوكن لا في نداء منفصل: يُطبَع على أوامر الشراء
+            // تحت خانة «أصدره»، ويُعرض في الواجهة. توقيع بلا اسم مقروء لا
+            // يدلّ على أحد بعد شهور.
+            new(ClaimTypes.Name, user.FullName),
             new("role", user.Role),
         };
         if (user.BranchId.HasValue)
@@ -91,12 +101,22 @@ public class AuthController : ControllerBase
             signingCredentials: creds
         );
 
+        // لوح الفرع يُقرأ بلا سياق عزل: المستخدم لم يُصادَق بعد في هذه
+        // اللحظة، وقراءة صفّ فرعه هو بمعرّفه المعلوم لا تُسرّب شيئاً.
+        var branchPalette = user.BranchId.HasValue
+            ? await _db.Branches
+                .Where(b => b.Id == user.BranchId.Value)
+                .Select(b => b.ThemePalette)
+                .FirstOrDefaultAsync() ?? "default"
+            : "default";
+
         return new LoginResponse(
             new JwtSecurityTokenHandler().WriteToken(token),
             user.Role,
             user.OrganizationId,
             user.BranchId,
-            user.FullName
+            user.FullName,
+            branchPalette
         );
     }
 }

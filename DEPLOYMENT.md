@@ -103,9 +103,9 @@ git push -u origin main
 نفّذ ملف المخطط كاملاً عبر SSMS أو:
 
 ```powershell
-sqlcmd -S .\SQLEXPRESS -E -I -i "C:\kinetic_erp\docs\DATABASE_SCHEMA_SQLSERVER.sql"
-sqlcmd -S .\SQLEXPRESS -E -I -d KineticEnterprise -i "C:\kinetic_erp\docs\MIGRATIONS.sql"
-sqlcmd -S .\SQLEXPRESS -E -I -d KineticEnterprise -i "C:\kinetic_erp\docs\INDEXES.sql"
+sqlcmd -S .\SQLEXPRESS -E -I -f 65001 -i "C:\kinetic_erp\docs\DATABASE_SCHEMA_SQLSERVER.sql"
+sqlcmd -S .\SQLEXPRESS -E -I -f 65001 -d KineticEnterprise -i "C:\kinetic_erp\docs\MIGRATIONS.sql"
+sqlcmd -S .\SQLEXPRESS -E -I -f 65001 -d KineticEnterprise -i "C:\kinetic_erp\docs\INDEXES.sql"
 ```
 
 **العلم `-I` إلزامي** ولا يُحذف: المخطط يحوي فهارس مُرشَّحة (filtered
@@ -113,7 +113,14 @@ indexes) وأعمدة محسوبة، وSQL Server يرفض إنشاءها ما �
 `QUOTED_IDENTIFIER` مفعَّلاً — وsqlcmd يعطّله افتراضياً بخلاف SSMS. بدونه
 تُنشأ بعض الجداول ويفشل بعضها، فتبقى القاعدة نصف مبنيّة بلا رسالة واضحة.
 
-(سكربت `server_setup.ps1` لا يحتاجه: SqlClient يفعّله افتراضياً.)
+**والعلم `-f 65001` إلزامي كذلك:** الملفات مكتوبة بـ UTF-8 بلا BOM،
+وsqlcmd بدونه يقرأها بترميز النظام الغربي فتُخزَّن كل النصوص العربية
+تالفة (`Ø¥ØµØ¯Ø§Ø±` بدل `إصدار`). ولا يظهر الخلل وقت التنفيذ — لا خطأ
+ولا تحذير — بل بعد أسابيع في شاشة أمام المستخدم. والنصّ التالف لا
+تُصلحه إعادة التنفيذ وحدها إن كان الإدراج ملفوفاً بـ `IF NOT EXISTS`.
+
+(سكربت `server_setup.ps1` لا يحتاج العلمين: SqlClient يفعّل
+`QUOTED_IDENTIFIER` افتراضياً، والسكربت يقرأ الملفات بـ UTF-8 صراحةً.)
 
 الأول يُنشئ الجداول وسياسات العزل (Row-Level Security) ودوالّها. والثاني
 والثالث **إلزاميان** ولا يكفي الأول وحده: `MIGRATIONS.sql` يضيف ما استجدّ

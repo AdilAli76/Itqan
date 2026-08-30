@@ -16,6 +16,12 @@ import '../../../shared/widgets/skeleton.dart';
 import '../../../shared/widgets/pagination_bar.dart';
 import '../../../core/auth/permissions.dart';
 import '../../../shared/widgets/app_surface.dart';
+import 'package:file_picker/file_picker.dart';
+import '../../../shared/widgets/authed_image.dart';
+import '../../payroll/data/payroll_providers.dart';
+import '../../../core/theme/branding_provider.dart';
+import 'bulk_cards_dialog.dart';
+import 'import_customers_dialog.dart';
 
 class CustomersScreen extends ConsumerStatefulWidget {
   const CustomersScreen({super.key});
@@ -54,6 +60,25 @@ class _CustomersScreenState extends ConsumerState<CustomersScreen> {
       actions: [
         // الإخفاء لا التعطيل: من لا يملك صلاحية الإضافة لا يحتاج أن يرى
         // الزر أصلاً — رؤيته تدفعه للنقر ثم لسؤال الدعم عن سبب الرفض.
+        // الإصدار الجماعي لإصدار «المحفظة بالمحاسبة» وحده — والخادم
+        // يفرضه أيضاً: حدٌّ تجاري لا تفرضه إلا الواجهة ليس حدّاً.
+        if (ref.watch(brandingProvider).valueOrNull?.edition == 'wallet_plus')
+          Can(
+            permission: Perm.cardsIssue,
+            child: OutlinedButton.icon(
+              onPressed: () => _openBulkCards(context, ref),
+              icon: const Icon(Icons.credit_card_outlined, size: 18),
+              label: const Text('بطاقات جماعية'),
+            ),
+          ),
+        Can(
+          permission: Perm.customersManage,
+          child: TextButton.icon(
+            onPressed: () => _openImport(context, ref),
+            icon: const Icon(Icons.upload_file_outlined, size: 18),
+            label: const Text('استيراد'),
+          ),
+        ),
         Can(
           permission: Perm.customersManage,
           child: ElevatedButton.icon(
@@ -189,6 +214,22 @@ class _CustomersScreenState extends ConsumerState<CustomersScreen> {
     return Text(label, style: AppTextStyles.bodyMd(color: color));
   }
 
+  Future<void> _openImport(BuildContext context, WidgetRef ref) async {
+    final imported = await showDialog<bool>(
+      context: context,
+      builder: (_) => const ImportCustomersDialog(),
+    );
+    if (imported == true) ref.invalidate(customersProvider);
+  }
+
+  Future<void> _openBulkCards(BuildContext context, WidgetRef ref) async {
+    final issued = await showDialog<bool>(
+      context: context,
+      builder: (_) => const BulkCardsDialog(),
+    );
+    if (issued == true) ref.invalidate(customersProvider);
+  }
+
   Future<void> _openCustomerDialog(BuildContext context, {Map<String, dynamic>? customer}) async {
     final saved = await showDialog<bool>(
       context: context,
@@ -274,11 +315,20 @@ class _CustomerFormDialogState extends State<_CustomerFormDialog> {
   late final _cardController = TextEditingController(text: widget.customer?['cardBarcode'] as String?);
   late final _creditLimitController =
       TextEditingController(text: (widget.customer?['creditLimit'] as num?)?.toString() ?? '0');
+  // مهلة السداد — منها يُشتقّ تاريخ استحقاق كل بيع آجل لهذا العميل.
+  late final _creditDaysController =
+      TextEditingController(text: '${(widget.customer?['creditDays'] as num?)?.toInt() ?? 0}');
   late final _ceilingController =
       TextEditingController(text: (widget.customer?['entitlementCeiling'] as num?)?.toString() ?? '0');
   late bool _isBranchOnly = widget.customer?['branchId'] != null;
   late String _accountModel = widget.customer?['accountModel'] as String? ?? 'prepaid';
   late String? _sponsorId = widget.customer?['sponsorId'] as String?;
+  late String? _categoryId = widget.customer?['categoryId'] as String?;
+  // فارغٌ يعني «اتبع مرتَّب الفئة»، والصفر إيقافٌ صريح — راجع
+  // Customer.EntitlementOverride. ولذلك لا يُهيَّأ بصفر.
+  late final _overrideController = TextEditingController(
+      text: (widget.customer?['entitlementOverride'] as num?)?.toString() ?? '');
+  late String? _photoUrl = widget.customer?['photoUrl'] as String?;
   late DateTime? _expiresOn = widget.customer?['entitlementExpiresOn'] == null
       ? null
       : DateTime.tryParse(widget.customer!['entitlementExpiresOn'] as String);
@@ -297,6 +347,8 @@ class _CustomerFormDialogState extends State<_CustomerFormDialog> {
     _notesController.dispose();
     _cardController.dispose();
     _creditLimitController.dispose();
+    _creditDaysController.dispose();
+    _overrideController.dispose();
     _ceilingController.dispose();
     super.dispose();
   }
@@ -357,6 +409,24 @@ class _CustomerFormDialogState extends State<_CustomerFormDialog> {
                     return double.tryParse(v) == null ? 'قيمة غير صحيحة' : null;
                   },
                 ),
+                const SizedBox(height: 12),
+                // بجوار السقف لا في شاشة إعدادات: السقف يقول «كم»، والمهلة
+                // تقول «إلى متى» — وهما وجها قرار ائتماني واحد يُتخذ للعميل
+                // مرّة. وصفر يعني مستحقّاً يوم البيع، وهو الافتراض الآمن.
+                TextFormField(
+                  controller: _creditDaysController,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(
+                    labelText: 'مهلة السداد (أيام)',
+                    helperText: 'صفر = مستحقّ يوم البيع. منها يُحسب تاريخ الاستحقاق وأعمار الديون.',
+                  ),
+                  validator: (v) {
+                    if (v == null || v.trim().isEmpty) return 'حقل إلزامي';
+                    final parsed = int.tryParse(v.trim());
+                    if (parsed == null) return 'قيمة غير صحيحة';
+                    return parsed < 0 ? 'لا تقبل السالب' : null;
+                  },
+                ),
                 const Divider(height: 28),
                 Text('نموذج الحساب', style: AppTextStyles.labelMd()),
                 const SizedBox(height: 6),
@@ -392,6 +462,28 @@ class _CustomerFormDialogState extends State<_CustomerFormDialog> {
                   _SponsorPicker(
                     value: _sponsorId,
                     onChanged: (v) => setState(() => _sponsorId = v),
+                  ),
+                  const SizedBox(height: 12),
+                  _CategoryPicker(
+                    value: _categoryId,
+                    onChanged: (v) => setState(() => _categoryId = v),
+                  ),
+                  const SizedBox(height: 12),
+                  TextFormField(
+                    controller: _overrideController,
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    decoration: const InputDecoration(
+                      labelText: 'مرتَّب خاص بهذا المنتسب',
+                      // الفارغ والصفر معنيان مختلفان — وقولُهما هنا يمنع
+                      // من يكتب صفراً ظانّاً أنه «بلا تخصيص» فيوقف مرتَّبه.
+                      helperText: 'اتركه فارغاً ليتبع مرتَّب فئته · الصفر يوقف مرتَّبه',
+                    ),
+                    validator: (v) {
+                      if (v == null || v.trim().isEmpty) return null;
+                      final parsed = double.tryParse(v.trim());
+                      if (parsed == null) return 'قيمة غير صحيحة';
+                      return parsed < 0 ? 'المبلغ لا يكون سالباً' : null;
+                    },
                   ),
                   const SizedBox(height: 12),
                   TextFormField(
@@ -439,6 +531,11 @@ class _CustomerFormDialogState extends State<_CustomerFormDialog> {
                   ),
                 ],
                 const Divider(height: 28),
+                _CustomerPhotoBox(
+                  photoUrl: _photoUrl,
+                  onChanged: (v) => setState(() => _photoUrl = v),
+                ),
+                const SizedBox(height: 12),
                 TextFormField(
                   controller: _notesController,
                   maxLines: 2,
@@ -491,6 +588,7 @@ class _CustomerFormDialogState extends State<_CustomerFormDialog> {
       'notes': _notesController.text.trim().isEmpty ? null : _notesController.text.trim(),
       'cardBarcode': _cardController.text.trim().isEmpty ? null : _cardController.text.trim(),
       'creditLimit': double.parse(_creditLimitController.text),
+      'creditDays': int.parse(_creditDaysController.text.trim()),
       // فرع المستخدم الحالي وحده متاح بلا شاشة اختيار فروع بعد — راجع
       // نفس القيد في تعديل الكمية بشاشة المخزون.
       'branchId': _isBranchOnly ? await readCurrentBranchId() : null,
@@ -501,6 +599,13 @@ class _CustomerFormDialogState extends State<_CustomerFormDialog> {
       'entitlementCeiling': _isEntitlement ? double.parse(_ceilingController.text) : 0,
       'entitlementExpiresOn':
           _isEntitlement && _expiresOn != null ? DateFormat('yyyy-MM-dd').format(_expiresOn!) : null,
+      'categoryId': _isEntitlement ? _categoryId : null,
+      // فارغٌ ← null لا صفر: الصفر إيقافٌ صريح للمرتَّب، وإرسالُه بدل
+      // الفارغ يوقف مرتَّب كل من فُتحت بطاقته وحُفظت بلا تغيير.
+      'entitlementOverride': _isEntitlement && _overrideController.text.trim().isNotEmpty
+          ? double.tryParse(_overrideController.text.trim())
+          : null,
+      'photoUrl': _photoUrl,
     };
 
     try {
@@ -753,5 +858,192 @@ class _SponsorFormDialogState extends State<_SponsorFormDialog> {
         ),
       ],
     );
+  }
+}
+
+
+/// اختيار فئة المنتسب — منها يُؤخذ مرتَّبه.
+class _CategoryPicker extends ConsumerWidget {
+  const _CategoryPicker({required this.value, required this.onChanged});
+
+  final String? value;
+  final ValueChanged<String?> onChanged;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final async = ref.watch(customerCategoriesProvider);
+
+    return async.when(
+      loading: () => const LinearProgressIndicator(),
+      error: (_, __) => TextFormField(
+        enabled: false,
+        decoration: const InputDecoration(
+          labelText: 'الفئة',
+          helperText: 'تعذّر تحميل الفئات',
+        ),
+      ),
+      data: (categories) {
+        final active =
+            categories.where((c) => c['isActive'] as bool? ?? true).toList();
+
+        if (active.isEmpty) {
+          return TextFormField(
+            enabled: false,
+            decoration: const InputDecoration(
+              labelText: 'الفئة',
+              // قول الطريق لا مجرّد الامتناع: من يجد حقلاً معطَّلاً بلا
+              // سبب يظنّه عطباً.
+              helperText: 'لا فئات بعد — أنشئها من شاشة المرتَّبات والسلف',
+            ),
+          );
+        }
+
+        // القيمة المحفوظة قد تشير إلى فئةٍ أُوقفت: عرضُها كـnull يُظهر
+        // «بلا فئة» لمنتسبٍ له فئة، وحفظُ النموذج بعدها يمحوها فعلاً.
+        final known = active.any((c) => '${c['id']}' == value);
+
+        return DropdownButtonFormField<String?>(
+          initialValue: known ? value : null,
+          isExpanded: true,
+          decoration: InputDecoration(
+            labelText: 'الفئة',
+            helperText: known || value == null
+                ? 'مرتَّب المنتسب يُؤخذ منها'
+                : 'فئته السابقة موقوفة — اختر بديلاً',
+          ),
+          items: [
+            const DropdownMenuItem<String?>(value: null, child: Text('بلا فئة')),
+            for (final c in active)
+              DropdownMenuItem<String?>(
+                value: '${c['id']}',
+                child: Text(
+                    '${c['name']} — ${(c['periodAmount'] as num?)?.toStringAsFixed(2) ?? '0'}'),
+              ),
+          ],
+          onChanged: onChanged,
+        );
+      },
+    );
+  }
+}
+
+/// صورة صاحب البطاقة — تُطبع عليها وتظهر للكاشير عند المسح.
+///
+/// <para>ترفع الملف إلى <c>/api/files</c> فيُعاد مساره، ويُحفظ مع العميل
+/// عند حفظ النموذج — لا فوراً: صورةٌ تُرفع ثم يُلغى الحفظ تترك مرفقاً
+/// معلَّقاً بلا صاحب.</para>
+class _CustomerPhotoBox extends StatefulWidget {
+  const _CustomerPhotoBox({required this.photoUrl, required this.onChanged});
+
+  final String? photoUrl;
+  final ValueChanged<String?> onChanged;
+
+  @override
+  State<_CustomerPhotoBox> createState() => _CustomerPhotoBoxState();
+}
+
+class _CustomerPhotoBoxState extends State<_CustomerPhotoBox> {
+  bool _busy = false;
+  String? _error;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: 64,
+          height: 78,
+          decoration: BoxDecoration(
+            color: AppColors.surfaceAlt,
+            border: Border.all(color: AppColors.border),
+            borderRadius: BorderRadius.circular(6),
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: widget.photoUrl == null
+              ? Icon(Icons.person_outline, color: AppColors.textSecondary)
+              : AuthedImage(path: widget.photoUrl!, fit: BoxFit.cover),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('صورة صاحب البطاقة', style: AppTextStyles.bodyMd()),
+              const SizedBox(height: 2),
+              Text(
+                // السبب لا الوصف: من يقرأ «صورة اختيارية» يتخطّاها.
+                'تُطبع على البطاقة. وبطاقةٌ بلا رقم سرّي يحميها أن يعرف '
+                'الكاشير أن حاملها صاحبها.',
+                style: AppTextStyles.caption(color: AppColors.textSecondary),
+              ),
+              const SizedBox(height: 6),
+              Row(
+                children: [
+                  TextButton.icon(
+                    onPressed: _busy ? null : _pick,
+                    icon: const Icon(Icons.upload_outlined, size: 16),
+                    label: Text(_busy
+                        ? 'جارٍ الرفع…'
+                        : widget.photoUrl == null
+                            ? 'رفع صورة'
+                            : 'تغيير'),
+                  ),
+                  if (widget.photoUrl != null)
+                    TextButton(
+                      onPressed: _busy ? null : () => widget.onChanged(null),
+                      child: Text('إزالة',
+                          style: AppTextStyles.bodyMd(color: AppColors.danger)),
+                    ),
+                ],
+              ),
+              if (_error != null)
+                Text(_error!, style: AppTextStyles.caption(color: AppColors.danger)),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _pick() async {
+    final picked = await FilePicker.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: const ['png', 'jpg', 'jpeg', 'webp'],
+    );
+    final file = picked.firstOrNull;
+    if (file == null) return;
+
+    // البايتات لا المسار: الويب لا يعطي مساراً على القرص، وقراءتها صراحةً
+    // تجعل نفس الكود يعمل على المنصات الثلاث.
+    final bytes = await file.readAsBytes();
+
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      final form = FormData.fromMap({
+        'file': MultipartFile.fromBytes(bytes, filename: file.name),
+      });
+      final upload = await ApiClient.instance.dio.post(
+        '/files',
+        data: form,
+        queryParameters: {'entityType': 'customer_photo'},
+      );
+      AuthedImage.evictAll();
+      // المسار يُبنى من المعرّف كما يفعل شعار المنظمة — والملفات تُخدَم
+      // عبر متحكّمٍ لا كملفات ثابتة، فكل تنزيل يمرّ بالمصادقة والعزل.
+      widget.onChanged('/api/files/${upload.data['id']}');
+      if (mounted) setState(() => _busy = false);
+    } on DioException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _busy = false;
+        _error = e.response?.data is Map
+            ? (e.response!.data['message'] as String? ?? 'تعذّر رفع الصورة')
+            : 'تعذّر رفع الصورة';
+      });
+    }
   }
 }

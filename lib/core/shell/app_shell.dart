@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../auth/current_user.dart';
+import '../network/api_client.dart';
 import '../network/realtime_listener.dart';
 import '../network/realtime_service.dart';
 import '../responsive/breakpoints.dart';
@@ -17,6 +18,7 @@ import 'open_tabs_provider.dart';
 import 'screen_registry.dart';
 import 'shell_scope.dart';
 import '../../shared/widgets/icon_action.dart';
+import '../../shared/widgets/update_banner.dart';
 
 /// الحاوية الدائمة لكل شاشات النظام بعد تسجيل الدخول — تُبنى مرة واحدة فقط
 /// وتبقى حيّة طوال الجلسة. فتح شاشة جديدة = تبويب جديد في IndexedStack
@@ -42,6 +44,12 @@ class _AppShellState extends ConsumerState<AppShell> {
   @override
   void initState() {
     super.initState();
+    // انتهاء الجلسة (401 من أي طلب) يعيد إلى تسجيل الدخول فوراً.
+    //
+    // بدونه كانت كل شاشة تعرض «تعذّر التحميل» مع زر إعادة محاولة لا ينجح
+    // أبداً — السبب ليس الشبكة بل توكن مرفوض — ولا حارس مسار في النظام
+    // يكتشف ذلك. فيبقى المستخدم عالقاً بلا تفسير ولا مخرج.
+    ApiClient.instance.sessionExpired.addListener(_onSessionExpired);
     readJwtClaims().then((claims) {
       if (mounted) setState(() => _isPlatformAdmin = claims?['is_platform_admin'] == 'True');
     });
@@ -56,6 +64,22 @@ class _AppShellState extends ConsumerState<AppShell> {
         ref.read(openTabsProvider.notifier).open(item.route, title: item.label, icon: item.icon);
       }
     });
+  }
+
+  @override
+  void dispose() {
+    ApiClient.instance.sessionExpired.removeListener(_onSessionExpired);
+    super.dispose();
+  }
+
+  void _onSessionExpired() {
+    if (!mounted || !ApiClient.instance.sessionExpired.value) return;
+    // التوكن مُسِح في الاعتراض نفسه؛ الباقي إغلاق التبويبات والتنقّل.
+    ref.read(openTabsProvider.notifier).closeAll();
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('انتهت الجلسة — سجّل الدخول من جديد')),
+    );
+    context.go('/login');
   }
 
   void _openPalette() {
@@ -141,7 +165,15 @@ class _AppShellState extends ConsumerState<AppShell> {
               ],
             ),
       drawer: isDesktop ? null : Drawer(child: AppSidebar(activeRoute: tabsState.activeRoute ?? '')),
-      body: useSidebar
+      // شريط التحديث فوق كل شيء: هو الرسالة الوحيدة التي يجب أن تُرى مهما
+      // كانت الشاشة المفتوحة، ووضعه داخل شاشة بعينها يعني أن من لا يفتحها
+      // لا يعلم بالتحديث أبداً.
+      body: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const UpdateBanner(),
+          Expanded(
+            child: useSidebar
           ? Row(
               children: [
                 SizedBox(
@@ -169,6 +201,9 @@ class _AppShellState extends ConsumerState<AppShell> {
                   ],
                 )
               : content,
+          ),
+        ],
+      ),
     );
   }
 }

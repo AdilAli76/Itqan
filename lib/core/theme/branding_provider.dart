@@ -9,6 +9,7 @@ class OrganizationBranding {
     required this.colors,
     required this.currencySymbol,
     required this.navLayout,
+    required this.edition,
   });
 
   final String displayName;
@@ -18,12 +19,36 @@ class OrganizationBranding {
   // 'sidebar' أو 'navbar' — تفضيل عرض بحت يختاره كل عميل، راجع AdaptiveScaffold.
   final String navLayout;
 
+  /// شكل النظام: standard | wallet | pharmacy | trial | enterprise.
+  ///
+  /// يُقرَّر عند إنشاء المنظمة ولا يُغيَّر من الواجهة — تغييره بعد التشغيل
+  /// يعني إخفاء وحدات فيها بيانات قائمة.
+  final String edition;
+
+  /// إصدار المحفظة: بطاقات وأرصدة بلا بضاعة. نقطة البيع تُدخِل مبلغاً،
+  /// ولا كتالوج ولا مخزون ولا مشتريات.
+  /// إصدارٌ على شكل المحفظة — بطاقات وأرصدة بلا بضاعة.
+  ///
+  /// <para>يشمل `wallet_plus` (المحفظة ومعها المحاسبة): هو محفظةٌ في كل
+  /// سلوكه، والفارق دفترٌ لا شكلُ شاشة. ويقابل `Editions.IsWalletShaped`
+  /// في الخادم — والقائمتان تُقرآن معاً.</para>
+  bool get isWallet => edition == 'wallet' || edition == 'wallet_plus';
+
+  /// إصدار الصيدليات: نشرة الدواء مربوطة بالأصناف وتُعرض لحظة الصرف.
+  ///
+  /// مقصور على من اشتراه: النظام يُباع لبقالة ومحل قطع غيار أيضاً، وحقول
+  /// «موانع الاستعمال» و«الجرعة» في شاشة أصنافهم ضوضاء تُربك ولا تُفيد.
+  /// والإخفاء هنا للواجهة فقط — الحارس الفعلي على الخادم
+  /// (RequireModule("pharmacy")).
+  bool get isPharmacy => edition == 'pharmacy';
+
   static const fallback = OrganizationBranding(
-    displayName: 'Kinetic Enterprise',
+    displayName: 'منظومة إتقان ERP',
     logoUrl: null,
     colors: AppColors(),
     currencySymbol: 'د.ل',
     navLayout: 'sidebar',
+    edition: 'standard',
   );
 }
 
@@ -45,6 +70,7 @@ final brandingProvider = FutureProvider<OrganizationBranding>((ref) async {
       ),
       currencySymbol: data['currencySymbol'] as String? ?? 'د.ل',
       navLayout: data['navLayout'] as String? ?? 'sidebar',
+      edition: data['edition'] as String? ?? 'standard',
     );
   } catch (_) {
     // قبل تسجيل الدخول (لا توكن بعد) أو تعذّر الاتصال بالسيرفر -> اللوحة

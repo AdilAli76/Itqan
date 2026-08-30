@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../network/api_client.dart';
+import '../network/offline_queue.dart';
 
 /// نافذة/تبويب مفتوح — الشاشة نفسها تبقى حيّة في الذاكرة (IndexedStack في
 /// AppShell) طالما تبويبها مفتوح، فلا يُعاد بناؤها من الصفر عند التنقّل
@@ -63,4 +64,9 @@ final openTabsProvider = StateNotifierProvider<OpenTabsNotifier, TabsState>((ref
 Future<void> performLogout(WidgetRef ref) async {
   await ApiClient.instance.clearToken();
   ref.read(openTabsProvider.notifier).closeAll();
+
+  // الطابور يُخفى عن الشاشة ولا يُمحى من التخزين: قد يحمل مبيعات حقيقية لم
+  // تصل الخادم بعد، ومحوُها عند الخروج يُضيّع مالاً قُبض فعلاً. ويعود
+  // ظهوره حين يدخل صاحبه — راجع OfflineQueueNotifier.reloadForCurrentUser.
+  await ref.read(offlineQueueProvider.notifier).reloadForCurrentUser();
 }

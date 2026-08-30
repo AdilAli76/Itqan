@@ -1,0 +1,36 @@
+{
+  "expiredBatches": 1,
+  "expiredQuantity": 18.0,
+  "expiringBatches": 2,
+  "expiringQuantity": 42.0,
+  "withinDays": 30,
+  "batches": [
+    {
+      "productId": "adc8db41-ce24-4857-b355-a5c596724118",
+      "productName": "باراسيتامول 500 مجم",
+      "sku": "MED-001",
+      "batchNumber": "PAR-2312",
+      "expiryDate": "2026-08-09T00:00:00",
+      "quantity": 18.0,
+      "daysRemaining": -15
+    },
+    {
+      "productId": "95b9f645-4115-4031-8ef7-bdfa0a7ff155",
+      "productName": "أموكسيسيلين 250 مجم شراب",
+      "sku": "MED-002",
+      "batchNumber": "AMX-2405",
+      "expiryDate": "2026-09-03T00:00:00",
+      "quantity": 12.0,
+      "daysRemaining": 10
+    },
+    {
+      "productId": "adc8db41-ce24-4857-b355-a5c596724118",
+      "productName": "باراسيتامول 500 مجم",
+      "sku": "MED-001",
+      "batchNumber": "PAR-2401",
+      "expiryDate": "2026-09-18T00:00:00",
+      "quantity": 30.0,
+      "daysRemaining": 25
+    }
+  ]
+}

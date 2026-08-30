@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/network/api_client.dart';
+import '../../../core/network/offline_queue.dart';
 import '../../../core/responsive/breakpoints.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_text_styles.dart';
@@ -36,7 +37,18 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       });
       final token = response.data['token'] as String;
       await ApiClient.instance.saveToken(token);
+
+      // لوح خلفية الفرع يُطبَّق قبل الانتقال: تطبيقه بعد بناء الشاشة يجعلها
+      // تومض بالمحايد ثم تتبدّل أمام المستخدم. راجع BranchPalettes.
+      AppColors.applyBranchPalette(response.data['branchPalette'] as String?);
+
       ref.invalidate(brandingProvider);
+
+      // طابور البيع المؤجَّل يخصّ منظمةً بعينها: بلا إعادة تحميله هنا يبقى
+      // طابور من دخل قبله معروضاً لمن دخل الآن — وهو ما كان يُظهر عدّاد
+      // مزامنة لمنظمة أخرى على الجهاز نفسه.
+      await ref.read(offlineQueueProvider.notifier).reloadForCurrentUser();
+
       if (mounted) context.go('/app');
     } catch (_) {
       setState(() => _error = 'بيانات الدخول غير صحيحة، أو تعذّر الاتصال بالسيرفر');
@@ -60,20 +72,20 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
           // بعرض النموذج كاملاً.
           Align(
             alignment: AlignmentDirectional.centerStart,
-            child: Container(
-              width: 56,
-              height: 56,
-              decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.primary,
-                borderRadius: BorderRadius.circular(12),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(14),
+              child: Image.asset(
+                'assets/branding/itqan_logo.png',
+                width: 64,
+                height: 64,
+                fit: BoxFit.cover,
               ),
-              child: const Icon(Icons.hub_outlined, color: Colors.white),
             ),
           ),
           const SizedBox(height: 20),
           Text('تسجيل الدخول', style: AppTextStyles.displayLg()),
           const SizedBox(height: 4),
-          Text('نظام Kinetic Enterprise لإدارة الموارد', style: AppTextStyles.bodyMd()),
+          Text('منظومة إتقان ERP لإدارة الموارد والمؤسسات', style: AppTextStyles.bodyMd()),
           const SizedBox(height: 32),
           Text('البريد الإلكتروني أو اسم المستخدم', style: AppTextStyles.labelMd()),
           const SizedBox(height: 6),
@@ -127,6 +139,18 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
               label: const Text('عميل؟ اعرض رصيد بطاقتك'),
             ),
           ),
+          // تغيير الخادم من هنا: عنوانٌ كُتب خطأً كان سيحبس المستخدم في
+          // شاشة دخول تفشل أبداً بلا مخرج إلا حذف التطبيق. ولا يظهر على
+          // الويب ولا في نسخة مخبوزة لعميل بعينه.
+          if (ApiClient.canChangeServer)
+            Center(
+              child: TextButton.icon(
+                onPressed: () => context.go('/server'),
+                icon: const Icon(Icons.dns_outlined, size: 16),
+                label: Text('الخادم: ${_serverLabel()}',
+                    style: AppTextStyles.caption()),
+              ),
+            ),
         ],
       ),
     );
@@ -137,29 +161,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         child: isDesktop
             ? Row(
                 children: [
-                  // اللوحة اليسرى للهوية البصرية - جزء من العلامة التجارية
+                  // اللوحة اليسرى للهوية البصرية — جزء من العلامة التجارية
                   // القابلة للتخصيص، وليست تدرجاً بنفسجياً جاهزاً.
-                  Expanded(
-                    child: Container(
-                      color: Theme.of(context).colorScheme.primary,
-                      alignment: Alignment.center,
-                      child: Padding(
-                        padding: const EdgeInsets.all(48),
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            const Icon(Icons.hub_outlined, color: Colors.white, size: 48),
-                            const SizedBox(height: 20),
-                            Text(
-                              'إدارة موحّدة لكل فروعك\nمن لوحة تحكم واحدة',
-                              textAlign: TextAlign.center,
-                              style: AppTextStyles.headlineLg(color: Colors.white),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
+                  const Expanded(child: _BrandPanel()),
                   Expanded(child: _scrollableCenter(form, 32)),
                 ],
               )
@@ -256,6 +260,94 @@ class _Step extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// لوحة الهوية على شاشة الدخول.
+///
+/// **لماذا ليست لوناً مسطّحاً:** كانت مستطيلاً بلون واحد فتبدو الشاشة نموذجاً
+/// داخلياً لا منتجاً. والتدرّج بين لونَي المنظمة يعطي عمقاً **بلا شحن أي
+/// صورة**: صورة ثابتة في الحزمة تناقض التخصيص (لكل عميل لونان مختلفان)،
+/// وتزيد أول تحميل الذي خفّضناه للتوّ إلى الربع.
+///
+/// والعلامة المائية شفافة خلف النصّ — «صورة» مرسومة بالكود تتلوّن بهوية كل
+/// عميل تلقائياً، فلا تحتاج ملفاً لكل واحد.
+/// العنوان بلا بروتوكول ولا لاحقة — ما يقرؤه المستخدم لا ما يرسله العميل.
+String _serverLabel() {
+  final url = ApiClient.resolvedBaseUrl;
+  if (url.isEmpty) return 'غير مضبوط';
+  return url
+      .replaceFirst('https://', '')
+      .replaceFirst('http://', '')
+      .replaceFirst(RegExp(r'/api$'), '');
+}
+
+class _BrandPanel extends StatelessWidget {
+  const _BrandPanel();
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topRight,
+          end: Alignment.bottomLeft,
+          colors: [
+            scheme.primary,
+            Color.lerp(scheme.primary, scheme.secondary, 0.55) ?? scheme.primary,
+            scheme.primary,
+          ],
+          stops: const [0, 0.55, 1],
+        ),
+      ),
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          // تتجاوز حدود اللوحة عمداً فتُقصّ: الشكل المقصوص يوحي بامتداد خارج
+          // الإطار، والمتمركز الكامل يبدو ملصقاً.
+          Positioned(
+            right: -60,
+            bottom: -40,
+            child: Icon(
+              Icons.hub_outlined,
+              size: 320,
+              color: Colors.white.withValues(alpha: 0.07),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(48),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(24),
+                  child: Image.asset(
+                    'assets/branding/itqan_logo.png',
+                    width: 100,
+                    height: 100,
+                    fit: BoxFit.cover,
+                  ),
+                ),
+                const SizedBox(height: 24),
+                Text(
+                  'إتقان في الحسابات..\nوسرعة في العمليات',
+                  textAlign: TextAlign.center,
+                  style: AppTextStyles.headlineLg(color: Colors.white),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  'إدارة موحّدة وذكية لكل فروعك ومستودعاتك',
+                  textAlign: TextAlign.center,
+                  style: AppTextStyles.bodyMd(color: Colors.white.withValues(alpha: 0.85)),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

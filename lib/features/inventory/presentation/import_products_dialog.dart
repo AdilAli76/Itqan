@@ -34,20 +34,17 @@ class _ImportProductsDialogState extends ConsumerState<ImportProductsDialog> {
     final result = await FilePicker.pickFiles(
       type: FileType.custom,
       allowedExtensions: ['xlsx', 'xlsm', 'csv'],
-      // withData ضروري على الويب وعلى أندرويد: المسار قد لا يكون متاحاً
-      // أصلاً، والبايتات هي الطريق الوحيد المضمون على كل المنصات.
-      withData: true,
     );
-    if (result == null || result.files.isEmpty) return;
+    if (result.isEmpty) return;
 
-    final file = result.files.first;
-    if (file.bytes == null) {
-      setState(() => _error = 'تعذّرت قراءة الملف');
-      return;
-    }
+    // المسار قد لا يكون متاحاً على الويب ولا على أندرويد، فالبايتات هي
+    // الطريق الوحيد المضمون على كل المنصات.
+    final file = result.first;
+    final bytes = await file.readAsBytes();
+
     setState(() {
       _fileName = file.name;
-      _fileBytes = file.bytes;
+      _fileBytes = bytes;
       _preview = null;
       _error = null;
       _done = false;
@@ -115,6 +112,11 @@ class _ImportProductsDialogState extends ConsumerState<ImportProductsDialog> {
     final create = ((preview?['willCreate'] as num?) ?? 0).toInt();
     final update = ((preview?['willUpdate'] as num?) ?? 0).toInt();
     final total = ((preview?['totalRows'] as num?) ?? 0).toInt();
+    final newCategories =
+        ((preview?['createdCategories'] as List?) ?? const []).map((e) => 'تصنيف «$e»');
+    final newSuppliers =
+        ((preview?['createdSuppliers'] as List?) ?? const []).map((e) => 'مورّد «$e»');
+    final newLookups = [...newCategories, ...newSuppliers];
 
     return AlertDialog(
       title: const Text('استيراد أصناف من ملف'),
@@ -173,6 +175,25 @@ class _ImportProductsDialogState extends ConsumerState<ImportProductsDialog> {
                     _Stat(label: 'أخطاء', value: '$errors', color: errors > 0 ? AppColors.danger : null),
                   ],
                 ),
+                // تصنيفات وموردون سيُنشَأون تلقائياً — يُعرَضون قبل التأكيد
+                // لا بعده: خطأ إملائي في الملف يزرع تصنيفاً شبحاً، ورؤيته
+                // الآن تكلّف تصحيح خلية واحدة، ورؤيته لاحقاً تكلّف تنظيف
+                // كتالوج.
+                if (newLookups.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: AppColors.infoBg,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
+                      'سيُنشأ تلقائياً: ${newLookups.join('، ')}',
+                      style: AppTextStyles.bodyMd(color: AppColors.info),
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 12),
                 if (_done)
                   Container(

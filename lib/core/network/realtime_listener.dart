@@ -36,6 +36,22 @@ class _RealtimeListenerState extends ConsumerState<RealtimeListener> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) ref.read(realtimeServiceProvider).connect();
     });
+
+    // تفريغ الطابور عند الإقلاع أيضاً، لا عند انتقال الحالة وحده.
+    //
+    // **العطب الذي يصلحه:** المزامنة كانت تقع فقط عند الانتقال من «غير
+    // متصل» إلى «متصل». والحالة الغالبة أن يُفتح التطبيق **وهو متصل
+    // أصلاً** — فلا انتقال يقع ولا تُستدعى المزامنة أبداً، فيبقى الطابور
+    // المستعاد من التخزين معروضاً إلى الأبد رغم وجود الإنترنت. وهو ما
+    // يظهر للمستخدم كعدّاد «يحتاج مزامنة» لا يتحدّث مهما فعل.
+    //
+    // ويُعاد تحميل الطابور أولاً: التوكن قد يكون قُرئ بعد إنشاء المزوّد،
+    // ومنظمة الطابور تُعرَف منه.
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      await ref.read(offlineQueueProvider.notifier).reloadForCurrentUser();
+      if (mounted) await _drainQueue();
+    });
   }
 
   /// ما الذي يبطُل عند كل حدث. الإبطال ضيّق عمداً: إبطال كل شيء عند أي حدث
@@ -104,6 +120,7 @@ class _RealtimeListenerState extends ConsumerState<RealtimeListener> {
     return widget.child;
   }
 
+
   Future<void> _drainQueue() async {
     final queue = ref.read(offlineQueueProvider);
     if (queue.isEmpty) return;
@@ -138,35 +155,46 @@ class RealtimeIndicator extends ConsumerWidget {
     }
 
     final connecting = status == RealtimeStatus.connecting;
+
+    // أيقونةٌ وحدها لا شارةٌ بنصّ.
+    //
+    // <para><b>لماذا تغيّرت:</b> الشارة النصّية تظهر ما دام الاتصال اللحظي
+    // منقطعاً — وقد يبقى كذلك ساعات. فتصير تحذيراً دائماً لا يُغيّر سلوكاً،
+    // وهو تعريف الضجيج: ما يُرى دائماً يُهمَل دائماً. وعلى الهاتف كانت
+    // تسرق عرض شريط العنوان فيُقصّ اسم الشاشة («الخصم م...»).</para>
+    //
+    // <para>والمعلومة تبقى كاملة عند النقر — لمن أرادها حين يريدها.</para>
     return Tooltip(
       message: connecting
           ? 'جارٍ استعادة الاتصال اللحظي…'
           : 'الاتصال اللحظي منقطع — البيانات قد لا تكون محدَّثة، استخدم زر التحديث',
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-        decoration: BoxDecoration(
-          color: connecting ? AppColors.infoBg : AppColors.warningBg,
-          borderRadius: BorderRadius.circular(6),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
+      child: Semantics(
+        button: true,
+        label: connecting ? 'جارٍ استعادة الاتصال اللحظي' : 'الاتصال اللحظي منقطع',
+        child: InkWell(
+          onTap: () => _explain(context, connecting),
+          borderRadius: BorderRadius.circular(20),
+          child: Padding(
+            padding: const EdgeInsets.all(6),
+            child: Icon(
               connecting ? Icons.sync : Icons.cloud_off_outlined,
-              size: 14,
+              size: 18,
               color: connecting ? AppColors.info : AppColors.warning,
             ),
-            const SizedBox(width: 6),
-            Text(
-              connecting ? 'إعادة اتصال' : 'غير متصل',
-              style: AppTextStyles.labelMd(
-                color: connecting ? AppColors.info : AppColors.warning,
-              ),
-            ),
-          ],
+          ),
         ),
       ),
     );
+  }
+
+  void _explain(BuildContext context, bool connecting) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(connecting
+          ? 'جارٍ استعادة الاتصال اللحظي…'
+          : 'الاتصال اللحظي منقطع — البيانات قد لا تكون محدَّثة. '
+              'البيع يعمل كالمعتاد، واستخدم زرّ التحديث لأحدث الأرقام.'),
+      duration: const Duration(seconds: 5),
+    ));
   }
 }
 

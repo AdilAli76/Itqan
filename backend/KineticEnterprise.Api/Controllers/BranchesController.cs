@@ -1,4 +1,4 @@
-using System.IdentityModel.Tokens.Jwt;
+﻿using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -8,8 +8,8 @@ using KineticEnterprise.Api.Models;
 
 namespace KineticEnterprise.Api.Controllers;
 
-public record CreateBranchRequest(string Name, string Code, string? Address, string? Phone);
-public record UpdateBranchRequest(string Name, string Code, string? Address, string? Phone, bool IsActive);
+public record CreateBranchRequest(string Name, string Code, string? Address, string? Phone, string? ThemePalette = null);
+public record UpdateBranchRequest(string Name, string Code, string? Address, string? Phone, bool IsActive, string? ThemePalette = null);
 
 /// <summary>
 /// إدارة الفروع (إضافة/تعديل) مقصورة على super_admin عمداً — هيكلة فروع
@@ -37,26 +37,32 @@ public class BranchesController : ControllerBase
     [Authorize(Roles = "super_admin")]
     public async Task<ActionResult<Branch>> Create(CreateBranchRequest request)
     {
+        var organizationId = Guid.Parse(User.FindFirstValue("organization_id")!);
+
+        // حدّ الترخيص يُفحَص قبل أي كتابة — راجع [LicenseLimits].
+        try
+        {
+            await LicenseLimits.EnsureCanAddBranchAsync(_db, organizationId);
+        }
+        catch (LicenseLimitException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+
         var branch = new Branch
         {
-            OrganizationId = Guid.Parse(User.FindFirstValue("organization_id")!),
+            OrganizationId = organizationId,
             Name = request.Name,
             Code = request.Code,
             Address = request.Address,
             Phone = request.Phone,
+            ThemePalette = NormalizePalette(request.ThemePalette),
         };
         _db.Branches.Add(branch);
         _db.LogAudit(branch.OrganizationId, CurrentUserId(), "branch.created", "branches", branch.Id,
             newValues: new { branch.Name, branch.Code });
 
-        try
-        {
-            await _db.SaveChangesAsync();
-        }
-        catch (DbUpdateException)
-        {
-            return Conflict(new { message = "رمز الفرع مستخدَم بالفعل" });
-        }
+        await _db.SaveChangesAsync();
         return CreatedAtAction(nameof(GetAll), new { }, branch);
     }
 
@@ -72,19 +78,23 @@ public class BranchesController : ControllerBase
         branch.Address = request.Address;
         branch.Phone = request.Phone;
         branch.IsActive = request.IsActive;
+        branch.ThemePalette = NormalizePalette(request.ThemePalette);
 
         _db.LogAudit(branch.OrganizationId, CurrentUserId(), "branch.updated", "branches", branch.Id,
             newValues: new { branch.Name, branch.Code, branch.IsActive });
 
-        try
-        {
-            await _db.SaveChangesAsync();
-        }
-        catch (DbUpdateException)
-        {
-            return Conflict(new { message = "رمز الفرع مستخدَم بالفعل" });
-        }
+        await _db.SaveChangesAsync();
         return NoContent();
+    }
+
+    /// <summary>
+    /// لوح غير معروف يُردّ إلى الافتراضي بدل رفض الطلب: قيمة عرض لا تستحقّ
+    /// أن تُفشل حفظ فرع، وعميل من نسخة أقدم قد يرسل اسماً حُذف.
+    /// </summary>
+    private static string NormalizePalette(string? value)
+    {
+        string[] known = { "default", "warm", "cool", "green", "slate" };
+        return value is not null && known.Contains(value) ? value : "default";
     }
 
     private Guid? CurrentUserId()

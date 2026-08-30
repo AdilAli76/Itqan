@@ -1,7 +1,11 @@
 import 'package:flutter/material.dart';
 
 class AppConstants {
-  static const String appNameFallback = 'Kinetic Enterprise';
+  /// الاسم التجاري للمنتج.
+  ///
+  /// «احتياطي» لأن كل منظمة تعرض اسمها هي (White-Labeling، راجع
+  /// branding_provider). وهذا ما يظهر قبل تحميل هويّتها وفي شاشة الدخول.
+  static const String appNameFallback = 'إتقان ERP';
   static const Locale locale = Locale('ar');
   static const TextDirection direction = TextDirection.rtl;
 

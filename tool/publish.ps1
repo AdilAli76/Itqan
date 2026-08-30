@@ -6,9 +6,10 @@
     يُنتج مجلداً واحداً (وملف ZIP) يحوي كل ما يحتاجه السيرفر:
 
         publish/
-          backend/     ← الخادم مبنياً للإنتاج (win-x64)
-          web/         ← تطبيق الويب مبنياً
+          backend/     ← الخادم مبنياً للإنتاج (win-x64)، وتطبيق الويب
+                         داخل backend\wwwroot (موقع IIS واحد يخدمهما معاً)
           sql/         ← المخطط والترحيلات والفهارس
+          tool/        ← سكربتات التشغيل على السيرفر
           appsettings.Production.template.json
           README-النشر.txt
 
@@ -18,8 +19,9 @@
     في أي منظمة.
 
 .PARAMETER ApiUrl
-    عنوان الخادم كما سيراه المتصفح. يُحقَن في بناء الويب.
-    مثال: https://erp.example.ly/api
+    اختياري. الويب يشتقّ عنوان الـAPI من أصل الصفحة وقت التشغيل، فالحزمة
+    الواحدة تعمل على أي نطاق بلا إعادة بناء. مرّره فقط إن كان الـAPI على
+    أصل مختلف عن الصفحة. مثال: https://erp.droob-albayan.ly/api
 
 .PARAMETER Output
     مجلد الإخراج. الافتراضي publish/ في جذر المشروع.
@@ -28,11 +30,13 @@
     تخطّي بناء الويب (للنشر على خادم API فقط).
 
 .EXAMPLE
-    .\tool\publish.ps1 -ApiUrl https://erp.example.ly/api
+    .\tool\publish.ps1
+    .\tool\publish.ps1 -ApiUrl https://erp.droob-albayan.ly/api
 #>
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory = $true)]
+    # اختياري: الويب يشتقّ العنوان من أصل الصفحة. مرّره فقط إن كان الـAPI
+    # على أصل مختلف عن الصفحة.
     [string]$ApiUrl,
     [string]$Output,
     [switch]$SkipWeb,
@@ -50,8 +54,9 @@ $api = Join-Path $root 'backend\KineticEnterprise.Api'
 
 function Step($n, $t) { Write-Host "`n[$n] $t" -ForegroundColor Cyan }
 function Ok($t) { Write-Host "    $t" -ForegroundColor Green }
+function Warn($t) { Write-Host "    $t" -ForegroundColor Yellow }
 
-if ($ApiUrl -notmatch '^https://') {
+if ($ApiUrl -and $ApiUrl -notmatch '^https://') {
     if (-not $AllowInsecure) {
         # HTTP يعني توكن JWT وكلمات مرور تمرّ بنصّ ظاهر على الشبكة.
         throw "ApiUrl يجب أن يبدأ بـ https:// — أو مرّر -AllowInsecure لتجربة أولى على IP."
@@ -65,17 +70,34 @@ if ($ApiUrl -notmatch '^https://') {
     Write-Host '  ############################################################' -ForegroundColor Red
     Write-Host ''
 }
-if ($ApiUrl -notmatch '/api/?$') {
+if ($ApiUrl -and $ApiUrl -notmatch '/api/?$') {
     throw "ApiUrl يجب أن ينتهي بـ /api — هذا ما يتوقّعه ApiClient.baseUrl."
 }
 
 Write-Host "`n=== بناء حزمة النشر ===" -ForegroundColor White
-Write-Host "    عنوان الـ API: $ApiUrl"
+Write-Host "    عنوان الـ API: $(if ($ApiUrl) { $ApiUrl } else { 'يُشتقّ من أصل الصفحة — الحزمة تعمل على أي نطاق' })"
 
 # ── 1. تنظيف ────────────────────────────────────────────────────────────
 Step 1 'تنظيف مجلد الإخراج'
-if (Test-Path $Output) { Remove-Item -LiteralPath $Output -Recurse -Force }
-New-Item -ItemType Directory -Path $Output | Out-Null
+# المحتوى أولاً ثم المجلد نفسه — وفشل الأخير لا يوقف البناء.
+#
+# مجلد الإخراج يبقى مفتوحاً في المستكشف أو تحت فحص المضاد أو المفهرس، فيُقفل
+# **المجلد** بينما محتواه قابل للحذف. وRemove-Item -Recurse يفشل حينها فيسقط
+# البناء كلّه عند خطوته الأولى — لسبب لا علاقة له بالشيفرة، ولا يفهمه من
+# يقرأ الرسالة. وقع فعلاً.
+if (Test-Path $Output) {
+    Get-ChildItem -LiteralPath $Output -Force -ErrorAction SilentlyContinue |
+        Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+
+    # المتبقّي بعد المحاولة يعني قفلاً على ملف بعينه — وهذا يوقف البناء
+    # فعلاً، لأن حزمةً تخلط ملفات نسختين أسوأ من بناء يفشل.
+    $left = @(Get-ChildItem -LiteralPath $Output -Force -Recurse -ErrorAction SilentlyContinue)
+    if ($left.Count -gt 0) {
+        throw "تعذّر تفريغ $Output — $($left.Count) عنصراً ما زال مقفولاً. أغلق ما يفتحه ثم أعد المحاولة، أو مرّر -Output بمسار آخر."
+    }
+} else {
+    New-Item -ItemType Directory -Path $Output | Out-Null
+}
 Ok $Output
 
 # ── 2. اختبارات قبل البناء ──────────────────────────────────────────────
@@ -113,7 +135,15 @@ if (-not $SkipWeb) {
     Step 4 'بناء تطبيق الويب'
     Push-Location $root
     try {
-        & flutter build web --release --dart-define=API_BASE_URL=$ApiUrl
+        # بلا --dart-define: الويب يشتقّ عنوان الـAPI من أصل الصفحة وقت
+        # التشغيل (راجع ApiClient.baseUrl)، فالحزمة الواحدة تعمل على أي
+        # نطاق. ويُخبَز العنوان فقط إن مُرِّر -ApiUrl صراحةً — حالة استضافة
+        # الـAPI على أصل مختلف.
+        if ($ApiUrl) {
+            & flutter build web --release --dart-define=API_BASE_URL=$ApiUrl
+        } else {
+            & flutter build web --release
+        }
         if ($LASTEXITCODE -ne 0) { throw 'flutter build web فشل' }
     } finally { Pop-Location }
     # داخل wwwroot لا في مجلد منفصل: الخادم يخدم الويب من جذره (راجع
@@ -123,6 +153,19 @@ if (-not $SkipWeb) {
     if (Test-Path $wwwroot) { Remove-Item $wwwroot -Recurse -Force }
     Copy-Item -Path (Join-Path $root 'build\web') -Destination $wwwroot -Recurse
     Ok 'الويب جاهز داخل backend\wwwroot'
+
+    # ── ضغط الأصول مرّة واحدة بأقصى جودة ────────────────────────────────
+    #
+    # يُنفَّذ بالحزمة نفسها لا بـPowerShell: BrotliStream غير موجود في
+    # Windows PowerShell 5.1 (يحتاج .NET Core)، وهو المثبَّت افتراضياً على
+    # ويندوز. راجع WebAssetCompressor لسبب الضغط وقت البناء لا وقت الطلب.
+    $apiDll = Join-Path $backendOut 'KineticEnterprise.Api.dll'
+    if (Test-Path $apiDll) {
+        & dotnet $apiDll compress-web $wwwroot
+        if ($LASTEXITCODE -ne 0) { throw 'ضغط أصول الويب فشل' }
+    } else {
+        Warn 'لم يُعثر على الحزمة لتشغيل ضغط الأصول — تُنشر بلا ضغط مسبق'
+    }
 }
 
 # ── 5. ملفات SQL ────────────────────────────────────────────────────────
@@ -132,6 +175,34 @@ New-Item -ItemType Directory -Path $sqlOut | Out-Null
 foreach ($f in @('docs\DATABASE_SCHEMA_SQLSERVER.sql', 'docs\MIGRATIONS.sql', 'docs\INDEXES.sql')) {
     $p = Join-Path $root $f
     if (Test-Path $p) { Copy-Item $p $sqlOut; Ok (Split-Path $f -Leaf) }
+}
+
+# لقطة المخطّط المتوقَّع — ما يجعل schema_check يعمل على السيرفر.
+#
+# الفاحص يقرأ Entities.cs وAppDbContext.cs، وهما غير موجودين على السيرفر
+# (هناك DLL مبنيّة فقط). واللقطة تُبنى هنا من المصدر نفسه فتسافر مع الحزمة،
+# فيبقى الفحص ممكناً في المكان الذي يهمّ فيه أكثر: بعد الترقية على الإنتاج.
+& (Join-Path $root 'tool\schema_check.ps1') -Emit (Join-Path $sqlOut 'expected_schema.json')
+Ok 'expected_schema.json'
+
+# ── 5.5 سكربتات السيرفر ─────────────────────────────────────────────────
+#
+#  كانت الحزمة تصل بلا أي سكربت، فتصبح تعليمات README تركيباً يدوياً كاملاً
+#  في IIS — وهي بالضبط الخطوات التي كتبنا server_setup.ps1 لأتمتتها. ومن
+#  يفتح الحزمة على السيرفر لا يملك المستودع أصلاً، فأمرٌ مثل
+#  `tool\server_setup.ps1` كان يفشل عنده بـ«الملف غير موجود».
+#
+#  ولا تدخل الحزمة أدوات التطوير (publish، run_local، capture_fixtures،
+#  generate_app_icons): لا معنى لها على سيرفر بلا مستودع ولا Flutter، ووجودها
+#  يوحي بأنها جزء من التشغيل.
+Step 5.5 'سكربتات السيرفر'
+$toolOut = Join-Path $Output 'tool'
+New-Item -ItemType Directory -Path $toolOut | Out-Null
+foreach ($f in @('server_setup.ps1', 'setup_staging.ps1', 'backup.ps1',
+                 'deploy_update.ps1', 'schema_check.ps1', 'api_test.ps1',
+                 'install_local.ps1', 'runner_setup.ps1')) {
+    $p = Join-Path $root "tool\$f"
+    if (Test-Path $p) { Copy-Item $p $toolOut; Ok $f }
 }
 
 # ── 6. قالب الإعدادات ───────────────────────────────────────────────────
@@ -149,7 +220,7 @@ Step 6 'قالب الإعدادات'
     "Issuer": "KineticEnterprise.Api",
     "Audience": "KineticEnterprise.Client"
   },
-  "AllowedOrigins": "https://erp.example.ly"
+  "AllowedOrigins": "https://erp.droob-albayan.ly"
 }
 '@ | Out-File -LiteralPath (Join-Path $Output 'appsettings.Production.template.json') -Encoding utf8
 Ok 'appsettings.Production.template.json'
@@ -160,7 +231,7 @@ Step 7 'تعليمات مرافقة'
 تثبيت Kinetic Enterprise على السيرفر
 =====================================
 حُزمت في: $(Get-Date -Format 'yyyy-MM-dd HH:mm')
-عنوان الـ API المبني فيها: $ApiUrl
+عنوان الـ API: $(if ($ApiUrl) { "مخبوز — $ApiUrl" } else { 'يُشتقّ من أصل الصفحة وقت التشغيل (يعمل على أي نطاق)' })
 
 الترتيب مُلزَم — كل خطوة تعتمد على ما قبلها.
 
@@ -180,30 +251,92 @@ Step 7 'تعليمات مرافقة'
          [Convert]::ToBase64String((1..48|%{Get-Random -Max 256}))
      - AllowedOrigins             نطاقك الحقيقي لا localhost
 
-3) الخادم
-   انسخ backend\ إلى C:\inetpub\kinetic-api ثم أنشئ موقعاً في IIS يشير إليه
-   بـ Application Pool من نوع "No Managed Code".
-   تأكّد من تثبيت ASP.NET Core 8 Hosting Bundle أولاً.
+3) الخادم والويب معاً — موقع IIS واحد
+   تطبيق الويب مبنيٌّ داخل backend\wwwroot، فالخادم يخدمه من جذره ولا حاجة
+   إلى موقع ثانٍ ولا إلى CORS أصلاً.
 
-4) الويب
-   انسخ web\ إلى موقع IIS آخر (أو مجلد فرعي) على النطاق نفسه.
-   إن اختلف النطاق فأضفه إلى AllowedOrigins وإلا حجبه CORS.
+   من نافذة PowerShell **كمسؤول**، ومن مجلد الحزمة نفسه:
+     .\tool\server_setup.ps1 -Stage iis -Domain erp.droob-albayan.ly
+
+   ثم بعد ربط شهادة HTTPS:
+     .\tool\server_setup.ps1 -Stage verify -Domain erp.droob-albayan.ly
+
+   مرحلة verify هي ما يفعّل UseHttpsRedirection — لا تُفعّله يدوياً قبل
+   الشهادة، فكل طلب يُحوَّل إلى https على خادم بلا شهادة يفشل تماماً.
+
+   يدوياً إن لزم: انسخ backend\ إلى C:\inetpub\kinetic-api وأنشئ موقعاً
+   بـ Application Pool من نوع "No Managed Code". وثبّت
+   ASP.NET Core 8 Hosting Bundle أولاً في الحالتين.
+
+4) بيئة التجربة (اختياري)
+     .\tool\setup_staging.ps1
+   النطاق الافتراضي staging-erp.droob-albayan.ly، وقاعدة وموقع ومجمّع
+   مستقلّة تماماً عن الإنتاج. تأخذ بياناتها من آخر نسخة احتياطية —
+   خذ واحدة بـ tool\backup.ps1 أولاً وإلا أُنشئت قاعدة فارغة.
 
 5) أول حساب
    من مجلد الخادم على السيرفر:
      dotnet KineticEnterprise.Api.dll create-platform-owner
    أمر تفاعلي — شغّله من نافذة أوامر حقيقية لا عبر خدمة.
 
+══════════════════════════════════════════════════════════════════════
+  التركيب المحلّي — للمحلّ الواحد بلا فروع وبلا إنترنت
+══════════════════════════════════════════════════════════════════════
+
+  لا تتبع الخطوات 1–5 أعلاه. كلها في أمر واحد على جهاز المحلّ، من نافذة
+  PowerShell **كمسؤول**:
+
+     .\tool\install_local.ps1 -LicensePublicKey C:\key\public.pem
+
+  يُنشئ القاعدة، ويسجّل الخادم خدمةَ ويندوز تعمل مع الإقلاع، ويفتح المنفذ
+  على الشبكة الخاصّة وحدها، ويجدول نسخة احتياطية، ويطبع بصمة الجهاز.
+
+  ولجهاز واحد لا كاشير ثانٍ معه:  -LocalhostOnly
+
+  ثلاثة فروق جوهرية عن التركيب السحابي، مقصودة كلّها:
+    • لا IIS — Kestrel كخدمة يكفي محلّاً واحداً وأقلُّ ما يُركَّب أقلُّ ما يُعطَب.
+    • لا HTTPS — لا نطاق ولا إنترنت للتجديد، وشهادةٌ موقَّعة ذاتياً تُدرّب
+      المستخدم على تجاوز تحذير الأمان. الحماية حدُّ الشبكة: لا تصل الجهاز
+      بشبكة عامّة ولا تفتح المنفذ في الراوتر.
+    • مفتاح الترخيص العامّ **يلزم فعلاً** هنا: القاعدة بيد الزبون، فبلا
+      توقيع لا شيء يمنع تعديل تاريخ الانتهاء بسطر SQL واحد.
+
 6) قبل التسليم
    راجع "ملخص فحص ما قبل الإطلاق" في DEPLOYMENT.md — وخاصةً:
    HTTPS بشهادة حقيقية، ونسخ احتياطي مجدوَل ومختبَر الاسترجاع.
+
+   وفحصان جاهزان في tool\:
+     .\tool\schema_check.ps1 -SqlInstance .\SQLEXPRESS -Database KineticEnterprise
+        يكشف عموداً في الكود بلا نظير في القاعدة، وجدولاً بلا عزل صفوف.
+     .\tool\api_test.ps1 -BaseUrl https://erp.droob-albayan.ly/api
+        يختبر قواعد العمل على الخادم نفسه. يكتب بيانات باسم TEST- .
 "@ | Out-File -LiteralPath (Join-Path $Output 'README-النشر.txt') -Encoding utf8
 Ok 'README-النشر.txt'
 
 # ── 8. ضغط ──────────────────────────────────────────────────────────────
 Step 8 'ضغط الحزمة'
-$zip = "$Output.zip"
+
+# اسمٌ مؤرَّخ لا اسمٌ ثابت: kinetic_pkg_2026-08-29_1226.zip
+#
+# كانت الحزمة تُسمّى publish.zip دائماً، فلا يُميَّز جديدُها من قديمها إلا
+# بقراءة تاريخ الملف. ووقع ذلك فعلاً: بناءٌ فشل صامتاً فبقيت حزمة الأمس
+# مكانها، ورُفعت على أنها الجديدة ولم يلاحظ أحد.
+#
+# والاسم يحمل kinetic_pkg لأنه ما يُعرَف به على الخادم — و«publish» اسمٌ
+# عامّ يصطدم بأي مجلد نشر آخر عند فكّه.
+$stamp = Get-Date -Format 'yyyy-MM-dd_HHmm'
+$zip = Join-Path (Split-Path -Parent $Output) "kinetic_pkg_$stamp.zip"
 if (Test-Path $zip) { Remove-Item $zip -Force }
+
+# والحزم الأقدم من ثلاث تُزال: مجلدٌ فيه عشرون حزمة يجعل اختيار الصحيحة
+# تخميناً، وكلٌّ منها يشغل خمسين ميغابايت.
+Get-ChildItem -Path (Split-Path -Parent $Output) -Filter 'kinetic_pkg_*.zip' -ErrorAction SilentlyContinue |
+    Sort-Object LastWriteTime -Descending |
+    Select-Object -Skip 3 |
+    ForEach-Object {
+        Remove-Item $_.FullName -Force -ErrorAction SilentlyContinue
+        Warn "أُزيلت حزمة قديمة: $($_.Name)"
+    }
 
 # ZipFile بدل Compress-Archive: الأخير يقرأ كل ملف على حدة فيتعثّر بأي ملف
 # يقفله برنامج آخر لحظتها (المضاد للفيروسات يفحص مخرجات البناء فور كتابتها).
@@ -231,4 +364,5 @@ $sizeMb = [math]::Round((Get-Item $zip).Length / 1MB, 1)
 Ok "$zip ($sizeMb ميغابايت)"
 
 Write-Host "`nتمّت الحزمة. ارفع الملف التالي إلى السيرفر:" -ForegroundColor Green
-Write-Host "    $zip`n" -ForegroundColor White
+Write-Host "    $zip" -ForegroundColor White
+Write-Host "    بُنيت: $(Get-Date -Format 'yyyy-MM-dd HH:mm')`n" -ForegroundColor DarkGray

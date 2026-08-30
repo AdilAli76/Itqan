@@ -35,6 +35,14 @@ PATHS = [
     '/permissions/matrix',
     '/branches',
     '/products/inventory?page=1&pageSize=50',
+    # شريط الصلاحية على شاشة نقطة البيع — راجع posExpiryAlertProvider.
+    '/products/expiry-alerts?withinDays=30&limit=10',
+    # نشرات الأدوية — إصدار الصيدليات (شاشة مالك المنصّة).
+    '/medicine-reference?page=1&pageSize=50',
+    # دفتر الوصفات — إصدار الصيدليات.
+    '/prescriptions?page=1&pageSize=50',
+    # تقرير إعادة الطلب.
+    '/reports/reorder?windowDays=90&coverageDays=14&onlyBelowThreshold=true',
     '/categories',
     '/suppliers',
     '/customers?page=1&pageSize=50',
@@ -51,6 +59,8 @@ PATHS = [
     '/users/login-history',
     '/reports/sales-summary',
     '/reports/inventory-summary',
+    '/reports/debt-aging',
+    '/reports/inventory-valuation',
     '/insights',
     '/license/me',
     '/organizations/me/settings',

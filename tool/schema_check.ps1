@@ -26,8 +26,11 @@
 #>
 [CmdletBinding()]
 param(
-    [string]$SqlInstance = '.\SQLEXPRESS01',
-    [string]$Database = 'KineticEnterprise'
+    [string]$SqlInstance = '.\SQLEXPRESS',
+    [string]$Database = 'KineticEnterprise',
+    # يكتب لقطة (كيان ← جدول ← أعمدة) ثم يخرج بلا فحص. يستدعيها publish.ps1
+    # لتسافر مع الحزمة.
+    [string]$Emit
 )
 
 $ErrorActionPreference = 'Stop'
@@ -37,9 +40,26 @@ $root = Split-Path -Parent $PSScriptRoot
 $entities = Join-Path $root 'backend\KineticEnterprise.Api\Models\Entities.cs'
 $context = Join-Path $root 'backend\KineticEnterprise.Api\Data\AppDbContext.cs'
 
+# لقطة بديلة عن الشيفرة المصدرية.
+#
+# على السيرفر لا وجود لـEntities.cs ولا AppDbContext.cs — هناك DLL مبنيّة
+# فقط. وفحص «عمود في الكيان بلا نظير في القاعدة» هو **أنفع ما يكون بعد
+# ترقية على السيرفر**، أي في المكان الذي لا مصدر فيه. فتُبنى اللقطة على
+# جهاز التطوير وتسافر مع الحزمة في sql\expected_schema.json.
+$snapshot = @(
+    (Join-Path $root 'sql\expected_schema.json'),
+    (Join-Path $PSScriptRoot 'expected_schema.json')
+) | Where-Object { Test-Path $_ } | Select-Object -First 1
+
+$fromSource = (Test-Path $entities) -and (Test-Path $context)
+if (-not $fromSource -and -not $snapshot) {
+    throw "لا شيفرة مصدرية ولا لقطة. على جهاز التطوير شغّله من المستودع، وعلى السيرفر يلزم sql\expected_schema.json داخل مجلد النشر."
+}
+
 # خصائص لا تُخزَّن أو تُخزَّن باسم مختلف صراحةً عبر HasColumnName / Ignore.
 $known = @{
     'BarcodeTemplateJson' = 'barcode_template'
+    'ReceiptTemplateJson' = 'receipt_template'
     'EnabledModulesJson'  = 'enabled_modules'
 }
 
@@ -50,24 +70,70 @@ function ConvertTo-SnakeCase([string]$name) {
     return $s.ToLower()
 }
 
-# ── خريطة الكيان ← الجدول من AppDbContext ────────────────────────────────
-$ctxText = Get-Content -LiteralPath $context -Raw -Encoding UTF8
+# ── خريطة الكيان ← الجدول ─────────────────────────────────────────────────
 $entityToTable = @{}
-foreach ($m in [regex]::Matches($ctxText, 'Entity<(\w+)>\(\)\.ToTable\("(\w+)"\)')) {
-    $entityToTable[$m.Groups[1].Value] = $m.Groups[2].Value
+if ($fromSource) {
+    $ctxText = Get-Content -LiteralPath $context -Raw -Encoding UTF8
+    foreach ($m in [regex]::Matches($ctxText, 'Entity<(\w+)>\(\)\.ToTable\("(\w+)"\)')) {
+        $entityToTable[$m.Groups[1].Value] = $m.Groups[2].Value
+    }
 }
 
-# ── خصائص كل كيان من Entities.cs ─────────────────────────────────────────
-$text = Get-Content -LiteralPath $entities -Raw -Encoding UTF8
+# ── خصائص كل كيان: من الشيفرة على جهاز التطوير، ومن اللقطة على السيرفر ──
 $classes = @{}
-foreach ($m in [regex]::Matches($text, '(?s)public class (\w+)\s*\{(.*?)\n\}')) {
-    $name = $m.Groups[1].Value
-    $body = $m.Groups[2].Value
-    $props = @()
-    foreach ($p in [regex]::Matches($body, 'public\s+[\w<>,\?\[\]\s]+?\s+(\w+)\s*\{\s*get;')) {
-        $props += $p.Groups[1].Value
+if ($fromSource) {
+    $text = Get-Content -LiteralPath $entities -Raw -Encoding UTF8
+    foreach ($m in [regex]::Matches($text, '(?s)public class (\w+)\s*\{(.*?)\n\}')) {
+        $name = $m.Groups[1].Value
+        $body = $m.Groups[2].Value
+        $props = @()
+        foreach ($p in [regex]::Matches($body, 'public\s+(.+?)\s+(\w+)\s*\{\s*get;')) {
+            # خصائص التنقّل (قوائم كيانات) لا تُقابل أعمدة. تُستبعَد **بنوعها لا
+            # باسمها**: القائمة المكتوبة يدوياً (Items، Payments) نُسي تحديثها عند
+            # إضافة Batches، فبلّغ الفاحص عن عمود مفقود لا وجود له وأخفى بذلك
+            # نتيجة فحص العزل تحته.
+            if ($p.Groups[1].Value -match '^(List|ICollection|IEnumerable|HashSet)\s*<') { continue }
+            $props += $p.Groups[2].Value
+        }
+        $classes[$name] = $props
     }
-    $classes[$name] = $props
+
+}
+else {
+    # اللقطة تحمل أسماء الأعمدة نهائيةً (بعد snake_case وبعد الاستثناءات)،
+    # فلا يُعاد اشتقاقها هنا — اشتقاقٌ ثانٍ بمنطق قد ينحرف يُنتج فحصاً يكذب.
+    $snap = Get-Content -LiteralPath $snapshot -Raw -Encoding UTF8 | ConvertFrom-Json
+    foreach ($e in $snap.entities) {
+        $entityToTable[$e.entity] = $e.table
+        $classes[$e.entity] = @($e.columns)
+        foreach ($c in $e.columns) { $known[$c] = $c }
+    }
+    Write-Host "  المصدر: لقطة $snapshot (بُنيت في $($snap.generatedAt))" -ForegroundColor DarkGray
+}
+
+# ── وضع الإصدار: يكتب اللقطة ويخرج ───────────────────────────────────────
+if ($Emit) {
+    if (-not $fromSource) { throw 'اللقطة تُبنى من الشيفرة المصدرية — شغّله من المستودع.' }
+    $out = [ordered]@{
+        generatedAt = (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
+        entities = @(
+            foreach ($e in ($entityToTable.Keys | Sort-Object)) {
+                if (-not $classes.ContainsKey($e)) { continue }
+                [ordered]@{
+                    entity  = $e
+                    table   = $entityToTable[$e]
+                    columns = @($classes[$e] | ForEach-Object {
+                        if ($known.ContainsKey($_)) { $known[$_] } else { ConvertTo-SnakeCase $_ }
+                    })
+                }
+            }
+        )
+    }
+    $dir = Split-Path -Parent $Emit
+    if ($dir -and -not (Test-Path $dir)) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
+    $out | ConvertTo-Json -Depth 6 | Out-File -LiteralPath $Emit -Encoding utf8
+    Write-Host "لقطة المخطّط: $Emit ($($out.entities.Count) كياناً)" -ForegroundColor Green
+    return
 }
 
 # ── أعمدة القاعدة ────────────────────────────────────────────────────────
@@ -104,8 +170,6 @@ foreach ($entity in ($entityToTable.Keys | Sort-Object)) {
     foreach ($prop in $classes[$entity]) {
         $checked++
         $col = if ($known.ContainsKey($prop)) { $known[$prop] } else { ConvertTo-SnakeCase $prop }
-        # خصائص التنقّل (قوائم كيانات) لا تُقابل أعمدة
-        if ($prop -match '^(Items|Payments)$') { continue }
         if (-not $dbCols[$table].Contains($col)) { $missing += "$prop -> $col" }
     }
 
@@ -128,8 +192,14 @@ Write-Host '=== تغطية سياسات العزل (Row-Level Security) ===' -Fo
 #                          قبل وجود أي سياق.
 #   permissions          : كتالوج عام لا يخصّ منظمة.
 #   platform_*           : مستوى المنصّة لا مستوى العميل.
+#   medicine_reference   : معرفة دوائية عامة لا بيانات منظمة — «باراسيتامول
+#                          500 مجم» له نفس موانع الاستعمال في كل صيدلية.
+#                          ربطه بالمنظمة كان يعني أن كل عميل جديد يبدأ
+#                          بنشرات فارغة (راجع MedicineReference في
+#                          Entities.cs). ولا سعر فيه ولا مخزون، فلا تسرّب.
 $rlsExempt = @('app_users', 'customer_card_index', 'permissions',
-               'platform_organizations', 'platform_settings')
+               'platform_organizations', 'platform_settings',
+               'medicine_reference')
 
 $conn2 = New-Object System.Data.SqlClient.SqlConnection(
     "Server=$SqlInstance;Database=$Database;Integrated Security=true;TrustServerCertificate=true;Connection Timeout=15")

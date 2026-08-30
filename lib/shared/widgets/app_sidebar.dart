@@ -8,6 +8,7 @@ import '../../core/theme/branding_provider.dart';
 import 'nav_items.dart';
 import 'animations.dart';
 import '../../core/auth/permissions.dart';
+import 'authed_image.dart';
 
 /// الشريط الجانبي الموحّد — أي موديول جديد يُضاف مستقبلاً (حسب
 /// ARCHITECTURE.md) يُسجَّل في nav_items.dart بسطر واحد فقط ويظهر تلقائياً
@@ -49,7 +50,10 @@ class _AppSidebarState extends ConsumerState<AppSidebar> {
   Widget build(BuildContext context) {
     final perms = ref.perms;
     final groups = filterByPermissions(
-      navGroupsFor(isPlatformAdmin: _isPlatformAdmin),
+      navGroupsFor(
+        isPlatformAdmin: _isPlatformAdmin,
+        edition: ref.watch(brandingProvider).valueOrNull?.edition ?? 'standard',
+      ),
       (route) {
         final required = kRoutePermissions[route];
         return required == null || perms.can(required);
@@ -79,24 +83,37 @@ class _AppSidebarState extends ConsumerState<AppSidebar> {
               children: [
                 Flexible(
                   child: Text(
-                    branding?.displayName ?? 'Kinetic Enterprise',
+                    branding?.displayName ?? 'إتقان ERP',
                     style: AppTextStyles.headlineMd(),
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
-                if (branding?.logoUrl != null) ...[
-                  const SizedBox(width: 10),
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(6),
-                    child: Image.network(
-                      branding!.logoUrl!,
-                      width: 28,
-                      height: 28,
-                      fit: BoxFit.cover,
-                      errorBuilder: (context, error, stack) => const Icon(Icons.hub_outlined, size: 24),
-                    ),
-                  ),
-                ],
+                const SizedBox(width: 10),
+                // شعار المنظمة إن رفعته، وإلا شعار المنتج — لا أيقونة
+                // عامّة. والسقوط على الأصل المحلي يجعل الشريط يحمل هويةً
+                // ولو انقطعت الشبكة أو حُذف الملف من الخادم.
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(6),
+                  child: branding?.logoUrl != null
+                      ? AuthedImage(
+                          path: branding!.logoUrl!,
+                          width: 32,
+                          height: 32,
+                          fit: BoxFit.cover,
+                          errorWidget: Image.asset(
+                            'assets/branding/itqan_logo.png',
+                            width: 32,
+                            height: 32,
+                            fit: BoxFit.cover,
+                          ),
+                        )
+                      : Image.asset(
+                          'assets/branding/itqan_logo.png',
+                          width: 32,
+                          height: 32,
+                          fit: BoxFit.cover,
+                        ),
+                ),
               ],
             ),
           ),

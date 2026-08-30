@@ -1,0 +1,96 @@
+# بناء حزمة النشر آلياً عند كل وسم إصدار.
+#
+# الغرض ليس الراحة بل التطابق: الحزمة تُبنى في بيئة نظيفة واحدة، فلا تختلف
+# باختلاف جهاز من بناها ولا بما تبقّى في مجلداته من بناء سابق. وقد وقع ذلك
+# فعلاً في هذا المشروع: مجلدات بناء قديمة أسقطت نسخة الويب من ماسح الباركود
+# فخرجت حزمة تعمل ظاهرياً وفيها شاشة معطّلة.
+#
+# التشغيل:  git tag v1.2.0 && git push origin v1.2.0
+# المخرَج:  kinetic_pkg_<التاريخ>_<الوقت>.zip مرفقة بالإصدار على GitHub،
+#           ومعها ملف بصمتها.
+
+name: بناء حزمة النشر
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+jobs:
+  # لا تُبنى حزمة من شيفرة لم تمرّ بالفحص. والوسم لا يعني أن الاختبارات
+  # شُغِّلت — يعني أن أحداً كتب أمر وسم.
+  verify:
+    uses: ./.github/workflows/ci.yml
+
+  build:
+    needs: verify
+    # ويندوز إلزامي لا تفضيل: الخادم يُنشر win-x64، والنشر المستقلّ عن
+    # المنصّة يُنتج ملفات لا تعمل على IIS كما هو مضبوط.
+    runs-on: windows-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: تهيئة .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: تهيئة Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.44.9'
+          channel: stable
+          cache: true
+
+      - name: جلب الاعتماديات
+        run: flutter pub get
+
+      # البناء النظيف مقصود: مجلدات .dart_tool المتبقّية هي ما يُسقط
+      # تسجيل إضافات الويب من الحزمة بلا أي رسالة خطأ.
+      - name: بناء الحزمة
+        shell: pwsh
+        run: |
+          flutter clean
+          flutter pub get
+          .\tool\publish.ps1
+
+      # الاسم مؤرَّخ لا ثابت (kinetic_pkg_2026-08-30_1412.zip) — راجع
+      # publish.ps1. فيُلتقط بنمطه لا بحرفه، وغيابُه خطأ يوقف السير:
+      # وظيفةٌ «تنجح» وترفع لا شيء أسوأ من وظيفةٍ تفشل.
+      - name: تحديد الحزمة وبصمتها
+        shell: pwsh
+        run: |
+          $pkg = Get-ChildItem -Filter 'kinetic_pkg_*.zip' |
+                 Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          if (-not $pkg) { throw 'لم تُنتَج حزمة — راجع خطوة البناء أعلاه.' }
+          $h = (Get-FileHash $pkg.FullName -Algorithm SHA256).Hash
+          "$h  $($pkg.Name)" | Out-File "$($pkg.FullName).sha256" -Encoding utf8
+          Write-Host "الحزمة: $($pkg.Name)  ($([math]::Round($pkg.Length/1MB,1)) ميغابايت)"
+          Write-Host "البصمة: $h"
+          "PKG=$($pkg.Name)" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "SHA=$h"           | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: ملخّص الإصدار
+        shell: pwsh
+        run: |
+          "## الحزمة`n`n- **الملف:** ``$env:PKG```n- **SHA256:** ``$env:SHA```" |
+            Out-File $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
+      - name: إرفاق بالإصدار
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            kinetic_pkg_*.zip
+            kinetic_pkg_*.zip.sha256
+
+      - name: حفظ الحزمة كأثر
+        uses: actions/upload-artifact@v4
+        with:
+          name: kinetic_pkg
+          path: |
+            kinetic_pkg_*.zip
+            kinetic_pkg_*.zip.sha256
+          retention-days: 30

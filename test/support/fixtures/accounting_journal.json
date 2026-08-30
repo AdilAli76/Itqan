@@ -1,0 +1,32 @@
+[
+  {
+    "id": "j1",
+    "number": 2,
+    "entryDate": "2026-08-25T00:00:00",
+    "source": "invoice",
+    "sourceId": "i1",
+    "description": "فاتورة INV-20260825120000",
+    "reversesEntryId": null,
+    "isReversed": false,
+    "createdByName": "مدير النظام",
+    "createdAt": "2026-08-25T12:00:00",
+    "lines": [
+      {
+        "accountId": "a3",
+        "accountCode": "1101",
+        "accountName": "الصندوق",
+        "debit": 230.5,
+        "credit": 0,
+        "note": null
+      },
+      {
+        "accountId": "d2",
+        "accountCode": "4101",
+        "accountName": "المبيعات",
+        "debit": 0,
+        "credit": 230.5,
+        "note": null
+      }
+    ]
+  }
+]

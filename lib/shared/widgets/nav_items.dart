@@ -29,6 +29,17 @@ const _notifications = NavItem(Icons.notifications_outlined, 'الإشعارات
 // يظهر فقط لمالك المنصة (is_platform_admin في التوكن) — تزويد عملاء جدد
 // على نفس السيرفر ليس جزءاً من صلاحيات أي عميل عادي مهما كان دوره.
 const kPlatformNavItem = NavItem(Icons.add_business_outlined, 'إنشاء منظمة جديدة', '/platform/organizations/new');
+const kPlatformManageItem = NavItem(Icons.apartment_outlined, 'الشركات المشترَكة', '/platform/organizations');
+
+// نشرات الأدوية جدول على مستوى المنصّة يديره مالكها ويقرأه كل عملاء إصدار
+// الصيدليات — فمكانه مع عناصر مالك المنصّة لا في قائمة أي عميل.
+const kMedicineReferenceItem =
+    NavItem(Icons.medical_information_outlined, 'نشرات الأدوية', '/medicine-reference');
+
+// دفتر الوصفات بيانات الصيدلية نفسها (بخلاف النشرات المشتركة على مستوى
+// المنصّة)، فيظهر لعملاء إصدار الصيدليات لا لمالك المنصّة وحده.
+const kPrescriptionsItem =
+    NavItem(Icons.assignment_outlined, 'دفتر الوصفات', '/prescriptions');
 
 const _salesGroup = NavGroup(
   icon: Icons.point_of_sale_outlined,
@@ -47,9 +58,13 @@ const _inventoryGroup = NavGroup(
   items: [
     NavItem(Icons.inventory_2_outlined, 'المخزون والموردين', '/inventory'),
     NavItem(Icons.shopping_cart_outlined, 'المشتريات', '/purchasing'),
+    // بجوار المشتريات لا في التقارير: مخرَجه قرار شراء يُنفَّذ فوراً، لا رقم
+    // يُقرأ ويُنسى. المكان يحدّد هل تُقرأ الشاشة أم لا.
+    NavItem(Icons.shopping_cart_checkout_outlined, 'إعادة الطلب', '/reorder'),
     NavItem(Icons.sync_alt_outlined, 'تحويل المخزون بين الفروع', '/stock-transfer'),
     NavItem(Icons.fact_check_outlined, 'الجرد الدوري', '/stock-count'),
     NavItem(Icons.qr_code_outlined, 'تخصيص ملصق الباركود', '/barcode-designer'),
+    NavItem(Icons.receipt_outlined, 'قالب الإيصال', '/receipt-designer'),
   ],
 );
 
@@ -84,18 +99,101 @@ const _systemGroup = NavGroup(
 
 /// المجموعات بالترتيب المعروض. مالك المنصة وحده يرى "إنشاء منظمة جديدة"،
 /// وتُضاف داخل مجموعة النظام بدل أن تكون عنصراً سائباً في آخر القائمة.
-List<NavGroup> navGroupsFor({required bool isPlatformAdmin}) => [
+/// إصدارٌ على شكل المحفظة — بطاقات وأرصدة بلا بضاعة.
+///
+/// <para>يقابل `Editions.IsWalletShaped` في الخادم. والقائمتان تُقرآن معاً:
+/// إصدارٌ يُضاف هنا ولا يُضاف هناك يُخفي شاشةً يسمح بها الخادم.</para>
+bool _isWalletShaped(String edition) => edition == 'wallet' || edition == 'wallet_plus';
+
+/// أفي هذا الإصدار دفترٌ محاسبي؟ — يقابل وحدة `accounting` في الخادم.
+bool _hasAccounting(String edition) => edition == 'enterprise' || edition == 'wallet_plus';
+
+List<NavGroup> navGroupsFor({required bool isPlatformAdmin, String edition = 'standard'}) => [
       NavGroup(icon: _dashboard.icon, label: _dashboard.label, items: const [_dashboard]),
       _salesGroup,
-      _inventoryGroup,
+      // إصدار المحفظة بلا بضاعة أصلاً: لا كتالوج ولا مخزون ولا مشتريات ولا
+      // جرد ولا ملصقات باركود. إخفاء المجموعة هنا لا في كل واجهة على حدة —
+      // ثلاثة مواضع تعرض هذه القائمة (الشريط الجانبي والعلوي ولوحة
+      // الأوامر)، وإخفاء يُنفَّذ في اثنين يترك الشاشة قابلة للفتح من الثالث.
+      if (!_isWalletShaped(edition)) _inventoryGroup,
+      // مجموعة تظهر لإصدار الصيدليات وحده — النظام يُباع لبقالة ومحل قطع
+      // غيار، ودفتر الوصفات في قائمتهم بند لا معنى له.
+      if (edition == 'pharmacy')
+        const NavGroup(
+          icon: Icons.local_pharmacy_outlined,
+          label: 'الصيدلية',
+          items: [kPrescriptionsItem],
+        ),
+      // المرتَّبات والسلف لإصدارات المحفظة وحدها: جهةٌ تصرف على منتسبيها
+      // تحتاجهما، ومتجرٌ يبيع بضاعة لا معنى لهما في قائمته.
+      if (_isWalletShaped(edition))
+        const NavGroup(
+          icon: Icons.account_balance_wallet_outlined,
+          label: 'المرتَّبات',
+          items: [
+            NavItem(Icons.payments_outlined, 'المرتَّبات والسلف', '/payroll'),
+          ],
+        ),
+      // المحاسبة لمن اشتراها — بقّالة بفرع واحد لا تحتاج ميزان مراجعة،
+      // وشجرة حسابات في قائمتها بند يُربك ولا يُفيد. والترشيح هنا لا في كل
+      // واجهة: ثلاثة مواضع تعرض هذه القائمة.
+      if (_hasAccounting(edition))
+        NavGroup(
+          icon: Icons.account_balance_outlined,
+          label: 'المحاسبة',
+          items: [
+            const NavItem(Icons.account_tree_outlined, 'دليل الحسابات', '/accounting'),
+            // فواتير الموردين مع المحاسبة لا مع المشتريات: هي مستندٌ
+            // محاسبي يُفرغ «وردت ولم تُفوتَر» إلى «الموردون».
+            //
+            // لكنها تحتاج **الاثنتين**: منظمةٌ بلا مشتريات لا استلامَ عندها
+            // تُفوتره، فالشاشة تفتح فارغةً أبداً. وشاشةٌ لا تمتلئ يوماً
+            // أسوأ من شاشةٍ غائبة — يظنّها المستخدم معطوبة.
+            if (!_isWalletShaped(edition))
+              const NavItem(Icons.receipt_long_outlined, 'فواتير الموردين', '/supplier-invoices'),
+          ],
+        ),
+      // المصروفات في كل الإصدارات عدا المحفظة البسيطة: الإيجار والرواتب
+      // مصروفات كل نشاط، وبلا تسجيلها يقول تقرير الأرباح ربحاً ليس ربحاً.
+      // أما إصدار المحفظة فجهةٌ تصرف على منتسبيها لا تُدير محلاً بمصروفاته.
+      //
+      // ومحفظةٌ **بمحاسبة** تحتاجها: دفترٌ يقيّد ما دخل ولا يقيّد ما صُرف
+      // ليس دفتراً.
+      if (edition != 'wallet')
+        const NavGroup(
+          icon: Icons.payments_outlined,
+          label: 'المالية',
+          items: [NavItem(Icons.payments_outlined, 'المصروفات', '/expenses')],
+        ),
       _reportsGroup,
       NavGroup(icon: _notifications.icon, label: _notifications.label, items: const [_notifications]),
       _adminGroup,
       NavGroup(
         icon: _systemGroup.icon,
         label: _systemGroup.label,
-        items: [..._systemGroup.items, if (isPlatformAdmin) kPlatformNavItem],
+        items: [
+          ..._systemGroup.items,
+          // نشرة الدواء تبقى هنا: محتوى منصّةٍ يُدار مرّةً، لا عملُ مشغّلٍ
+          // يومي.
+          if (isPlatformAdmin) kMedicineReferenceItem,
+        ],
       ),
+      // ── المنصّة ────────────────────────────────────────────────────
+      //
+      // مجموعةٌ مستقلّة لا بنودٌ مدسوسة في آخر «النظام» بجانب الإعدادات.
+      // مالك المنصّة **مشغّلٌ لا مستأجر**: عملُه إدارة عملاء واشتراكات، لا
+      // ضبط إعدادات منظمةٍ واحدة. وخلطُهما جعله يدخل كأي مدير فيجد ثلاثة
+      // بنودٍ زائدة، ولا يرى حال أعماله كمشغّل في أي شاشة.
+      if (isPlatformAdmin)
+        const NavGroup(
+          icon: Icons.hub_outlined,
+          label: 'المنصّة',
+          items: [
+            NavItem(Icons.dashboard_outlined, 'لوحة المنصّة', '/platform'),
+            kPlatformManageItem,
+            kPlatformNavItem,
+          ],
+        ),
     ];
 
 /// يُسقط من القائمة الوحدات التي يحجبها الخادم كلياً عن هذا المستخدم.

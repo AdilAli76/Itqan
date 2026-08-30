@@ -31,3 +31,12 @@ Map<String, dynamic> _decodeJwtSegment(String segment) {
   final decoded = utf8.decode(base64.decode(normalized));
   return json.decode(decoded) as Map<String, dynamic>;
 }
+
+/// اسم المستخدم الحالي كما في التوكن — يُطبع تحت خانة «أصدره» في أوامر
+/// الشراء. توقيع بلا اسم مقروء لا يدلّ على أحد بعد شهور.
+Future<String?> readCurrentUserName() async {
+  final claims = await readJwtClaims();
+  return claims?['http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name'] as String? ??
+      claims?['name'] as String? ??
+      claims?['unique_name'] as String?;
+}

@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.Authorization;
+﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Data.SqlClient;
@@ -78,9 +78,22 @@ public class CustomerPortalController : ControllerBase
         }
 
         var customer = await db.Customers.FirstOrDefaultAsync(c => c.Id == card.CustomerId && !c.IsDeleted);
-        if (customer is null || customer.PinHash is null)
+        if (customer is null)
         {
             return Unauthorized(new { message = "رمز البطاقة أو الرقم السري غير صحيح" });
+        }
+
+        // حساب في نمط «بطاقة فقط» لا رقم سرّي له، فلا سبيل لدخول البوابة.
+        // ورسالة صريحة هنا لا «رمز خاطئ»: الأخيرة تجعل صاحب الحساب يعيد
+        // المحاولة عشرات المرّات ظانّاً أنه أخطأ، بينما لا رقم أصلاً. وهي لا
+        // تكشف أكثر ممّا تكشفه رسالة البطاقة المحظورة أعلاه.
+        if (customer.PinHash is null)
+        {
+            return StatusCode(403, new
+            {
+                message = "هذا الحساب يعمل بنمط «البطاقة فقط» بلا رقم سرّي — "
+                        + "لمتابعة رصيدك من البوابة راجع إدارة المتجر لإصدار رقم سرّي."
+            });
         }
 
         // نفس البوابة التي تستخدمها نقطة البيع — عدّاد قفل واحد لا اثنان.

@@ -1,4 +1,4 @@
-using System.Security.Claims;
+﻿using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -16,7 +16,12 @@ public record ImportSummary(
     int WillUpdate,
     int WithErrors,
     bool Committed,
-    List<ImportRowResult> Rows);
+    List<ImportRowResult> Rows,
+    // تُعرَض للمستخدم قبل التأكيد: الاستيراد ينشئ تصنيفات وموردين لم
+    // يطلبها صراحةً، فإخفاء ذلك يجعل خطأً إملائياً في الملف يزرع تصنيفاً
+    // شبحاً في الكتالوج بلا أن يدري أحد.
+    List<string> CreatedCategories,
+    List<string> CreatedSuppliers);
 
 /// <summary>
 /// استيراد كتالوج الأصناف من ملف إكسل أو CSV.
@@ -32,6 +37,7 @@ public record ImportSummary(
 /// المرحلتان ليستا رفاهية: ملف فيه عمود سعر بمكان عمود التكلفة يقلب أسعار
 /// كتالوج كامل، واكتشافه بعد الكتابة يعني استرجاع نسخة احتياطية.
 /// </summary>
+[RequireModule("inventory")]
 [ApiController]
 [Route("api/products/import")]
 [Authorize]
@@ -91,6 +97,8 @@ public class ProductImportController : ControllerBase
         var suppliers = await _db.Suppliers.Where(s => !s.IsDeleted)
             .ToDictionaryAsync(s => s.Name.ToLower(), s => s.Id);
 
+        var createdCategories = new List<string>();
+        var createdSuppliers = new List<string>();
         var results = new List<ImportRowResult>();
         var toCreate = new List<Product>();
         var toUpdate = new List<Product>();
@@ -142,26 +150,40 @@ public class ProductImportController : ControllerBase
                 continue;
             }
 
+            // تصنيف أو مورّد غير موجود يُنشأ، لا يُرفض الصف.
+            //
+            // الرفض كان يجعل الاستيراد بلا فائدة عملياً: ملف من ستين صنفاً
+            // بخمسة تصنيفات جديدة يفشل كاملاً — والاستيراد كله-أو-لا-شيء —
+            // فيُطالَب المستخدم بإنشاء التصنيفات يدوياً واحداً واحداً أولاً.
+            // وقع هذا على القالب المرفق مع النظام نفسه: تصنيفاته ليست
+            // مزروعة في قاعدة جديدة، فأول تجربة استيراد تفشل بستين خطأ.
+            //
+            // والاسم وحده هو كل ما يحمله التصنيف، فإنشاؤه بلا ضرر. والمورّد
+            // يُنشأ بالاسم فقط ويُكمَّل لاحقاً من شاشة الموردين.
             Guid? categoryId = null;
-            if (categoryName is not null && !categories.TryGetValue(categoryName.ToLower(), out var cid))
+            if (categoryName is not null)
             {
-                results.Add(new ImportRowResult(rowNumber, name, effectiveSku, "خطأ",
-                    $"التصنيف «{categoryName}» غير موجود — أنشئه أولاً"));
-                continue;
-            }
-            else if (categoryName is not null)
-            {
-                categoryId = categories[categoryName.ToLower()];
+                var key = categoryName.ToLower();
+                if (!categories.TryGetValue(key, out var cid))
+                {
+                    var created = new ProductCategory { OrganizationId = orgId, Name = categoryName };
+                    _db.ProductCategories.Add(created);
+                    categories[key] = created.Id;
+                    cid = created.Id;
+                    createdCategories.Add(categoryName);
+                }
+                categoryId = cid;
             }
 
             Guid? supplierId = null;
-            if (supplierName is not null && !suppliers.TryGetValue(supplierName.ToLower(), out _))
+            if (supplierName is not null && !suppliers.ContainsKey(supplierName.ToLower()))
             {
-                results.Add(new ImportRowResult(rowNumber, name, effectiveSku, "خطأ",
-                    $"المورّد «{supplierName}» غير موجود — أنشئه أولاً"));
-                continue;
+                var created = new Supplier { OrganizationId = orgId, Name = supplierName };
+                _db.Suppliers.Add(created);
+                suppliers[supplierName.ToLower()] = created.Id;
+                createdSuppliers.Add(supplierName);
             }
-            else if (supplierName is not null)
+            if (supplierName is not null)
             {
                 supplierId = suppliers[supplierName.ToLower()];
             }
@@ -234,7 +256,9 @@ public class ProductImportController : ControllerBase
         return new ImportSummary(
             results.Count, willCreate, willUpdate, withErrors, !dryRun,
             // الأخطاء أولاً: هي ما يحتاج المستخدم رؤيته، والقائمة قد تطول.
-            results.OrderBy(r => r.Action == "خطأ" ? 0 : 1).Take(200).ToList());
+            results.OrderBy(r => r.Action == "خطأ" ? 0 : 1).Take(200).ToList(),
+            createdCategories.Distinct().ToList(),
+            createdSuppliers.Distinct().ToList());
     }
 
     /// <summary>

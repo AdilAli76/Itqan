@@ -1,0 +1,26 @@
+[
+  {
+    "id": "bbbb2222-2222-2222-2222-222222222221",
+    "customerId": "cccc3333-3333-3333-3333-333333333331",
+    "customerName": "محمد عبد السلام",
+    "amount": 600.0,
+    "installmentAmount": 100.0,
+    "outstanding": 400.0,
+    "issuedOn": "2026-06-14",
+    "note": "سلفة علاج",
+    "isCancelled": false,
+    "createdAt": "2026-06-14T09:20:00"
+  },
+  {
+    "id": "bbbb2222-2222-2222-2222-222222222222",
+    "customerId": "cccc3333-3333-3333-3333-333333333332",
+    "customerName": "سالمة الفيتوري",
+    "amount": 250.0,
+    "installmentAmount": 0.0,
+    "outstanding": 250.0,
+    "issuedOn": "2026-08-02",
+    "note": null,
+    "isCancelled": false,
+    "createdAt": "2026-08-02T11:05:00"
+  }
+]

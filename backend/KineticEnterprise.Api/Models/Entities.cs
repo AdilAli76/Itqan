@@ -1,4 +1,91 @@
-namespace KineticEnterprise.Api.Models;
+﻿namespace KineticEnterprise.Api.Models;
+
+/// <summary>
+/// إصدارات النظام. المصدر الوحيد لأسمائها، فلا تتفرّق نصوصاً حرّة في
+/// الوحدات والواجهة.
+/// </summary>
+public static class Editions
+{
+    public const string Standard = "standard";
+    public const string Trial = "trial";
+    public const string Enterprise = "enterprise";
+
+    /// <summary>
+    /// بطاقات وأرصدة بلا بضاعة: الكاشير يُدخل مبلغاً فيُخصم من بطاقة صاحبها
+    /// أو يُسجَّل بيعاً نقدياً للفرع. للجهة التي تصرف على منتسبيها لا التي
+    /// تبيع بضاعة — فلا كتالوج ولا مخزون ولا مشتريات.
+    /// </summary>
+    public const string Wallet = "wallet";
+
+    /// <summary>
+    /// المحفظة ومعها دفتر محاسبي كامل.
+    ///
+    /// <para><b>لماذا إصدارٌ مستقلّ لا ترقية إلى «المؤسسات»:</b> جهةٌ تصرف
+    /// على منتسبيها تريد ميزاناً ودفتراً — ورصيد البطاقة عندها **التزام**
+    /// لا إيراد (راجع [AccountRoles.CustomerWallet]). لكنها لا بضاعة لها،
+    /// فترقيتُها إلى المؤسسات تُغرق قائمتها بمخزونٍ ومستودعاتٍ ومشترياتٍ لا
+    /// معنى لها عندها — وهو نفس ما نتجنّبه حين نُخفي المحاسبة عن
+    /// البقّالة.</para>
+    ///
+    /// <para>وهو محفظةٌ في كل سلوكه — راجع [IsWalletShaped].</para>
+    /// </summary>
+    public const string WalletPlus = "wallet_plus";
+
+    /// <summary>
+    /// الإصدار القياسي زائد المعرفة الدوائية: نشرة الدواء المرتبطة بالصنف
+    /// (المادة الفعّالة، التركيز، دواعي الاستعمال، موانعه، التحذيرات،
+    /// الأعراض الجانبية) تُعرض للكاشير لحظة الصرف.
+    ///
+    /// <para><b>لماذا إصدار لا ميزة دائمة:</b> النظام يُباع لبقالة ومحل
+    /// قطع غيار ومخزن مواد بناء أيضاً. حقول «موانع الاستعمال» و«الجرعة» في
+    /// شاشة أصناف محل ملابس ليست ميزة زائدة بل ضوضاء تُربك المستخدم وتُطيل
+    /// نموذج الإدخال بلا مقابل. فتُقيَّد بوحدة <c>pharmacy</c> التي لا
+    /// يملكها إلا من اشتراها.</para>
+    /// </summary>
+    public const string Pharmacy = "pharmacy";
+
+    public static readonly string[] All = { Standard, Wallet, WalletPlus, Pharmacy, Trial, Enterprise };
+
+    /// <summary>الوحدات المفعَّلة لكل إصدار — منها يُبنى التنقّل وتُقيَّد النقاط.</summary>
+    public static string[] ModulesOf(string edition) => edition switch
+    {
+        Wallet => new[] { "pos", "customers", "reports" },
+        // المحفظة ومعها المحاسبة — ولا مخزون: لا بضاعة تُقاس ولا مستودع
+        // يُدار. والمصروفات تأتي مع accounting لا وحدةً مستقلّة.
+        WalletPlus => new[] { "pos", "customers", "reports", "accounting" },
+        // وحدة pharmacy فوق وحدات الإصدار القياسي لا بدلاً منها: الصيدلية
+        // متجر تجزئة كامل قبل أن تكون صيدلية — لها مخزون ومشتريات وموردون.
+        Pharmacy => new[] { "inventory", "pos", "customers", "reports", "pharmacy" },
+        // إصدار المؤسسات: المخزون يُقاس بالدينار لا بالقطعة، ويُثبَت بدفتر،
+        // وله مكان معلوم. الوحدات الثلاث هي ما يفصله عن القياسي فعلياً بعد
+        // أن كان يسقط على الافتراضي فيطابقه حرفياً — أي إصداراً بالاسم فقط.
+        Enterprise => new[]
+        {
+            "inventory", "pos", "customers", "reports",
+            "warehouses", "valuation", "procurement",
+            // دليل الحسابات والقيود. لإصدار المؤسسات وحده: بقّالة بفرع واحد
+            // لا تحتاج ميزان مراجعة، وشجرة حسابات في شاشتها ضوضاء تُربك ولا
+            // تُفيد — نفس مبرر تقييد نشرة الدواء بوحدة pharmacy.
+            "accounting",
+        },
+        _ => new[] { "inventory", "pos", "customers", "reports" },
+    };
+
+    /// <summary>
+    /// أهذا إصدارٌ على شكل المحفظة — بطاقات وأرصدة بلا بضاعة؟
+    ///
+    /// <para><b>ولماذا دالّة لا مقارنة مكرّرة:</b> سلوك المحفظة يُفحَص في
+    /// ستّة مواضع بين الخادم والواجهة (شاشة البيع، إخفاء المخزون، بذر صنف
+    /// القيمة، البيع بالقيمة الحرّة…). وإضافةُ إصدارٍ جديد على شكلها بـ
+    /// <c>== Wallet</c> مكرّرة تعني تحديث خمسةٍ ونسيان السادس — والسادس هو
+    /// الذي يُكتشف عند العميل.</para>
+    /// </summary>
+    public static bool IsWalletShaped(string edition) =>
+        edition == Wallet || edition == WalletPlus;
+
+    /// <summary>إصدارات المحفظة تبيع بالقيمة الحرّة حصراً — لا أصناف تُختار.</summary>
+    public static bool AllowsOpenProduct(string edition) => IsWalletShaped(edition);
+}
 
 public class Organization
 {
@@ -6,6 +93,12 @@ public class Organization
     public string LegalName { get; set; } = "";
     public string DisplayName { get; set; } = "";
     public string? LogoUrl { get; set; }
+
+    /// <summary>
+    /// شكل النظام لا حجمه — انظر [Editions]. غير PlanTier في الترخيص الذي
+    /// يحدّد الحدود (فروع، مستخدمون، مدّة).
+    /// </summary>
+    public string Edition { get; set; } = Editions.Standard;
     public string PrimaryColor { get; set; } = "#0B2540";
     public string SecondaryColor { get; set; } = "#C8952B";
     public string CurrencyCode { get; set; } = "LYD";
@@ -24,6 +117,38 @@ public class Organization
     // الطابعات الحديثة (تكامل الأجهزة §2.12). الطباعة نفسها عبر تعريف
     // Windows القياسي للطابعة، لا بروتوكول ESC/POS مباشر لموديل بعينه.
     public double ReceiptWidthMm { get; set; } = 80;
+
+    /// <summary>
+    /// الرقم الضريبي — كما تطلبه الفاتورة الرسمية.
+    ///
+    /// <para>لم يكن له موضع، فيكتبه التاجر بخطّ اليد على الورقة المطبوعة أو
+    /// لا يكتبه.</para>
+    /// </summary>
+    public string? TaxNumber { get; set; }
+
+    /// <summary>رقم السجلّ التجاري.</summary>
+    public string? CommercialRegistry { get; set; }
+
+    /// <summary>
+    /// قالب الإيصال — JSON واحد لا عمودٌ لكل خيار.
+    ///
+    /// <para><b>الفجوة التي يسدّه:</b> الإيصال كان يطبع اسم المنظمة نصّاً
+    /// وحسب: لا شعار ولا رقم ضريبي ولا سجلّ تجاري ولا شروط تذييل ولا رمز
+    /// استجابة سريعة. والتاجر يريد شعاره على الورقة — وهو أوّل ما يسأل عنه
+    /// بعد الشراء.</para>
+    ///
+    /// <para><b>ولماذا JSON لا أعمدة:</b> نفس نهج
+    /// <see cref="BarcodeTemplateJson"/>. كل خيار عمودٌ يعني هجرةً لكل خيار
+    /// جديد — وهو الطريق الذي انتهى بجدولٍ ذي ١٦٥ عموداً في نظامٍ آخر
+    /// دُرس (راجع ENTERPRISE_HARVEST.md §32.2).</para>
+    ///
+    /// <para><c>paper</c> أحد: <c>roll80</c>، <c>roll58</c>، <c>a4</c>،
+    /// <c>a5</c>.</para>
+    /// </summary>
+    public string ReceiptTemplateJson { get; set; } =
+        "{\"paper\":\"roll80\",\"showLogo\":true,\"showTaxNumber\":true,"
+        + "\"showCommercialRegistry\":false,\"showQr\":false,"
+        + "\"headerText\":null,\"footerText\":\"شكراً لتعاملكم معنا\"}";
     // شريط جانبي أو شريط علوي — تفضيل عرض بحت لا يغيّر أي وظيفة.
     public string NavLayout { get; set; } = "sidebar";
     // السماح ببيع الأصناف مفتوحة القيمة في نقطة البيع. مطفأ افتراضياً:
@@ -31,6 +156,37 @@ public class Organization
     // لسحب نقدية بلا أثر. تفعيله قرار مدير المنظمة (super_admin) وحده،
     // ولا يُضبط من إعدادات جهاز الكاشير.
     public bool PosAllowOpenProduct { get; set; }
+
+    /// <summary>
+    /// منطقة المنظمة الزمنية — راجع [OrgClock].
+    ///
+    /// <para>«اليوم» كان يُقاس بـUTC، فمحلٌّ في طرابلس بين العاشرة مساءً
+    /// ومنتصف الليل يُسجّل مصروف اليوم في يوم أمس، ولا يستطيع إقفال أمس.
+    /// </para>
+    /// </summary>
+    // النصّ لا OrgClock.DefaultTimeZone: الكيانات لا تعتمد على طبقة
+    // البيانات. والقيمتان متطابقتان وتُفحصان في الاختبار.
+    public string TimeZoneId { get; set; } = "Libya";
+
+    // ── أنماط بطاقة المحفظة (راجع [CardModes]) ──────────────────────────
+
+    /// <summary>
+    /// الأنماط المسموحة في هذه المنظمة، مفصولة بفاصلة. المدير يحدّد
+    /// **المظروف** لا اختيار كل زبون: محلٌّ بلا إنترنت مستقرّ لا يفعّل
+    /// التأكيد بالهاتف، ومحلٌّ يخدم كباراً قد يُلغي الرقم السرّي كلّه.
+    /// </summary>
+    public string CardModesAllowed { get; set; } = $"{CardModes.Card},{CardModes.Pin}";
+
+    /// <summary>نمط الحساب الجديد — كل حساب يبدأ من مكان معلوم.</summary>
+    public string CardModeDefault { get; set; } = CardModes.Pin;
+
+    /// <summary>
+    /// السقف اليومي لنمط «بطاقة فقط». صفر = النمط معطَّل فعلياً.
+    ///
+    /// <para>هو ما يجعل النمط المكشوف مقبولاً: خطرُه محصور برقم يقرّره
+    /// المدير، لا بكامل رصيد الزبون.</para>
+    /// </summary>
+    public decimal CardOpenModeDailyCap { get; set; } = 50;
     public bool IsActive { get; set; } = true;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
@@ -74,10 +230,48 @@ public class License
     public int MaxBranches { get; set; } = 1;
     public int MaxUsers { get; set; } = 5;
     public string EnabledModulesJson { get; set; } = "[\"inventory\",\"pos\",\"customers\",\"reports\"]";
+    /// <summary>الاشتراك الشهري المتفَّق عليه — يُطبَع في العقد.</summary>
+    public decimal MonthlyFee { get; set; }
+
+    /// <summary>رسوم التخزين السحابي الشهرية.</summary>
+    public decimal StorageFee { get; set; }
+
+    /// <summary>نسبة الصيانة المئوية. صفر يعني التفاهم عليها مع الدعم.</summary>
+    public decimal MaintenanceRate { get; set; }
+
     public string? HardwareFingerprint { get; set; }
     public DateTime IssuedAt { get; set; } = DateTime.UtcNow;
     public DateTime ExpiresAt { get; set; }
-    public string Status { get; set; } = "active"; // active | grace_period | expired | revoked
+
+    /// <summary>
+    /// active (عامل) · grace_period (مهلة — قراءة فقط) · expired (منتهٍ) ·
+    /// revoked (أُنهيت الخدمة).
+    ///
+    /// <para>كانت هذه القيم معرَّفة في المخطّط منذ البداية **ولا يقرأها
+    /// أحد** — أي أن ترخيصاً منتهياً أو ملغى كان يعمل كالجديد تماماً.</para>
+    /// </summary>
+    public string Status { get; set; } = "active";
+
+    /// <summary>
+    /// قراءة فقط: كل ما ليس <c>GET</c> يُرفض.
+    ///
+    /// <para><b>عمود واحد يخدم ثلاث حاجات</b> بدل ثلاث آليات:
+    /// نسخة العرض التي تُرى ولا تُعدَّل، والعميل المتأخّر في السداد يُجمَّد
+    /// بلا أن يفقد بياناته، ومهلة ما بعد الانتهاء التي يذكرها
+    /// <c>ARCHITECTURE.md</c> §2.2 — «قراءة فقط بدل توقّف مفاجئ يفقد ثقة
+    /// الزبون».</para>
+    ///
+    /// <para><b>ولماذا على الترخيص لا على الإصدار:</b> ربطه بإصدار
+    /// <c>trial</c> كان يمنع وجود تجربة حقيقية يُدخِل فيها العميل بياناته،
+    /// ويمنع تجميد عميل قياسي متأخّر. الحاجة صفةُ عقد لا شكلُ منتج.</para>
+    /// </summary>
+    public bool IsReadOnly { get; set; }
+
+    /// <summary>سبب التجميد أو الإنهاء — يُعرض للعميل نفسه لا لنا وحدنا.</summary>
+    public string? StatusReason { get; set; }
+
+    /// <summary>متى تغيّرت الحالة آخر مرّة — أساس أي نزاع لاحق.</summary>
+    public DateTime? StatusChangedAt { get; set; }
 }
 
 public class Branch
@@ -88,6 +282,20 @@ public class Branch
     public string Code { get; set; } = "";
     public string? Address { get; set; }
     public string? Phone { get; set; }
+
+    /// <summary>
+    /// لوح خلفية الفرع: default | warm | cool | green | slate.
+    ///
+    /// <para><b>يميّز المكان لا الشخص:</b> تفضيل السطوع (نهاري/ليلي) شخصيّ
+    /// يُحفَظ على الجهاز، أمّا اللوح فيقول لموظفٍ ينتقل بين فرعين **أين هو
+    /// الآن** — وهو ما يمنع إدخال بيانات في الفرع الخطأ، أشيع أخطاء
+    /// الأنظمة متعدّدة الفروع.</para>
+    ///
+    /// <para>ولا يمسّ ألوان العلامة التجارية: يُزيح الأسطح والحدود وحدها،
+    /// فتبقى هوية الشركة واحدة في كل فروعها (ARCHITECTURE.md §2.1).</para>
+    /// </summary>
+    public string ThemePalette { get; set; } = "default";
+
     public bool IsActive { get; set; } = true;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }
@@ -144,10 +352,62 @@ public class Product
     public string Name { get; set; } = "";
     public string UnitBase { get; set; } = "piece";
     public decimal UnitConversionFactor { get; set; } = 1;
+
+    // ── البيع بالوحدة الجزئية ──────────────────────────────────────────
+    //
+    // الصيدلية تشتري شريطاً وتبيع حبّة، والبقالة تبيع البيضة من الطبق.
+    // المخزون يُعدّ بالوحدة الأساسية دائماً، والبيع الجزئي يخصم كسراً منها.
+
+    /// <summary>اسم الوحدة الجزئية: حبّة، قرص، مل. NULL = لا بيع جزئي.</summary>
+    public string? SubUnitName { get; set; }
+
+    /// <summary>كم وحدة جزئية في الوحدة الأساسية. صفر أو واحد = لا بيع جزئي.</summary>
+    public decimal SubUnitsPerBase { get; set; }
+
+    /// <summary>
+    /// سعر الوحدة الجزئية — مستقلٌّ لا يُشتقّ بالقسمة: الصيدلية تربح على
+    /// التجزئة، فحبّة من شريط بثمانية دنانير تُباع بدينار لا بـ0.80.
+    /// </summary>
+    public decimal SubUnitPrice { get; set; }
+
+    /// <summary>هل يقبل هذا الصنف بيعاً جزئياً فعلياً.</summary>
+    public bool AllowsSubUnitSale => SubUnitsPerBase > 1 && SubUnitPrice > 0;
     public decimal CostPrice { get; set; }
     public decimal SalePrice { get; set; }
+
+    /// <summary>
+    /// الحدّ الأدنى لسعر البيع. صفر = بلا حدّ.
+    ///
+    /// <para><b>العطب الذي يسدّه:</b> صلاحية <c>pos.price_override</c> تسمح
+    /// بتغيير السعر، ولا شيء كان يمنع البيع **تحت التكلفة**. كاشيرٌ يخطئ في
+    /// رقم، أو يجامل قريباً، فتخرج البضاعة بخسارة ولا يظهر ذلك إلا في تقرير
+    /// الشهر — إن ظهر. والصلاحية لا تحمي: مدير المنظمة يملكها دائماً.</para>
+    ///
+    /// <para><b>وهو حدٌّ مطلق لا يتجاوزه أحد</b> — ولا حتى حامل صلاحية
+    /// تعديل السعر. حدٌّ له استثناء ليس حدّاً: من يريد بيعاً أرخص يُنزل
+    /// الحدّ صراحةً على بطاقة الصنف، فيبقى القرار مسجَّلاً في مكانٍ واحد بدل
+    /// أن يتكرّر صامتاً في كل فاتورة.</para>
+    ///
+    /// <para>وبالوحدة الأساسية دائماً: البيع الجزئي يقيسه بالنسبة (راجع
+    /// [SubUnitsPerBase])، فحدٌّ ثانٍ للوحدة الجزئية كان سيفترق عن الأوّل
+    /// أوّل مرّة يُعدَّل أحدهما.</para>
+    public decimal MinSalePrice { get; set; }
+    /// <summary>
+    /// نشرة الدواء المرتبطة بهذا الصنف — راجع [MedicineReference].
+    ///
+    /// اختياري دائماً وليس فقط في غير إصدار الصيدلية: الصيدلية نفسها تبيع
+    /// مستحضرات تجميل وحفاضات وأدوات، وإلزامه كان يمنع إدخالها.
+    /// </summary>
+    public Guid? MedicineRefId { get; set; }
+
     public bool TrackExpiry { get; set; }
     public decimal ReorderLevel { get; set; }
+
+    /// <summary>
+    /// مهلة التوريد بالأيام — كم يوماً بين إرسال أمر الشراء ووصول البضاعة.
+    /// نصف معادلة إعادة الطلب (الاستهلاك اليومي × المهلة).
+    /// </summary>
+    public int LeadTimeDays { get; set; } = 7;
 
     /// <summary>
     /// صنف غير متتبَّع مخزنياً (خدمة، أو بضاعة مفتوحة القيمة تُكتب قيمتها
@@ -160,6 +420,15 @@ public class Product
     /// المخزون وحده (راجع InvoicesController.Create).
     /// </summary>
     public bool TracksStock { get; set; } = true;
+
+    /// <summary>
+    /// آخر مرّة عُدّ فيها هذا الصنف فعلياً (اعتُمد جرد يشمله).
+    ///
+    /// <para>هو ما يجعل **الجرد الدوري الموزَّع** ممكناً: بدل إغلاق المحل
+    /// يوماً كاملاً لعدّ كل شيء، يُعدّ ما لم يُعدّ منذ مدّة. والحقل بلا
+    /// معنى قبل أن يوجد معيار يقرأه — ولهذا يُضاف معه لا قبله.</para>
+    /// </summary>
+    public DateTime? LastCountedAt { get; set; }
 
     public bool IsDeleted { get; set; }
 }
@@ -191,6 +460,29 @@ public class ProductCategory
     public Guid? ParentId { get; set; }
 }
 
+/// <summary>
+/// مرفق مخزَّن على قرص السيرفر — شعار منظمة، أو صورة فاتورة مورّد.
+///
+/// الصفّ يصف الملف ولا يحمله: البايتات على القرص تحت مجلد التخزين
+/// (Storage:Path)، و[StoredName] اسمه هناك. حفظ الملفات في القاعدة كان
+/// سيُضخّم كل نسخة احتياطية بصور لا تتغيّر أبداً بعد رفعها.
+/// </summary>
+public class Attachment
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid OrganizationId { get; set; }
+    /// organization_logo | purchase_order
+    public string EntityType { get; set; } = "";
+    public Guid? EntityId { get; set; }
+    public string FileName { get; set; } = "";
+    public string ContentType { get; set; } = "";
+    public long SizeBytes { get; set; }
+    /// اسم الملف على القرص فقط لا مسار كامل — نقل المجلد لا يُبطل الصف.
+    public string StoredName { get; set; } = "";
+    public Guid? UploadedBy { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+}
+
 public class StockLevel
 {
     public Guid Id { get; set; } = Guid.NewGuid();
@@ -200,6 +492,64 @@ public class StockLevel
     public decimal Quantity { get; set; }
     public string BatchNumber { get; set; } = "";
     public DateTime? ExpiryDate { get; set; }
+
+    /// <summary>
+    /// موضع التخزين داخل الفرع. NULL = مستودع الفرع الافتراضي — راجع
+    /// [Warehouse]. قابليته للـ NULL هي ما يجعل الشجرة تُضاف بلا ترحيل
+    /// بيانات ولا كسر لإصدار قائم.
+    /// </summary>
+    public Guid? WarehouseId { get; set; }
+
+    // ── القفل: إيقاف بضاعة في مكانها ────────────────────────────────────
+    //
+    // تصل دفعة بشبهة عيب، أو ينتظر صنف نتيجة فحص، أو تُرتجع بضاعة يجب ألّا
+    // تُباع قبل معاينتها. الحلول الثلاثة المتاحة قبل هذا الحقل كانت كلها
+    // معطوبة: حذف الصفّ يفقد الكمية ويكسر التدقيق، وتركه يعني أن يبيعها
+    // الكاشير، ونقلها إلى فرع وهمي يشوّه كل تقارير الفروع.
+    //
+    // فالقفل هو الجواب الرابع: البضاعة تبقى في مكانها وبكمّيتها، وتظهر في
+    // الجرد وفي قيمة المخزون (فهي مالٌ مملوك فعلاً)، وتخرج وحدها من:
+    // المتاح للبيع، وحساب إعادة الطلب، والتحويل بين الفروع.
+
+    /// <summary>موقوفة عن الصرف — راجع تعليق القفل أعلاه.</summary>
+    public bool IsLocked { get; set; }
+
+    /// <summary>
+    /// سبب الإيقاف. إلزامي عند القفل لا اختياري: قفلٌ بلا سبب يصبح بعد
+    /// أسبوعين كمية مجمَّدة لا يعرف أحد لماذا جُمِّدت ولا متى تُفرَج.
+    /// </summary>
+    public string? LockReason { get; set; }
+
+    public Guid? LockedBy { get; set; }
+    public DateTime? LockedAt { get; set; }
+
+    // ── تاريخ الاستراتيجية: ترتيب الصرف بحقل واحد ────────────────────────
+    //
+    // الصيدلية يجب أن تصرف الأقرب انتهاءً (FEFO)، والبقالة تكفيها الأقدم
+    // دخولاً (FIFO). فبدل قاعدتَي ترتيب منفصلتين، تاريخٌ واحد يُملأ بحسب
+    // طبيعة الصنف ويُرتَّب عليه في كل مكان:
+    //
+    //   صنف بصلاحية  → تاريخ الانتهاء     ⇒ FEFO
+    //   صنف بلا صلاحية → تاريخ الإدخال     ⇒ FIFO
+    //
+    // العطب الذي يصلحه: الأصناف بلا صلاحية كانت تُرتَّب برقم الدفعة أبجدياً
+    // — أي عشوائياً فعلياً — فتبقى الدفعة القديمة على الرفّ إلى ما لا نهاية
+    // لأن رقمها يبدأ بحرف متأخّر.
+
+    /// <summary>
+    /// أساس ترتيب الصرف. NULL = صنف يتتبّع الصلاحية ووصلت دفعته بلا تاريخ
+    /// (بيانات قديمة أو إدخال ناقص) — ويُؤخَّر في الترتيب عمداً: المعلوم
+    /// أولى بالتصريف من المجهول.
+    /// </summary>
+    public DateTime? StrategyDate { get; set; }
+
+    /// <summary>
+    /// يُستدعى عند **إنشاء** الصفّ أو تغيير تاريخ صلاحيته — لا عند مجرّد
+    /// زيادة الكمية على دفعة قائمة: إعادة ختمه حينها تُقفز الدفعة القديمة
+    /// إلى آخر الطابور كلما وصلها توريد جديد، وهو نقيض FIFO.
+    /// </summary>
+    public void StampStrategyDate(bool trackExpiry) =>
+        StrategyDate = ExpiryDate ?? (trackExpiry ? null : DateTime.UtcNow);
 }
 
 /// <summary>
@@ -209,6 +559,143 @@ public class StockLevel
 /// النقل. لا مسار رجوع من in_transit إلى cancelled عمداً؛ البضاعة تكون قد
 /// غادرت الفرع المصدر فعلياً، فالتصحيح بعد هذه النقطة تعديل مخزون يدوي.
 /// </summary>
+/// <summary>أنواع المستندات التي تُحرّك المخزون — مصدر السطر في الدفتر.</summary>
+public static class StockSourceTypes
+{
+    public const string PurchaseReceipt = "purchase_receipt";
+    public const string Invoice = "invoice";
+    public const string InvoiceReturn = "invoice_return";
+    public const string TransferOut = "transfer_out";
+    public const string TransferIn = "transfer_in";
+    public const string StockCount = "stock_count";
+    /// <summary>بضاعة أُعيدت إلى المورّد — إخراجٌ من المخزون.</summary>
+    public const string PurchaseReturn = "purchase_return";
+
+    public const string ManualAdjustment = "manual_adjustment";
+    public const string Opening = "opening";
+}
+
+/// <summary>
+/// دفتر حركة المخزون — **مصدر الحقيقة**، وstock_levels ذاكرة مشتقّة منه.
+///
+/// <para><b>العطب الذي يصلحه:</b> كان الرصيد يُعدَّل في مكانه، فلا جواب عن
+/// «كم كان الرصيد يوم كذا»، ولا تكلفة حقيقية (سعر تكلفة واحد ثابت للصنف مهما
+/// اختلفت أسعار الشراء)، ولا أثر يُجمَع حسابياً لمن غيّر ماذا.</para>
+///
+/// <para><b>يُلحَق به ولا يُعدَّل:</b> التصحيح بسطرٍ عكسي لا بمحو الماضي —
+/// نفس حرمة القيد في دفتر المحفظة. و<see cref="IsCancelled"/> إلغاء منطقي
+/// لا حذف.</para>
+///
+/// <para><b>الكتابة داخل المعاملة نفسها</b> التي تُعدّل الرصيد، عبر
+/// [StockLedger] وحده — لا مسار يستثنيه.</para>
+/// </summary>
+public class StockLedgerEntry
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid OrganizationId { get; set; }
+    public Guid BranchId { get; set; }
+
+    /// <summary>NULL = مستودع الفرع الافتراضي — راجع [Warehouse].</summary>
+    public Guid? WarehouseId { get; set; }
+
+    public Guid ProductId { get; set; }
+    public string BatchNumber { get; set; } = "";
+    public DateTime? ExpiryDate { get; set; }
+
+    /// <summary>
+    /// وقت الحركة. datetime لا date: ترتيب حركات اليوم الواحد يحدّد الرصيد
+    /// بعد كلٍّ منها، وتاريخٌ بلا وقت يجعل ترتيب البيع والاستلام في اليوم
+    /// نفسه اعتباطياً.
+    /// </summary>
+    public DateTime PostedAt { get; set; } = DateTime.UtcNow;
+
+    /// <summary>الفرق موجباً أو سالباً — لا رصيداً.</summary>
+    public decimal QuantityChange { get; set; }
+
+    /// <summary>الرصيد بعد هذه الحركة، لهذه الدفعة في هذا الموضع.</summary>
+    public decimal BalanceAfter { get; set; }
+
+    /// <summary>تكلفة الوحدة الداخلة أو الخارجة.</summary>
+    public decimal UnitCost { get; set; }
+
+    /// <summary>قيمة المخزون بعد الحركة = BalanceAfter × متوسط التكلفة.</summary>
+    public decimal ValueAfter { get; set; }
+
+    /// <summary>ما يُرحَّل محاسبياً — أساس تقرير قيمة المخزون.</summary>
+    public decimal ValueChange { get; set; }
+
+    /// <summary>راجع [StockSourceTypes].</summary>
+    public string SourceType { get; set; } = "";
+    public Guid? SourceId { get; set; }
+
+    /// <summary>
+    /// سطر الإدخال الذي استُهلك منه — في سطور الصرف وحدها.
+    ///
+    /// <para>هذا ما يميّز الدفتر عن دفتر عادي: الأخير يقول «خرجت خمس قطع»،
+    /// وهذا يقول «خرجت خمس قطع **من الشحنة التي وصلت يوم كذا بتكلفة كذا**».
+    /// منه تُقرأ التكلفة الدقيقة بلا طابور FIFO يُخزَّن ويُصان، ومنه يُجاب
+    /// سؤال التتبّع العكسي: «هذه الدفعة معيبة — من اشتراها؟» باستعلام
+    /// واحد — وهو مطلب تنظيمي في الأدوية والغذاء لا رفاهية.</para>
+    /// </summary>
+    public Guid? SourceEntryId { get; set; }
+
+    /// <summary>
+    /// المتبقّي من هذا الإدخال لم يُستهلَك بعد — في سطور الإدخال وحدها.
+    /// هو ما يجعل اختيار «من أي إدخال نصرف» استعلاماً لا حساباً تراكمياً.
+    /// </summary>
+    public decimal RemainingQuantity { get; set; }
+
+    public Guid? CreatedBy { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public bool IsCancelled { get; set; }
+    public string? CancelReason { get; set; }
+}
+
+/// <summary>أنواع المستودعات — راجع [Warehouse].</summary>
+public static class WarehouseKinds
+{
+    public const string Main = "main";
+    /// <summary>بضاعة غادرت فرعاً ولم تصل الآخر بعد.</summary>
+    public const string Transit = "transit";
+    public const string Damaged = "damaged";
+    public const string Returns = "returns";
+    public const string Quarantine = "quarantine";
+}
+
+/// <summary>
+/// مستودع **تحت** الفرع لا بدلاً منه.
+///
+/// <para><b>لماذا NULL مسموح في كل مكان يشير إليه:</b> NULL يعني «مستودع
+/// الفرع الافتراضي». فتبقى البقالة والصيدلية تعملان بلا سطر إعداد واحد ولا
+/// ترحيل بيانات، ويستفيد إصدار المؤسسات وحده من الشجرة.</para>
+///
+/// <para><b>مستودع العبور يصلح عطباً قائماً:</b> تحويل في حالة
+/// <c>in_transit</c> يُخصم من المصدر ولا يُضاف للهدف — فتختفي البضاعة من كل
+/// تقرير طوال الترحيل. بمستودع عبور تبقى مرئية، لها مكان ومسؤول.</para>
+/// </summary>
+public class Warehouse
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid OrganizationId { get; set; }
+    public Guid BranchId { get; set; }
+
+    /// <summary>عقدة أعلى في الشجرة. NULL = جذر تحت الفرع.</summary>
+    public Guid? ParentWarehouseId { get; set; }
+
+    public string Name { get; set; } = "";
+    public string Code { get; set; } = "";
+    public string Kind { get; set; } = WarehouseKinds.Main;
+
+    /// <summary>
+    /// عقدة تجميعية لا تُخزَّن فيها بضاعة — تُجمع أرصدة أبنائها وحسب.
+    /// السماح بالتخزين فيها يجعل المجموع يعدّ الأب والابن معاً.
+    /// </summary>
+    public bool IsGroup { get; set; }
+
+    public bool IsActive { get; set; } = true;
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+}
+
 public class StockTransfer
 {
     public Guid Id { get; set; } = Guid.NewGuid();
@@ -238,10 +725,65 @@ public class StockCount
     public Guid Id { get; set; } = Guid.NewGuid();
     public Guid OrganizationId { get; set; }
     public Guid BranchId { get; set; }
-    public string Status { get; set; } = "open"; // open | reconciled | cancelled
+
+    /// <summary>
+    /// open (قيد العد) ← pending_review (انتهى العدّ وفيه فروقات تنتظر قراراً)
+    /// ← reconciled (اعتُمدت الفروقات وطُبِّقت على stock_levels) أو عودة إلى
+    /// open (طُلبت إعادة عدّ). و cancelled يُلغي بلا أثر.
+    ///
+    /// <para><b>لماذا حالة وسيطة:</b> كان الجرد ينتقل من open إلى reconciled
+    /// بضغطة واحدة، فيُطبَّق فرقٌ ناتج عن خطأ عدّ على المخزون بلا أن يراه
+    /// أحد. والفرق ليس رقماً محايداً: زيادة تُخفي سرقة، ونقصٌ يُشطب بضاعة
+    /// موجودة. فالقرار بشري بخيارين لا ثالث لهما — اقبل الفرق، أو أعد العدّ.
+    /// </para>
+    ///
+    /// <para>وجردٌ بلا فرق واحد لا يمرّ بها: لا قرار يُتخذ حين لا يوجد ما
+    /// يُقرَّر فيه، وإجبار المستخدم على ضغطتين لتأكيد «لا شيء تغيّر» يُعلّمه
+    /// أن يضغط بلا قراءة — وهو ما تُوجد هذه الخطوة لمنعه.</para>
+    /// </summary>
+    public string Status { get; set; } = "open";
+
+    /// <summary>
+    /// <c>periodic</c> جرد دوري على مخزون قائم، أو <c>initial</c> جرد
+    /// ابتدائي لإدخال مخزون موجود إلى نظام جديد.
+    ///
+    /// <para><b>الفرق ليس تسميةً:</b> الدوري يبدأ بالكمية النظامية مملوءة
+    /// فيصحّح الموظف الاستثناءات وحدها. والابتدائي يبدأ **بأصفار** لأنه لا
+    /// كمية نظامية أصلاً — وملؤه بالنظامي كان يجعل «قبول الافتراضي» يُثبّت
+    /// صفراً لكل صنف على الرفّ.</para>
+    ///
+    /// <para>وبلا هذا المسار كان كل زبون جديد يُدخل مخزونه الأول صنفاً صنفاً
+    /// من شاشة تعديل الكمية — بلا مستند ولا مراجعة ولا أثر واحد يجمعها.</para>
+    /// </summary>
+    public string Kind { get; set; } = StockCountKinds.Periodic;
+
     public Guid? CreatedBy { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? ClosedAt { get; set; }
+
+    /// <summary>من أنهى العدّ ومتى — الطرف الأول في القرار.</summary>
+    public Guid? SubmittedBy { get; set; }
+    public DateTime? SubmittedAt { get; set; }
+
+    /// <summary>
+    /// من بتّ في الفروقات ومتى (قبولاً أو إعادةَ عدّ).
+    ///
+    /// <para>لا يمنع النظام أن يكون هو نفسه من عدّ: المحل الذي يديره صاحبه
+    /// وحده لا يملك شخصاً ثانياً، ومنعُه يجعل الجرد مستحيلاً فيه. لكنّ
+    /// الحقلين منفصلان فيظهر تطابقهما في سجلّ التدقيق لمن يبحث عنه.</para>
+    /// </summary>
+    public Guid? ReviewedBy { get; set; }
+    public DateTime? ReviewedAt { get; set; }
+
+    /// <summary>سبب آخر طلب إعادة عدّ — إلزامي عند الطلب.</summary>
+    public string? RecountReason { get; set; }
+
+    /// <summary>
+    /// كم مرّة أُعيد العدّ. جردٌ أُعيد ثلاث مرّات ليس جرداً دقيقاً بل مؤشّر
+    /// على مشكلة في العدّ نفسه أو في المخزون — والرقم هو ما يجعلها مرئية.
+    /// </summary>
+    public int RecountRounds { get; set; }
+
     public List<StockCountItem> Items { get; set; } = new();
 }
 
@@ -249,6 +791,12 @@ public class StockCount
 /// Variance عمود محسوب (PERSISTED) في قاعدة البيانات نفسها — لا يُكتَب من
 /// EF Core إطلاقاً (راجع AppDbContext.OnModelCreating)، فقط يُقرأ بعد الحفظ.
 /// </summary>
+public static class StockCountKinds
+{
+    public const string Periodic = "periodic";
+    public const string Initial = "initial";
+}
+
 public class StockCountItem
 {
     public Guid Id { get; set; } = Guid.NewGuid();
@@ -257,6 +805,32 @@ public class StockCountItem
     public decimal SystemQuantity { get; set; }
     public decimal CountedQuantity { get; set; }
     public decimal Variance { get; set; }
+
+    /// <summary>
+    /// متى عُدَّ هذا السطر فعلاً. NULL = **لم يُمَسّ بعد**.
+    ///
+    /// <para><b>العطب الذي يصلحه:</b> الجرد الدوري يبدأ بـ
+    /// <c>CountedQuantity = SystemQuantity</c>، فسطرٌ لم يره أحد يبدو
+    /// «عُدَّ وطابق». عاملٌ مسح أربعين صنفاً من ثلاثمئة ثم أرسل، يقول له
+    /// النظام **صفر فروقات** — لأن مئتين وستين وافقت نفسها. الكمية وحدها
+    /// لا تفرّق بين «طابق» و«لم يُنظَر إليه»، والفرق بينهما هو الجرد كلّه.
+    /// </para>
+    ///
+    /// <para>وهو ما يجعل الشاشة الميدانية ممكنة أصلاً: سؤالها الدائم «كم
+    /// بقي» لا جواب له بلا هذا الحقل.</para>
+    /// </summary>
+    public DateTime? CountedAt { get; set; }
+
+    /// <summary>
+    /// أُضيف أثناء العدّ لأنه وُجد على الرفّ ولم يكن في القائمة.
+    ///
+    /// <para>الحالة التي يسمّيها myWMS <c>ConfirmUnexpectedUnitLoad</c>،
+    /// وتقع عندنا في الجرد الموزَّع: <c>NotCountedSince</c> يستبعد ما عُدَّ
+    /// حديثاً، فيقف العامل أمام صنف موجود لا يجده في قائمته. بلا زرٍّ يقول
+    /// «وجدتُ ما ليس في القائمة» يخرج من النظام ويكتب على ورقة — وتنتهي
+    /// صلاحية النظام كلّه.</para>
+    /// </summary>
+    public bool AddedDuringCount { get; set; }
 }
 
 /// <summary>
@@ -273,6 +847,15 @@ public class PurchaseOrder
     public Guid? SupplierId { get; set; }
     public string Status { get; set; } = "draft"; // draft | ordered | received | cancelled
     public decimal TotalAmount { get; set; }
+
+    /// <summary>
+    /// أمرٌ ولّده اقتراح إعادة الطلب لا يدُ مستخدم.
+    ///
+    /// <para>يجعل الأتمتة **قابلة للمراجعة**: مدير يرى عشرين أمراً لا يعرف
+    /// أيّها قراره وأيّها قرار معادلة، فلا يستطيع الحكم على المعادلة أصلاً.
+    /// وصندوقٌ أسود لا يُراجَع يُوقَف بعد أول خطأ.</para>
+    /// </summary>
+    public bool IsAuto { get; set; }
     public Guid? CreatedBy { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public List<PurchaseOrderItem> Items { get; set; } = new();
@@ -287,6 +870,15 @@ public class PurchaseOrderItem
     public decimal UnitCost { get; set; }
     // اختياري — NULL يعني الإبقاء على سعر بيع الصنف الحالي عند الاستلام.
     public decimal? SalePrice { get; set; }
+
+    /// <summary>
+    /// المستلَم فعلياً من [Quantity]. أقلّ منها يعني توريداً ناقصاً والأمر
+    /// يبقى مفتوحاً حتى يكتمل.
+    /// </summary>
+    public decimal ReceivedQuantity { get; set; }
+
+    /// <summary>ما لم يصل بعد — الأساس الذي يُبنى عليه أي استلام تالٍ.</summary>
+    public decimal RemainingQuantity => Quantity - ReceivedQuantity;
 }
 
 /// <summary>
@@ -295,6 +887,74 @@ public class PurchaseOrderItem
 /// (راجع libyan_models/ACCOUNTING_RULES.md §3: عمود رصيد قابل للكتابة هو
 /// أسرع طريق إلى بطاقة رصيدها لا يطابق محاسبتها).
 /// </summary>
+/// <summary>
+/// مستند استلام: شحنة واحدة وصلت فعلياً من أمر شراء.
+///
+/// <para><b>لماذا مستند لا رقم تراكمي:</b> كان الاستلام يزيد
+/// <see cref="PurchaseOrderItem.ReceivedQuantity"/> فقط. فثلاث شحنات جزئية
+/// تُبتلع في رقم واحد، ويضيع معها ثلاثة أشياء لا تُستعاد: **متى** وصلت كل
+/// شحنة (فلا تُقاس مهلة التوريد الحقيقية ويبقى <c>LeadTimeDays</c> رقماً
+/// مُدخَلاً بالظنّ)، و**رقم إشعار المورّد** وهو المرجع الوحيد عند الخلاف،
+/// و**أي شحنة تخصّ أي فاتورة مورّد** حين تُبنى المطابقة لاحقاً.</para>
+///
+/// <para>وهو **شرط مسبق لدفتر حركة المخزون** (راجع ARCHITECTURE.md §2.15):
+/// سطر الإدخال في الدفتر يجب أن يشير إلى مستند وصول حقيقي، لا إلى أمر شراء
+/// قد يصل على دفعات.</para>
+/// </summary>
+public class PurchaseReceipt
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid OrganizationId { get; set; }
+    public Guid BranchId { get; set; }
+    public Guid PurchaseOrderId { get; set; }
+
+    /// <summary>
+    /// رقم إشعار التسليم كما كتبه المورّد على ورقته. اختياري لا إلزامي:
+    /// كثير من الموردين المحليين يسلّمون بلا إشعار مرقَّم، وإلزامه كان
+    /// يدفع المستخدم إلى كتابة أي شيء ليمرّ — وحقلٌ مملوء بالقمامة أسوأ من
+    /// حقل فارغ، لأن الأول يُصدَّق.
+    /// </summary>
+    public string? SupplierNoteNumber { get; set; }
+
+    /// <summary>
+    /// تاريخ وصول البضاعة فعلاً — منفصل عن <see cref="CreatedAt"/> عمداً:
+    /// الشحنة تصل الخميس ويُدخلها أمين المخزن الأحد. قياس مهلة التوريد
+    /// بتاريخ الإدخال يضيف إليها يومين وهميين في كل مرّة.
+    /// </summary>
+    public DateTime ReceivedOn { get; set; }
+
+    public Guid? ReceivedBy { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public string? Notes { get; set; }
+
+    public List<PurchaseReceiptItem> Items { get; set; } = new();
+}
+
+public class PurchaseReceiptItem
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid PurchaseReceiptId { get; set; }
+
+    /// <summary>
+    /// سطر أمر الشراء المقابل. يُحفَظ إلى جانب ProductId لا بدلاً منه:
+    /// الأمر قد يحمل سطرين لنفس الصنف بتكلفتين، والربط بالصنف وحده يجعل
+    /// نسبة الشحنة إلى سطرها تخميناً.
+    /// </summary>
+    public Guid PurchaseOrderItemId { get; set; }
+
+    public Guid ProductId { get; set; }
+    public decimal Quantity { get; set; }
+    public string BatchNumber { get; set; } = "";
+    public DateTime? ExpiryDate { get; set; }
+
+    /// <summary>
+    /// لقطة التكلفة وقت الوصول. تكلفة سطر الأمر قد تُعدَّل لاحقاً، والمستند
+    /// يجب أن يبقى شاهداً على ما وصل بأي سعر — وهو أساس التقييم وتوزيع
+    /// تكلفة الشحنة الواردة حين يُبنيان.
+    /// </summary>
+    public decimal UnitCost { get; set; }
+}
+
 public class Customer
 {
     public Guid Id { get; set; } = Guid.NewGuid();
@@ -306,6 +966,19 @@ public class Customer
     public string? Notes { get; set; }
     public string? CardBarcode { get; set; }
     public decimal CreditLimit { get; set; }
+
+    /// <summary>
+    /// مهلة سداد الآجل بالأيام. صفر = مستحقّ يوم البيع.
+    ///
+    /// <para><b>لماذا على العميل لا على المنظمة:</b> تاجر الجملة يمنح
+    /// مستشفى ثلاثين يوماً وبقّالاً سبعة. ومهلة واحدة للجميع تعني إمّا
+    /// مطاردة من له مهلة، أو تركَ من لا مهلة له.</para>
+    ///
+    /// <para>منه يُشتقّ <see cref="Invoice.DueDate"/> لحظة البيع، ولقطةً
+    /// لا مرجعاً: تغيير المهلة لاحقاً لا يحرّك استحقاق فواتير مضت.</para>
+    /// </summary>
+    public int CreditDays { get; set; }
+
     public int LoyaltyPoints { get; set; }
     public bool IsDeleted { get; set; }
     // الرقم السري مُجزَّأ بـ BCrypt كأي كلمة مرور، ورمز البطاقة نفسه يعيش
@@ -316,6 +989,22 @@ public class Customer
     public string? PinHash { get; set; }
     public DateTime? PinLockedUntil { get; set; }
 
+    /// <summary>
+    /// نمط التحقّق لهذا الحساب — راجع [CardModes]. NULL = افتراضي المنظمة.
+    ///
+    /// <para>يختاره **صاحب الحساب** لا الكاشير: ماله هو. والتشديد حقٌّ بلا
+    /// إذن، أمّا التخفيف فلا يقع إلا بحضوره.</para>
+    /// </summary>
+    public string? CardMode { get; set; }
+
+    /// <summary>
+    /// سقف يومي أشدّ يختاره الزبون لنفسه. صفر = سقف المنظمة.
+    ///
+    /// <para>يُقبل الأقلّ فقط: سقفٌ أعلى من سقف المنظمة تجاوزٌ لحدّ وضعه
+    /// صاحب المحل لمخاطرته هو.</para>
+    /// </summary>
+    public decimal DailyCap { get; set; }
+
     // ---- نموذج الحساب ----
     // راجع [AccountModels] لسبب الفصل بين النموذجين.
     public string AccountModel { get; set; } = AccountModels.Prepaid;
@@ -325,6 +1014,30 @@ public class Customer
 
     /// <summary>سقف ما يُمنَح خلال الفترة الواحدة. صفر = بلا سقف.</summary>
     public decimal EntitlementCeiling { get; set; }
+
+    /// <summary>فئة العميل — منها يُؤخذ مبلغ المرتَّب. NULL = بلا فئة.</summary>
+    public Guid? CategoryId { get; set; }
+
+    /// <summary>
+    /// صورة صاحب البطاقة — مسارُ مرفقٍ لا الصورة نفسها.
+    ///
+    /// <para><b>لماذا تُطبع على البطاقة:</b> بطاقةٌ بلا رقم سرّي يحميها شيءٌ
+    /// واحد — أن يعرف الكاشير أن حاملها صاحبها. وبطاقةٌ بلا صورة في نمط
+    /// «بطاقة فقط» يستعملها من وجدها في الشارع.</para>
+    ///
+    /// <para>ومسارٌ لا بايتات: صورةٌ في عمود تُحمَّل مع كل قراءة عميل، وقائمةٌ
+    /// بألف منتسب كانت ستنقل عشرات الميغابايتات في كل فتح شاشة.</para>
+    /// </summary>
+    public string? PhotoUrl { get; set; }
+
+    /// <summary>
+    /// مبلغٌ يخصّ هذا العميل وحده، يَجُبّ مبلغ فئته. NULL = اتبع الفئة.
+    ///
+    /// <para><b>ولماذا NULL لا صفر:</b> الصفر قرارٌ صريح — «هذا العميل
+    /// موقوف المرتَّب هذه الدورة». وجعلُه يعني «اتبع الفئة» يُلغي القدرة على
+    /// إيقاف مرتَّب شخصٍ بعينه، وهي حاجةٌ حقيقية.</para>
+    /// </summary>
+    public decimal? EntitlementOverride { get; set; }
 
     /// <summary>
     /// نهاية فترة الاستحقاق الحالية. ما تبقّى بعدها يسقط بحركة إسقاط صريحة
@@ -361,6 +1074,47 @@ public static class AccountModels
 ///
 /// لا يحمل branch_id — الجهة تتعامل مع المنظمة ككل، بنفس مبرر [Supplier].
 /// </summary>
+/// <summary>
+/// فئة عملاء — اسمٌ ومبلغُ مرتَّبٍ دوري.
+///
+/// <para><b>الفجوة التي تسدّها:</b> سقف الاستحقاق كان
+/// <see cref="Customer.EntitlementCeiling"/> — رقماً **على كل عميل على
+/// حدة**. وجهةٌ تصرف على ألف منتسب مقسَّمين إلى ثلاث فئات كانت ترفع مرتب
+/// الفئة بتعديل ألف صفّ يدوياً؛ وأوّل صفٍّ يُنسى يُنتج منتسباً يقبض أقلّ
+/// من زملائه ولا يعرف أحدٌ لماذا.</para>
+///
+/// <para>والفئة **مبلغٌ واسم فقط** — لا سقفٌ يومي ولا نمط بطاقة ولا مدّة.
+/// تلك تبقى على العميل حيث كانت: خلطُها هنا يجعل تغيير المرتب يغيّر معه
+/// إعداداتٍ لم يقصد أحدٌ تغييرها.</para>
+/// </summary>
+public class CustomerCategory
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid OrganizationId { get; set; }
+
+    /// <summary>اسمها كما تسمّيها الإدارة — «أ» أو «موظفون» أو غيرهما.</summary>
+    public string Name { get; set; } = "";
+
+    /// <summary>المرتَّب الذي يُودَع لكل عميل فيها كل دورة صرف.</summary>
+    public decimal PeriodAmount { get; set; }
+
+    /// <summary>
+    /// أيسقط ما لم يُصرَف من مرتَّب الدورة عند صرف الدورة التالية؟
+    ///
+    /// <para><b>قرارُ إدارةٍ لا قاعدةٌ ثابتة:</b> جهةٌ تريد الرصيد «استعمله
+    /// أو تفقده» فلا يتراكم عندها التزام، وأخرى تريده يتراكم لمن لم يصرف.
+    /// وفرضُ أحدهما على الاثنتين يجعل النظام غير صالح لإحداهما.</para>
+    ///
+    /// <para>وتنفيذُه لا يحتاج شيئاً جديداً: <see cref="EntitlementSweeper"/>
+    /// لا يمسّ إلا من له <c>EntitlementExpiresOn</c> غير فارغ. فالرصيد الذي
+    /// لا يسقط يُودَع بتاريخ انتهاءٍ فارغ — فلا تراه المكنسة أصلاً.</para>
+    /// </summary>
+    public bool UnspentExpires { get; set; } = true;
+
+    public bool IsActive { get; set; } = true;
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+}
+
 public class Sponsor
 {
     public Guid Id { get; set; } = Guid.NewGuid();
@@ -433,12 +1187,63 @@ public class CustomerPinAttempt
 /// (نفس حرمة القيد المحاسبي؛ التصحيح بحركة معاكسة لا بتعديل الماضي).
 /// amount موجب دائماً والإشارة تُشتق من Kind عبر [WalletKinds.SignOf] وحدها.
 /// </summary>
+/// <summary>
+/// سلفة على منتسب — مالٌ يُقرَض ويُستردّ من مرتَّبه.
+///
+/// <para><b>ولماذا كيانٌ لا حركةُ محفظةٍ وحدها:</b> الحركة تقول كم دخل
+/// البطاقة؛ والسلفة تحتاج ما لا تحمله الحركة: كم القسط، ومتى بدأت، وكم
+/// بقي منها. والمتبقّي <b>محسوبٌ لا مخزَّن</b> — مجموعُ أقساطها مطروحاً من
+/// أصلها، بنفس مبدأ رصيد المحفظة وحساب المورّد.</para>
+///
+/// <para><b>والاسترداد تلقائي</b> عند صرف مرتَّب الدورة: يُخصم القسط، وما
+/// لا يتّسع له المرتَّب يُرحَّل. فلا يهبط رصيد المنتسب تحت الصفر بسبب قسط،
+/// ولا يبقى دَينٌ لا يُسدَّد.</para>
+/// </summary>
+public class CustomerAdvance
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid OrganizationId { get; set; }
+    public Guid CustomerId { get; set; }
+
+    /// <summary>أصل السلفة كما صُرفت.</summary>
+    public decimal Amount { get; set; }
+
+    /// <summary>
+    /// ما يُخصم من كل مرتَّب. صفر = كامل المتبقّي دفعةً واحدة.
+    ///
+    /// <para>وتحديدُه للإدارة لا حدَّ أدنى له — منتسبٌ يستلف مئتين ويسدّد
+    /// عشرين شهرياً أمرٌ تقرّره هي لا النظام.</para>
+    /// </summary>
+    public decimal InstallmentAmount { get; set; }
+
+    public DateOnly IssuedOn { get; set; }
+    public string? Note { get; set; }
+
+    /// <summary>
+    /// مُلغاة — لا محذوفة. أقساطها المخصومة حركاتٌ في الدفتر تشير إليها،
+    /// وحذفُها يترك خصماً بلا سببٍ ظاهر في كشف المنتسب.
+    /// </summary>
+    public bool IsCancelled { get; set; }
+
+    public Guid? CreatedBy { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+}
+
 public class CustomerWalletTransaction
 {
     public Guid Id { get; set; } = Guid.NewGuid();
     public Guid OrganizationId { get; set; }
     public Guid CustomerId { get; set; }
     public Guid? InvoiceId { get; set; }
+
+    /// <summary>
+    /// السلفة التي تخصّها هذه الحركة — صرفاً أو سداداً.
+    ///
+    /// <para>بدونه يستحيل معرفة كم بقي من سلفةٍ بعينها حين يكون على المنتسب
+    /// أكثر من واحدة.</para>
+    /// </summary>
+    public Guid? AdvanceId { get; set; }
+
     public string Kind { get; set; } = "";
     public decimal Amount { get; set; }
     public string? Note { get; set; }
@@ -450,6 +1255,62 @@ public class CustomerWalletTransaction
 /// المصدر الوحيد لإشارة كل نوع حركة — أي حساب للرصيد في النظام يمرّ من هنا،
 /// فلا يمكن أن يحسب موضعان الرصيد بإشارتين مختلفتين.
 /// </summary>
+/// <summary>
+/// أنماط التحقّق عند الصرف من بطاقة المحفظة.
+///
+/// <para><b>المشكلة التي تحلّها:</b> الرقم السري كان **إلزامياً دائماً**
+/// بلا بديل. والرقم وسيلةُ إثبات يعرفها طرفان: الزبون يُدخله على جهاز
+/// الكاشير، فيراه أو يلتقطه أو يحفظه — ثم يسحب بعد انصراف الزبون بالبحث
+/// عن اسمه. إلزامٌ بلا بديل هو ما يخلق الثغرة، لا ضعف الرقم.</para>
+///
+/// <para><b>وقاعدة الحوكمة:</b> التشديد على النفس حقٌّ لا يحتاج إذناً،
+/// والتخفيف لا يقع إلا برضا صاحب المال. **والكاشير لا يغيّر النمط
+/// إطلاقاً** — من يستطيع خفض الحماية لحظة الصرف لا تحميه حمايةٌ.</para>
+/// </summary>
+public static class CardModes
+{
+    /// <summary>
+    /// مسح البطاقة وحده، **بسقف يومي**.
+    ///
+    /// <para>لمن لا يملك هاتفاً ولا يحفظ رقماً. والرقم السري هنا **يختفي
+    /// تماماً** فلا شيء يُحفَظ أصلاً — الثغرة تُغلق بحذف الوسيلة لا
+    /// بحراستها، وهذا أقوى من أي ضبط.</para>
+    /// </summary>
+    public const string Card = "card";
+
+    /// <summary>بطاقة + رقم سرّي — السلوك القائم، ويبقى خياراً.</summary>
+    public const string Pin = "pin";
+
+    /// <summary>
+    /// بطاقة + تأكيد من هاتف الزبون.
+    ///
+    /// <para><b>معرَّف ولا يُعرَض بعد:</b> لا قناة إرسال في النظام، وإتاحة
+    /// نمطٍ يفشل صامتاً أسوأ من غيابه. يُضاف إلى [Selectable] يوم تُبنى
+    /// القناة.</para>
+    /// </summary>
+    public const string Phone = "phone";
+
+    /// <summary>ما يجوز اختياره فعلياً اليوم.</summary>
+    public static readonly string[] Selectable = { Card, Pin };
+
+    public static bool IsSelectable(string? mode) =>
+        mode is not null && Selectable.Contains(mode);
+
+    /// <summary>
+    /// هل الأول أشدّ من الثاني — أساس قاعدة «التشديد بلا إذن».
+    /// </summary>
+    public static bool IsStricter(string mode, string than) =>
+        Rank(mode) > Rank(than);
+
+    private static int Rank(string mode) => mode switch
+    {
+        Card => 0,
+        Phone => 1,
+        Pin => 2,
+        _ => 0,
+    };
+}
+
 public static class WalletKinds
 {
     public const string TopUp = "topup";
@@ -467,10 +1328,23 @@ public static class WalletKinds
     /// </summary>
     public const string EntitlementExpiry = "entitlement_expiry";
 
+    /// <summary>
+    /// سلفة صُرفت على البطاقة — مالٌ يُقرَض لا يُعطى.
+    ///
+    /// <para><b>ولماذا نوعٌ مستقلّ عن <see cref="TopUp"/>:</b> السلفة ترفع
+    /// الرصيد كالشحن، لكنها **تبقى ديناً على المنتسب** حتى تُستردّ. وخلطُها
+    /// بالشحن يجعل الجهة لا تعرف كم على منتسبيها من ديون — وهو أوّل ما
+    /// تسأل عنه.</para>
+    /// </summary>
+    public const string Advance = "advance";
+
+    /// <summary>قسطٌ من سلفة يُخصم — يُقابل [Advance].</summary>
+    public const string AdvanceRepayment = "advance_repayment";
+
     public static int SignOf(string kind) => kind switch
     {
-        TopUp or InvoiceRefund or AdjustmentIn or EntitlementGrant => 1,
-        Spend or AdjustmentOut or EntitlementExpiry => -1,
+        TopUp or InvoiceRefund or AdjustmentIn or EntitlementGrant or Advance => 1,
+        Spend or AdjustmentOut or EntitlementExpiry or AdvanceRepayment => -1,
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "نوع حركة محفظة غير معروف"),
     };
 
@@ -505,6 +1379,28 @@ public class Invoice
     public decimal TaxAmount { get; set; }
     public decimal DiscountAmount { get; set; }
     public decimal TotalAmount { get; set; }
+
+    /// <summary>
+    /// المدفوع فعلاً. NULL أو مساوٍ للإجمالي = مدفوعة بالكامل. وأقلّ منه
+    /// يعني دفعاً جزئياً، والفرق دَينٌ مقيَّد على محفظة العميل.
+    /// </summary>
+    public decimal? PaidAmount { get; set; }
+
+    /// <summary>النقد الذي سلّمه الزبون — للتدقيق وتسوية الدرج.</summary>
+    public decimal? TenderedAmount { get; set; }
+
+    /// <summary>الباقي المُعاد إليه.</summary>
+    public decimal? ChangeDue { get; set; }
+
+    /// <summary>
+    /// تاريخ استحقاق الجزء الآجل. NULL في البيع المدفوع كاملاً.
+    ///
+    /// <para>بدونه كان الدَّين قائماً **بلا موعد**: لا يُقال عنه «متأخّر»
+    /// فلا تقرير أعمار ولا تذكير ولا أولوية تحصيل. وهو أقرب بنود الخطة إلى
+    /// ميزة تُباع بذاتها لتاجر الجملة، لأنه يمسّ نقده لا تنظيمه.</para>
+    /// </summary>
+    public DateTime? DueDate { get; set; }
+
     public string Status { get; set; } = "completed";
     public Guid? CreatedBy { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
@@ -512,14 +1408,132 @@ public class Invoice
     public List<InvoicePayment> Payments { get; set; } = new();
 }
 
+/// <summary>
+/// نشرة الدواء — معرفة دوائية عامة لا بيانات منظمة.
+///
+/// <para><b>على مستوى المنصّة لا المنظمة</b> (بلا organization_id وبلا
+/// Security Policy، كجدول platform_settings): «باراسيتامول 500 مجم» له
+/// نفس موانع الاستعمال في كل صيدلية. ربطه بالمنظمة كان يعني أن كل عميل
+/// جديد يبدأ بنشرات فارغة ويُدخلها من الصفر — وهو ما يجعل الميزة تُهمَل
+/// عملياً. والسعر والمخزون يبقيان على products وstock_levels حيث ينتميان،
+/// فلا تسرّب بيانات بين المنظمات عبر هذا الجدول.</para>
+///
+/// <para>يُقرأ فقط لمن يملك وحدة <c>pharmacy</c> — راجع [Editions].</para>
+/// </summary>
+public class MedicineReference
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    /// <summary>الاسم التجاري كما يُعرَف في السوق.</summary>
+    public string Name { get; set; } = "";
+
+    /// <summary>المادة الفعّالة — أساس كشف التكرار والبدائل.</summary>
+    public string ActiveIngredient { get; set; } = "";
+
+    /// <summary>التركيز كنصّ (500 مجم، 250 مجم/5 مل) — لا رقم: الوحدة جزء منه.</summary>
+    public string? Strength { get; set; }
+
+    /// <summary>الشكل الصيدلي: أقراص، كبسولات، شراب، حقن، مرهم…</summary>
+    public string? Form { get; set; }
+
+    public string? Indications { get; set; }
+    public string? Contraindications { get; set; }
+    public string? Cautions { get; set; }
+    public string? SideEffects { get; set; }
+
+    /// <summary>
+    /// دواء يُصرَف بوصفة. الحقل هنا لا على products: كونه مقيَّداً خاصيةُ
+    /// الدواء نفسه لا خاصيةُ صنف في متجر بعينه.
+    /// </summary>
+    public bool RequiresPrescription { get; set; }
+
+    public bool IsDeleted { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+}
+
+/// <summary>
+/// قيد في دفتر الوصفات — صرف دواء مقيَّد بوصفة.
+///
+/// <para><b>بيانات منظمة لا معرفة عامة</b> (بخلاف [MedicineReference]):
+/// وصفة مريض بعينه صرفتها صيدلية بعينها، فتحمل organization_id وbranch_id
+/// وتُطبَّق عليها سياسة العزل كبقية الجداول التشغيلية.</para>
+///
+/// <para><b>مرتبطة بالفاتورة:</b> الوصفة تُقدَّم لحظة الصرف، وربطها بما صُرِف
+/// فعلاً هو ما يجعل الدفتر قابلاً للمراجعة — من صرف، ماذا، لمن، بأمر أي
+/// طبيب. ودونه يصبح سجلاً موازياً لا أحد يوثّق أنه يطابق المبيعات.</para>
+/// </summary>
+public class Prescription
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid OrganizationId { get; set; }
+    public Guid BranchId { get; set; }
+    public Guid? InvoiceId { get; set; }
+
+    /// <summary>رقم الوصفة كما كُتب عليها — اختياري: وصفات كثيرة بلا ترقيم.</summary>
+    public string? PrescriptionNumber { get; set; }
+
+    public string DoctorName { get; set; } = "";
+    public string? DoctorLicense { get; set; }
+    public string PatientName { get; set; } = "";
+    public string? PatientPhone { get; set; }
+    public DateOnly? IssuedOn { get; set; }
+    public string? Notes { get; set; }
+    public Guid? CreatedBy { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+}
+
 public class InvoiceItem
 {
     public Guid Id { get; set; } = Guid.NewGuid();
     public Guid InvoiceId { get; set; }
     public Guid ProductId { get; set; }
+
+    /// <summary>
+    /// الكمية كما بيعت فعلاً (3 حبات لا 0.3 شريط)، والسعر سعرَها.
+    ///
+    /// حفظها محوَّلة إلى الوحدة الأساسية كان يجعل الإيصال يعرض «0.3 شريط
+    /// بسعر 10» — وهو ما لم يحدث. الخصم من المخزون وحده هو ما يُحوَّل.
+    /// </summary>
     public decimal Quantity { get; set; }
     public decimal UnitPrice { get; set; }
     public decimal LineTotal { get; set; }
+
+    /// <summary>هل بيع السطر بالوحدة الجزئية.</summary>
+    public bool SoldAsSubUnit { get; set; }
+
+    /// <summary>
+    /// لقطة من Product.SubUnitsPerBase وقت البيع: حجم العلبة قد يتغيّر
+    /// لاحقاً، والمرتجع يجب أن يعيد ما خرج فعلاً لا ما يقوله الكتالوج اليوم.
+    /// </summary>
+    public decimal SubUnitsPerBase { get; set; }
+
+    /// <summary>
+    /// من أي دفعات خرجت كمية هذا السطر. سطر واحد قد يمتدّ على أكثر من دفعة
+    /// (طلب 15 حبة موجودة 10 في دفعة و5 في أخرى)، فلا يكفي عمود
+    /// batch_number واحد على السطر — راجع InvoiceItemBatch.
+    /// </summary>
+    public List<InvoiceItemBatch> Batches { get; set; } = new();
+}
+
+/// <summary>
+/// تخصيص كمية سطر الفاتورة على الدفعات التي خرجت منها فعلاً.
+///
+/// وجوده شرطٌ لصحّة المرتجع لا ترفٌ تحليلي: بدونه لا سبيل لمعرفة الدفعة
+/// الأصلية، فكان الإرجاع يضيف الكمية إلى «دفعة عامة» بلا رقم — فينتفخ رصيد
+/// وهمي بلا تاريخ صلاحية بينما تبقى الدفعة الحقيقية ناقصة. ومع تكرار
+/// الإرجاعات ينحرف رصيد كل دفعة عن الواقع، ويسقط معه ترتيب FEFO نفسه لأنه
+/// يقرأ من هذه الأرصدة.
+///
+/// السطر التجاري يبقى واحداً في invoice_items (الإيصال يعرض «15 حبة» لا
+/// سطرين)، والتفصيل المخزوني هنا.
+/// </summary>
+public class InvoiceItemBatch
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid InvoiceItemId { get; set; }
+    public string BatchNumber { get; set; } = "";
+    public decimal Quantity { get; set; }
 }
 
 /// <summary>
@@ -534,6 +1548,62 @@ public class InvoicePayment
     public Guid InvoiceId { get; set; }
     public string Method { get; set; } = "cash"; // cash | card | customer_wallet | credit
     public decimal Amount { get; set; }
+}
+
+/// <summary>
+/// سلّم التذكير بالدين — ثلاث مراحل، كل واحدة أشدّ من سابقتها.
+///
+/// <para>الفواصل بالأيام **بعد** تاريخ الاستحقاق. الأولى يوم الاستحقاق
+/// نفسه تذكيراً ودّياً، والثانية بعد أسبوع، والثالثة بعد ثلاثة أسابيع حين
+/// يصبح التأخّر نمطاً لا سهواً.</para>
+/// </summary>
+public static class DebtReminderPolicy
+{
+    public static readonly int[] StageOffsetDays = { 0, 7, 21 };
+
+    /// <summary>أعلى مرحلة استحقّت بعد هذا العدد من أيام التأخّر. صفر = لا شيء بعد.</summary>
+    public static int StageFor(int daysOverdue)
+    {
+        var stage = 0;
+        for (var i = 0; i < StageOffsetDays.Length; i++)
+        {
+            if (daysOverdue >= StageOffsetDays[i]) stage = i + 1;
+        }
+        return stage;
+    }
+}
+
+/// <summary>
+/// تذكير أُرسل فعلاً — لا تذكير مجدوَل.
+///
+/// <para><b>لماذا يُكتب عند الإرسال لا عند الاستحقاق:</b> الصفّ المُنشأ
+/// آلياً عند حلول الموعد يعني جدولاً يمتلئ بصفوف لم يفعلها أحد، ويصبح
+/// «أُرسل التذكير» كذبةً يقولها النظام عن نفسه. أما موعد الاستحقاق فيُحفَظ
+/// هنا **لقطةً** (<see cref="DueOn"/>) لحظة الإرسال — فيبقى الفرق بين
+/// المخطَّط والفعلي ظاهراً للتدقيق حتى لو تغيّرت السياسة لاحقاً.</para>
+///
+/// <para>وعلى العميل لا على الفاتورة: الدَّين رصيدٌ واحد على العميل (راجع
+/// [WalletBalances])، والمطالبة تقع عليه لا على ورقة بعينها.</para>
+/// </summary>
+public class DebtReminder
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid OrganizationId { get; set; }
+    public Guid CustomerId { get; set; }
+
+    /// <summary>1 أو 2 أو 3 — راجع [DebtReminderPolicy].</summary>
+    public int Stage { get; set; }
+
+    /// <summary>تاريخ استحقاق هذه المرحلة كما كان محسوباً لحظة الإرسال.</summary>
+    public DateTime DueOn { get; set; }
+
+    public DateTime SentAt { get; set; } = DateTime.UtcNow;
+    public Guid? SentBy { get; set; }
+
+    /// <summary>مبلغ الدَّين وقت التذكير — يُظهر إن كان يتناقص أم يتراكم.</summary>
+    public decimal AmountAtReminder { get; set; }
+
+    public string? Note { get; set; }
 }
 
 public class NotificationItem
@@ -589,4 +1659,566 @@ public class AuditLog
     public string? OldValues { get; set; }
     public string? NewValues { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  المحاسبة — دليل الحسابات والقيود
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// <summary>
+/// أقسام دليل الحسابات، على الدليل المحاسبي الموحّد المعروف محلياً.
+///
+/// <para>خمسة أقسام لا أربعة: الشجرة الظاهرة للمستخدم أربعة جذور
+/// (الأصول · الالتزامات وحقوق الملكية · الاستخدامات · الإيرادات)، لكن
+/// **حقوق الملكية تسلك سلوكاً مغايراً للالتزامات** عند الإقفال وفي قراءة
+/// الميزانية. دمجُهما في نوع واحد يجعل التمييز مستحيلاً لاحقاً بلا ترحيل
+/// مؤلم، وفصلُهما لا يكلّف اليوم شيئاً.</para>
+/// </summary>
+public static class AccountTypes
+{
+    public const string Asset = "asset";
+    public const string Liability = "liability";
+    public const string Equity = "equity";
+
+    /// <summary>«الاستخدامات» في الدليل الموحّد — المصروفات والتكاليف.</summary>
+    public const string Expense = "expense";
+    public const string Revenue = "revenue";
+
+    public static readonly string[] All = { Asset, Liability, Equity, Expense, Revenue };
+
+    /// <summary>
+    /// هل يزيد رصيد هذا النوع بالمدين.
+    ///
+    /// <para>الأصول والاستخدامات تزيد مديناً؛ والالتزامات وحقوق الملكية
+    /// والإيرادات تزيد دائناً. هذه هي القاعدة التي يُشتقّ منها كل رصيد في
+    /// النظام، فلا تُكرَّر في أي مكان آخر.</para>
+    /// </summary>
+    public static bool IsDebitNormal(string type) => type is Asset or Expense;
+}
+
+/// <summary>
+/// حساب في دليل الحسابات.
+///
+/// <para><b>لماذا شجرة لا قائمة:</b> الميزان يُقرأ مجمَّعاً («إجمالي
+/// الأصول») ومفصَّلاً («صندوق الفرع الثاني») معاً، والتجميع بالبادئة النصّية
+/// للرمز يكسر أول ما يتجاوز الترقيم عشرة أبناء.</para>
+/// </summary>
+public class Account
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid OrganizationId { get; set; }
+
+    /// <summary>رمز الحساب — <c>1</c>، <c>11</c>، <c>1101</c>… فريد داخل المنظمة.</summary>
+    public string Code { get; set; } = "";
+    public string Name { get; set; } = "";
+    public Guid? ParentId { get; set; }
+
+    /// <summary>راجع [AccountTypes]. يُورَّث من الجذر ولا يخالفه.</summary>
+    public string Type { get; set; } = AccountTypes.Asset;
+
+    /// <summary>
+    /// هل يُرحَّل إليه مباشرةً.
+    ///
+    /// <para><b>الحسابات الوسيطة لا تُرحَّل إليها إطلاقاً:</b> قيدٌ على
+    /// «الأصول» مباشرةً يجعل رصيد الأب لا يساوي مجموع أبنائه — فلا يعود
+    /// للشجرة معنى، ويستحيل تفسير أي رقم بردّه إلى مفرداته. والحساب يصير
+    /// غير قابل للترحيل بمجرّد أن يُولَد له ابن.</para>
+    /// </summary>
+    public bool IsPostable { get; set; } = true;
+
+    /// <summary>
+    /// حساب أنشأه النظام ويعتمد عليه الترحيل الآلي.
+    ///
+    /// <para>لا يُحذف ولا يُغيَّر نوعه ولا رمزه. حذفُ «المبيعات» يُوقف كل
+    /// بيع في المحلّ — والمستخدم لا يعرف ذلك وهو يضغط «حذف».</para>
+    /// </summary>
+    public bool IsSystem { get; set; }
+
+    public bool IsActive { get; set; } = true;
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+}
+
+/// <summary>
+/// مصادر القيود — من أين جاء القيد.
+/// </summary>
+public static class JournalSources
+{
+    public const string Invoice = "invoice";
+    public const string InvoiceReturn = "invoice_return";
+    public const string Expense = "expense";
+
+    /// <summary>استلام بضاعة من مورّد.</summary>
+    public const string PurchaseReceipt = "purchase_receipt";
+
+    /// <summary>بضاعة أُعيدت إلى المورّد.</summary>
+    public const string PurchaseReturn = "purchase_return";
+
+    /// <summary>فاتورة مورّد — تُفرغ «وردت ولم تُفوتَر» إلى «الموردون».</summary>
+    public const string SupplierInvoice = "supplier_invoice";
+
+    public const string WalletTopUp = "wallet_top_up";
+    public const string Payment = "payment";
+
+    /// <summary>قيد كتبه محاسب بيده.</summary>
+    public const string Manual = "manual";
+
+    /// <summary>قيد عكسي يُصحّح قيداً سابقاً.</summary>
+    public const string Reversal = "reversal";
+
+    /// <summary>قيد إقفال مدّة مالية.</summary>
+    public const string Closing = "closing";
+}
+
+/// <summary>
+/// قيد يومية — رأس القيد.
+///
+/// <para><b>حرمة القيد:</b> لا يُعدَّل ولا يُحذف بعد إنشائه. التصحيح بقيد
+/// عكسي يشير إليه، بنفس مبدأ دفتر المخزون ودفتر المحفظة في هذا النظام. دفترٌ
+/// يُعدَّل ماضيه لا يصلح لإثبات شيء.</para>
+/// </summary>
+public class JournalEntry
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid OrganizationId { get; set; }
+    public Guid? BranchId { get; set; }
+
+    /// <summary>رقم متسلسل داخل المنظمة — ما يشير إليه المحاسب بلسانه.</summary>
+    public long Number { get; set; }
+
+    /// <summary>
+    /// تاريخ القيد المحاسبي — قد يخالف <see cref="CreatedAt"/>.
+    ///
+    /// <para>فاتورة أمس تُسجَّل اليوم تنتمي محاسبياً إلى أمس. والخلط بينهما
+    /// يجعل مبيعات شهرٍ تقع في الشهر التالي فتختلّ كل مقارنة.</para>
+    /// </summary>
+    public DateTime EntryDate { get; set; } = DateTime.UtcNow.Date;
+
+    /// <summary>راجع [JournalSources].</summary>
+    public string Source { get; set; } = JournalSources.Manual;
+
+    /// <summary>معرّف المستند الأصل (فاتورة، مصروف…) — للتتبّع في الاتجاهين.</summary>
+    public Guid? SourceId { get; set; }
+
+    public string Description { get; set; } = "";
+
+    /// <summary>القيد الذي يعكسه هذا القيد، إن كان تصحيحاً.</summary>
+    public Guid? ReversesEntryId { get; set; }
+
+    public Guid? CreatedBy { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+
+    public List<JournalEntryLine> Lines { get; set; } = new();
+}
+
+/// <summary>
+/// سطر قيد — مدين أو دائن على حساب واحد.
+///
+/// <para><b>عمودان لا عمود واحد بإشارة:</b> «مدين ٥٠» و«دائن ٥٠» يُقرآن
+/// كما يكتبهما المحاسب في دفتره، والمبلغ الموجب دائماً يمنع طبقةً كاملة من
+/// أخطاء الإشارة في التجميع.</para>
+/// </summary>
+public class JournalEntryLine
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid JournalEntryId { get; set; }
+    public Guid AccountId { get; set; }
+    public decimal Debit { get; set; }
+    public decimal Credit { get; set; }
+    public string? Note { get; set; }
+}
+
+/// <summary>
+/// ربط الأدوار المحاسبية بحسابات فعلية.
+///
+/// <para><b>لماذا جدول لا أعمدة على المنظمة:</b> الأدوار تنمو مع كل نوع
+/// حركة جديد (ضريبة، خصم مسموح، فروق جرد…)، وكل واحد عموداً يعني ترحيل
+/// مخطّط لكل إضافة.</para>
+///
+/// <para>ويُملأ كاملاً لحظة تفعيل الوحدة مع بذر الدليل. **ربطٌ ناقص يعني
+/// بيعاً يفشل عند الكاشير**، فلا يُترك للمستخدم أن يكتشفه بنفسه.</para>
+/// </summary>
+public class AccountMapping
+{
+    public Guid OrganizationId { get; set; }
+
+    /// <summary>راجع [AccountRoles].</summary>
+    public string Role { get; set; } = "";
+    public Guid AccountId { get; set; }
+}
+
+/// <summary>الأدوار المحاسبية التي يحتاجها الترحيل الآلي.</summary>
+public static class AccountRoles
+{
+    public const string Cash = "cash";
+    public const string Receivables = "receivables";
+
+    /// <summary>الموردون — ما على المنشأة لهم مقابل بضاعة استُلمت.</summary>
+    public const string Payables = "payables";
+
+    /// <summary>مردودات المشتريات — بضاعة أُعيدت إلى المورّد.</summary>
+    public const string PurchaseReturns = "purchase_returns";
+
+    /// <summary>
+    /// بضاعة وردت ولم تُفوتَر — التزامٌ وسيط بين الاستلام والفاتورة.
+    ///
+    /// <para><b>العطب الذي يسدّه:</b> كان الاستلام يُقيَّد مباشرةً على
+    /// «الموردون»، أي أن الدَّين يُثبَت بورقة أمين المخزن قبل أن تصل ورقة
+    /// المورّد. فإن اختلف السعران — وهو الغالب — لم يكن ثمّة موضعٌ يظهر فيه
+    /// الفرق، فيُدفَع للمورّد ما طلبه ويبقى الميزان يقول رقماً آخر.</para>
+    ///
+    /// <para>فيصير الاستلام: من ح/ المخزون إلى ح/ <b>بضاعة وردت ولم
+    /// تُفوتَر</b>. ثم تأتي الفاتورة فتُفرغه إلى «الموردون». ورصيدُه في أي
+    /// لحظة هو **قيمة ما في المخزن ولم يُطالِب به المورّد بعد** — رقمٌ
+    /// يُسأل عنه في كل جرد.</para>
+    /// </summary>
+    public const string GoodsReceivedNotInvoiced = "grni";
+
+    /// <summary>
+    /// فروق أسعار المشتريات — الفرق بين تكلفة أمر الشراء وما فوتره المورّد.
+    ///
+    /// <para>حسابٌ مستقلّ لا تسويةٌ صامتة على المخزون: الفرق المتراكم هنا
+    /// يقول كم يُكلّف المورّد الذي يرفع أسعاره بعد الاتفاق — وهو رقمٌ
+    /// تفاوضي. ودفنُه في تكلفة المخزون يجعله غير قابل للرؤية أصلاً.</para>
+    /// </summary>
+    public const string PurchasePriceVariance = "purchase_price_variance";
+
+    /// <summary>
+    /// الأرباح المحتجزة — وعاء نتيجة السنوات المُقفَلة.
+    ///
+    /// <para>إليه تُرحَّل أرصدة الإيرادات والاستخدامات عند الإقفال، فتصفر
+    /// وتبدأ السنة الجديدة من الصفر بينما تبقى النتيجة في حقوق الملكية.</para>
+    /// </summary>
+    public const string RetainedEarnings = "retained_earnings";
+    public const string SalesRevenue = "sales_revenue";
+    public const string SalesTax = "sales_tax";
+    public const string Inventory = "inventory";
+    public const string CostOfGoodsSold = "cost_of_goods_sold";
+
+    /// <summary>أرصدة العملاء المشحونة — التزامٌ على المنشأة لا إيراد.</summary>
+    public const string CustomerWallet = "customer_wallet";
+
+    public const string SalesReturns = "sales_returns";
+    public const string GeneralExpense = "general_expense";
+
+    /// <summary>ما لا يمكن للترحيل أن يعمل بدونه.</summary>
+    public static readonly string[] Required =
+    {
+        Cash, Receivables, Payables, SalesRevenue, SalesTax, Inventory,
+        CostOfGoodsSold, CustomerWallet, SalesReturns, PurchaseReturns, GeneralExpense,
+        RetainedEarnings, GoodsReceivedNotInvoiced, PurchasePriceVariance,
+    };
+}
+
+/// <summary>
+/// مصروف — إيجار، رواتب، كهرباء، نقل…
+///
+/// <para><b>الجدول كان موجوداً في المخطّط منذ اليوم الأول ولا يقرؤه سطر
+/// واحد:</b> لا كيان ولا وحدة تحكّم ولا شاشة. أي أن «المالية المبسّطة»
+/// الموعودة في ARCHITECTURE.md §2.8 لم تُبنَ أصلاً — والتاجر الذي يدفع إيجاراً
+/// من درج الكاشير لا يجد له مكاناً في النظام، فيُسجّله على ورقة أو لا يسجّله.
+/// وحينها يقول تقرير الأرباح ربحاً ليس ربحاً.</para>
+/// </summary>
+public class Expense
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid OrganizationId { get; set; }
+    public Guid BranchId { get; set; }
+
+    /// <summary>وصف حرّ للبند — يبقى مفيداً حتى مع المحاسبة المفعّلة.</summary>
+    public string Category { get; set; } = "";
+    public decimal Amount { get; set; }
+    public string? Note { get; set; }
+
+    /// <summary>
+    /// حساب المصروف حين تكون وحدة المحاسبة مفعّلة.
+    ///
+    /// <para>NULL يعني «مصروفات عمومية» — ودعُه فارغاً أفضل من إجبار من
+    /// يسجّل مصروفاً على اختيار حساب لا يعرفه، فيختار أول ما تقع عليه عينه
+    /// ويُفسد التبويب. الحساب الافتراضي يقول الحقيقة: «مصروف لم يُبوَّب».</para>
+    /// </summary>
+    public Guid? AccountId { get; set; }
+
+    /// <summary>
+    /// تاريخ الصرف الفعلي — منفصل عن <see cref="CreatedAt"/>.
+    ///
+    /// <para><b>النقص الذي يسدّه:</b> كان المصروف يُقيَّد بتاريخ إدخاله
+    /// دائماً. ففاتورة كهرباء الأسبوع الماضي تُدخَل اليوم فتقع في أرقام
+    /// اليوم — ويُقفَل شهرٌ ناقصاً مصروفاته، وتُحمَّل بها مدّةٌ لا تخصّها.
+    /// </para>
+    ///
+    /// <para>وهو نفس ما فُصل في <c>PurchaseReceipt.ReceivedOn</c> و
+    /// <c>SupplierPayment.PaidOn</c> — والمصروف كان الوحيد بلا تاريخ خاصّ.
+    /// </para>
+    /// </summary>
+    public DateTime SpentOn { get; set; } = DateTime.UtcNow.Date;
+
+    /// <summary>المصرف الذي دُفع منه — NULL يعني الصندوق.</summary>
+    public Guid? BankAccountId { get; set; }
+
+    public Guid? CreatedBy { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+}
+
+/// <summary>
+/// سداد لمورّد — دفعةٌ تُنقص ما عليك له.
+///
+/// <para><b>الثقب الذي يسدّه:</b> حساب «الموردون» كان يتراكم بلا طرف مقابل:
+/// كل استلام بضاعة يزيد الدَّين، ولا شيء يُنقصه. فالميزان يقول إنك مدينٌ
+/// بكل ما اشتريتَه منذ أول يوم — ولو سدّدتَ كلّه نقداً.</para>
+///
+/// <para><b>ولا يُعدَّل ولا يُحذف:</b> حركة مالية وقعت. التصحيح بدفعة عكسية
+/// لا بمحوها — نفس حرمة القيد في الدفاتر الأخرى.</para>
+/// </summary>
+public class SupplierPayment
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid OrganizationId { get; set; }
+    public Guid BranchId { get; set; }
+    public Guid SupplierId { get; set; }
+    public decimal Amount { get; set; }
+
+    /// <summary>نقداً أو حوالة — راجع [SupplierPaymentMethods].</summary>
+    public string Method { get; set; } = SupplierPaymentMethods.Cash;
+
+    /// <summary>
+    /// المصرف الذي خرج منه المبلغ — NULL يعني الصندوق.
+    ///
+    /// <para>كانت الحوالة تُقيَّد على الصندوق كالنقد، فتظهر النقدية الدفترية
+    /// أعلى ممّا في الدرج بمقدارها. راجع [BankAccount].</para>
+    /// </summary>
+    public Guid? BankAccountId { get; set; }
+
+    /// <summary>رقم الإيصال أو الحوالة كما كتبه المورّد.</summary>
+    public string? Reference { get; set; }
+    public string? Note { get; set; }
+
+    /// <summary>
+    /// تاريخ السداد الفعلي — منفصل عن <see cref="CreatedAt"/> عمداً:
+    /// الحوالة تُرسَل الخميس ويُدخلها المحاسب الأحد، وتأريخها بالإدخال يضع
+    /// سداد شهرٍ في الشهر التالي.
+    /// </summary>
+    public DateTime PaidOn { get; set; } = DateTime.UtcNow.Date;
+
+    public Guid? CreatedBy { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+}
+
+public static class SupplierPaymentMethods
+{
+    public const string Cash = "cash";
+
+    /// <summary>
+    /// حوالة مصرفية.
+    ///
+    /// <para>تُقيَّد على «الصندوق» اليوم كالنقد: لا حسابات بنكية مربوطة في
+    /// النظام بعد. **نقصٌ معلوم لا خطأ** — المبلغ صحيح، وينقصه أن يُنسب إلى
+    /// المصرف حين يُبنى. ويبقى مسجَّلاً هنا فيُعرَف لاحقاً أيّها كان حوالة.
+    /// </para>
+    /// </summary>
+    public const string Bank = "bank";
+
+    public static readonly string[] All = { Cash, Bank };
+}
+
+
+/// <summary>
+/// إقفال سنة مالية.
+///
+/// <para><b>ما يعنيه الإقفال فعلاً شيئان لا واحد:</b></para>
+/// <list type="number">
+/// <item>قيدٌ يُصفّر الإيرادات والاستخدامات ويُرحّل نتيجتها إلى «الأرباح
+/// المحتجزة» — فتبدأ السنة الجديدة من الصفر وتبقى النتيجة في حقوق
+/// الملكية.</item>
+/// <item>**قفلٌ يمنع أي قيد بتاريخ داخل المدّة المُقفَلة.** وبلا هذا القفل
+/// لا معنى للإقفال أصلاً: فاتورةٌ تُسجَّل بتاريخ العام الماضي تُغيّر أرقاماً
+/// صدرت عنها تقارير ووُقّعت عليها ميزانية.</item>
+/// </list>
+///
+/// <para><b>ويُفتح بقرار صريح مسجَّل:</b> خطأٌ يُكتشف بعد الإقفال حالة
+/// واقعية، ومنعُ الفتح إلى الأبد يدفع المحاسب إلى تصحيحه في سنةٍ لا يخصّها.
+/// لكن الفتح حدثٌ يُسجَّل باسمه وسببه.</para>
+/// </summary>
+public class FiscalClosing
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid OrganizationId { get; set; }
+
+    /// <summary>آخر يوم في المدّة المُقفَلة — لا قيد بتاريخه أو قبله.</summary>
+    public DateTime PeriodEnd { get; set; }
+
+    /// <summary>صافي نتيجة المدّة المُرحَّلة إلى الأرباح المحتجزة.</summary>
+    public decimal NetResult { get; set; }
+
+    /// <summary>قيد الإقفال — منه يُعرَف ما رُحّل بالضبط.</summary>
+    public Guid? JournalEntryId { get; set; }
+
+    public Guid? ClosedBy { get; set; }
+    public DateTime ClosedAt { get; set; } = DateTime.UtcNow;
+
+    /// <summary>
+    /// أُعيد فتحه.
+    ///
+    /// <para>لا يُحذف الصفّ: من راجع الدفتر يجب أن يرى أن السنة أُقفلت ثم
+    /// فُتحت ولماذا — لا أن يجدها مفتوحة كأن شيئاً لم يكن.</para>
+    /// </summary>
+    public bool IsReopened { get; set; }
+    public string? ReopenReason { get; set; }
+    public Guid? ReopenedBy { get; set; }
+    public DateTime? ReopenedAt { get; set; }
+}
+
+
+/// <summary>
+/// حساب مصرفي للمنشأة.
+///
+/// <para><b>الثقب الذي يسدّه:</b> كل ما يُدفع أو يُقبَض كان يُقيَّد على
+/// «الصندوق» — النقد والحوالة سواء. فتظهر النقدية الدفترية أعلى ممّا في
+/// الدرج بمقدار كل حوالة، ولا يُعرف رصيد المصرف إطلاقاً. وهو أوّل ما يسأل
+/// عنه من يُطابق كشف حسابه.</para>
+///
+/// <para><b>وكلٌّ له حسابه في الدليل:</b> لا حساب «المصارف» واحدٌ للجميع —
+/// مطابقةُ كشف مصرفٍ بعينه تستحيل إن اختلط برصيد مصرف آخر.</para>
+/// </summary>
+public class BankAccount
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid OrganizationId { get; set; }
+    public string Name { get; set; } = "";
+
+    /// <summary>رقم الحساب أو الآيبان — للعرض والمطابقة لا للتحويل.</summary>
+    public string? AccountNumber { get; set; }
+
+    /// <summary>
+    /// حسابه في دليل الحسابات — تحت «المصارف» (1102).
+    ///
+    /// <para>يُنشأ تلقائياً عند إنشاء المصرف: تركُه للمستخدم يعني حساباً
+    /// مصرفياً بلا أثر محاسبي، أو مربوطاً بحسابٍ خاطئ.</para>
+    /// </summary>
+    public Guid? LedgerAccountId { get; set; }
+
+    public bool IsActive { get; set; } = true;
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+}
+
+
+/// <summary>حالات فاتورة المورّد.</summary>
+public static class SupplierInvoiceStatuses
+{
+    /// <summary>مُدخَلة ولم تُرحَّل — تُعدَّل وتُحذف بحرّية.</summary>
+    public const string Draft = "draft";
+
+    /// <summary>مُرحَّلة إلى الدفتر — لا تُعدَّل، والإلغاء بقيد عكسي.</summary>
+    public const string Posted = "posted";
+
+    /// <summary>مُلغاة بقيد عكسي.</summary>
+    public const string Cancelled = "cancelled";
+}
+
+/// <summary>
+/// فاتورة المورّد — ورقتُه هو، مطابَقةً بما استُلم فعلاً.
+///
+/// <para><b>الفجوة التي تسدّها:</b> لم يكن للمورّد فاتورة في النظام إطلاقاً.
+/// كان الاستلام يُنشئ الدَّين مباشرةً بتكلفة **أمر الشراء** — أي بالسعر
+/// المتّفق عليه لا بالسعر المُطالَب به. فإذا رفع المورّد سعره، أو فوتر كميةً
+/// غير التي سلّمها، أو أضاف نقلاً، لم يكن في النظام موضعٌ واحد يُظهر الفرق.
+/// يدفع أمين الصندوق ما تقوله الورقة، ويبقى الميزان يقول رقماً آخر إلى
+/// الأبد.</para>
+///
+/// <para><b>المطابقة الثلاثية:</b> أمر الشراء (ما اتُّفق عليه) ← الاستلام
+/// (ما وصل) ← الفاتورة (ما طُولب به). وثلاثتها تلتقي في هذا المستند: كل سطر
+/// فيه يشير إلى سطر استلام بعينه، فالفرق يُحسَب لا يُقدَّر.</para>
+///
+/// <para><b>ولماذا لا تُلزَم بالمطابقة الكاملة:</b> فاتورةٌ تُرفض لأن فيها
+/// فرق دينارين تُدفَع خارج النظام. فتُقبَل ويُقيَّد الفرق على
+/// [AccountRoles.PurchasePriceVariance] صراحةً — ظاهراً للمراجعة، لا
+/// مدفوناً في تكلفة المخزون.</para>
+/// </summary>
+public class SupplierInvoice
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid OrganizationId { get; set; }
+    public Guid BranchId { get; set; }
+    public Guid SupplierId { get; set; }
+
+    /// <summary>
+    /// رقم الفاتورة كما كتبه المورّد. إلزامي — بخلاف
+    /// <see cref="PurchaseReceipt.SupplierNoteNumber"/>: إشعار التسليم قد
+    /// لا يُرقَّم، أمّا الفاتورة فهي مستند المطالبة ولا تخلو من رقم. وهو
+    /// المرجع الوحيد عند الخلاف، وأساس منع الازدواج.
+    /// </summary>
+    public string InvoiceNumber { get; set; } = "";
+
+    /// <summary>تاريخ الفاتورة كما عليها — لا تاريخ الإدخال.</summary>
+    public DateTime InvoiceDate { get; set; }
+
+    /// <summary>تاريخ الاستحقاق. NULL يعني نقداً أو بلا أجل متّفق.</summary>
+    public DateTime? DueDate { get; set; }
+
+    /// <summary>
+    /// إجمالي الفاتورة كما هو مكتوب عليها — يُدخله المستخدم ولا يُحسب.
+    ///
+    /// <para>وحسابُه من السطور يجعل النظام يُصحّح المورّد بدل أن يطابقه.
+    /// المطلوب معرفة أن ثمّة فرقاً، وذلك يقتضي رقمين لا رقماً واحداً.</para>
+    /// </summary>
+    public decimal TotalAmount { get; set; }
+
+    public string Status { get; set; } = SupplierInvoiceStatuses.Draft;
+    public string? Notes { get; set; }
+
+    public Guid? CreatedBy { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime? PostedAt { get; set; }
+
+    public List<SupplierInvoiceLine> Lines { get; set; } = new();
+}
+
+/// <summary>
+/// سطر في فاتورة المورّد، مربوطٌ بسطر استلامٍ بعينه.
+/// </summary>
+public class SupplierInvoiceLine
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid SupplierInvoiceId { get; set; }
+
+    /// <summary>
+    /// سطر الاستلام الذي تُفوتره. هو **مِحور المطابقة كله**: بدونه يبقى
+    /// السطر ادّعاءً لا يقابله وصول، ويصير «الفرق» غير قابل للحساب أصلاً.
+    ///
+    /// <para>ويمنع الازدواج: سطر استلامٍ فُوتر مرّة لا يُفوتر ثانية.</para>
+    /// </summary>
+    public Guid PurchaseReceiptItemId { get; set; }
+
+    public Guid ProductId { get; set; }
+
+    /// <summary>الكمية كما فوترها المورّد — قد تخالف ما وصل.</summary>
+    public decimal Quantity { get; set; }
+
+    /// <summary>سعر الوحدة كما فوتره المورّد — قد يخالف تكلفة الأمر.</summary>
+    public decimal UnitCost { get; set; }
+
+    public decimal LineTotal => Quantity * UnitCost;
+}
+
+
+/// <summary>
+/// مقاسات ورق الإيصال المتاحة.
+///
+/// <para>قائمةٌ مغلقة لا نصٌّ حرّ: مقاسٌ مجهول يُنتج PDF بأبعادٍ غير
+/// متوقَّعة، ولا يكتشفه أحد إلا والورق يخرج مقصوصاً.</para>
+/// </summary>
+public static class ReceiptPapers
+{
+    /// <summary>لفّة حرارية 80 ملم — الأشيع في نقاط البيع.</summary>
+    public const string Roll80 = "roll80";
+
+    /// <summary>لفّة حرارية 58 ملم — الطابعات الصغيرة والمحمولة.</summary>
+    public const string Roll58 = "roll58";
+
+    /// <summary>A4 — الفاتورة الرسمية التي تُقدَّم لجهة.</summary>
+    public const string A4 = "a4";
+
+    /// <summary>A5 — نصف الورقة، لفواتير الجملة المختصرة.</summary>
+    public const string A5 = "a5";
+
+    public static readonly string[] All = { Roll80, Roll58, A4, A5 };
 }

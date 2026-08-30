@@ -1,4 +1,4 @@
-using System.IdentityModel.Tokens.Jwt;
+﻿using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -114,6 +114,17 @@ public class UsersController : ControllerBase
             return Conflict(new { message = "اسم المستخدم مستخدَم بالفعل على حساب نشط" });
         }
 
+        // حدّ الترخيص قبل أي كتابة — النشطون وحدهم يُحسبون، فتعطيل موظف
+        // غادر يُفرِج عن مقعده. راجع [LicenseLimits].
+        try
+        {
+            await LicenseLimits.EnsureCanAddUserAsync(_db, CurrentOrgId());
+        }
+        catch (LicenseLimitException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+
         var user = new AppUser
         {
             OrganizationId = CurrentOrgId(),
@@ -128,14 +139,7 @@ public class UsersController : ControllerBase
         _db.LogAudit(user.OrganizationId, CurrentUserId(), "user.created", "app_users", user.Id,
             newValues: new { user.FullName, user.Email, user.Role });
 
-        try
-        {
-            await _db.SaveChangesAsync();
-        }
-        catch (DbUpdateException)
-        {
-            return Conflict(new { message = "البريد الإلكتروني أو اسم المستخدم مستخدَم بالفعل" });
-        }
+        await _db.SaveChangesAsync();
         return CreatedAtAction(nameof(GetById), new { id = user.Id }, ToDto(user));
     }
 
@@ -178,14 +182,7 @@ public class UsersController : ControllerBase
                 newValues: new { user.FullName });
         }
 
-        try
-        {
-            await _db.SaveChangesAsync();
-        }
-        catch (DbUpdateException)
-        {
-            return Conflict(new { message = "اسم المستخدم مستخدَم بالفعل" });
-        }
+        await _db.SaveChangesAsync();
         return NoContent();
     }
 
