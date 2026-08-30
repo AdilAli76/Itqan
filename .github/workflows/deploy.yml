@@ -159,5 +159,10 @@ jobs:
         if: always()
         shell: pwsh
         run: |
-          "## ${{ inputs.target }}`n`n- **الوسم:** ``${{ inputs.tag }}```n- **SHA256:** ``$env:SHA```" |
-            Out-File $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          # بأقواسٍ مفردة — راجع build-release.yml: علامة الهروب داخل نصٍّ
+          # مزدوج ابتلعت الاقتباس الختامي فأسقطت وظيفةً نجحت.
+          $out = $env:GITHUB_STEP_SUMMARY
+          '## ${{ inputs.target }}'                | Out-File $out -Append -Encoding utf8
+          ''                                       | Out-File $out -Append -Encoding utf8
+          '- **الوسم:** ${{ inputs.tag }}'         | Out-File $out -Append -Encoding utf8
+          '- **SHA256:** ' + $env:SHA              | Out-File $out -Append -Encoding utf8

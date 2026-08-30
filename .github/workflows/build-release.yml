@@ -72,12 +72,6 @@ jobs:
           "PKG=$($pkg.Name)" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
           "SHA=$h"           | Out-File $env:GITHUB_ENV -Append -Encoding utf8
 
-      - name: ملخّص الإصدار
-        shell: pwsh
-        run: |
-          "## الحزمة`n`n- **الملف:** ``$env:PKG```n- **SHA256:** ``$env:SHA```" |
-            Out-File $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
-
       - name: إرفاق بالإصدار
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
@@ -94,3 +88,21 @@ jobs:
             kinetic_pkg_*.zip
             kinetic_pkg_*.zip.sha256
           retention-days: 30
+
+      # ⚠ لا علامة هروب (`) داخل نصٍّ مزدوج القوسين في PowerShell.
+      #
+      # كانت الشرطة المائلة الخلفية تُستعمل لكتابة علامات الشيفرة في
+      # ماركداون، فابتلعت آخرُها علامةَ الاقتباس الختامية — «النصّ بلا
+      # منهٍ» — فسقط البناء كلّه بعد أن نجح، **وقبل إرفاق الحزمة**.
+      #
+      # فالسطور تُكتب مفردةً بأقواسٍ مفردة: ما بينها حرفيّ لا يُفسَّر.
+      # وهذه الخطوة صارت الأخيرة: زينةٌ لا يصحّ أن تُسقط عملاً تمّ.
+      - name: ملخّص الإصدار
+        if: always()
+        shell: pwsh
+        run: |
+          $out = $env:GITHUB_STEP_SUMMARY
+          '## الحزمة'                              | Out-File $out -Append -Encoding utf8
+          ''                                       | Out-File $out -Append -Encoding utf8
+          '- **الملف:** ' + $env:PKG               | Out-File $out -Append -Encoding utf8
+          '- **SHA256:** ' + $env:SHA              | Out-File $out -Append -Encoding utf8

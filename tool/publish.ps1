@@ -359,7 +359,9 @@ foreach ($attempt in 1..3) {
         }
     }
 }
-if (-not $zipped) { return }
+# ‏throw لا return: خروجٌ بنجاح ولا حزمة هو ما يجعل حزمة الأمس تُرفع على
+# أنها الجديدة — وهو العطب الذي سُمّيت الحزمة بتاريخها لتفاديه أصلاً.
+if (-not $zipped) { throw "تعذّر ضغط الحزمة بعد ثلاث محاولات. المجلد جاهز: $Output" }
 $sizeMb = [math]::Round((Get-Item $zip).Length / 1MB, 1)
 Ok "$zip ($sizeMb ميغابايت)"
 
