@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/network/api_client.dart';
+import '../../../core/time/app_clock.dart';
 
 enum ReportPeriod { today, last7Days, last30Days, last90Days }
 
@@ -12,7 +13,7 @@ extension ReportPeriodLabel on ReportPeriod {
       };
 
   DateTime get fromDate {
-    final today = DateTime.now();
+    final today = AppClock.now();
     final startOfToday = DateTime(today.year, today.month, today.day);
     return switch (this) {
       ReportPeriod.today => startOfToday,
@@ -35,6 +36,17 @@ final salesSummaryProvider = FutureProvider.autoDispose<Map<String, dynamic>>((r
 
 final inventorySummaryProvider = FutureProvider.autoDispose<Map<String, dynamic>>((ref) async {
   final response = await ApiClient.instance.dio.get('/reports/inventory-summary');
+  return response.data as Map<String, dynamic>;
+});
+
+/// المصروفات في المدّة — بالبند وباليوم.
+///
+/// <para>يتبع نفس فترة تقرير المبيعات: مقارنةُ إيرادٍ بمصروفٍ على مدّتين
+/// مختلفتين لا تعني شيئاً.</para>
+final expensesSummaryProvider = FutureProvider.autoDispose<Map<String, dynamic>>((ref) async {
+  final period = ref.watch(reportPeriodProvider);
+  final response = await ApiClient.instance.dio.get('/reports/expenses-summary',
+      queryParameters: {'from': period.fromDate.toIso8601String()});
   return response.data as Map<String, dynamic>;
 });
 

@@ -11,6 +11,7 @@ import '../../../core/theme/app_text_styles.dart';
 import '../../../shared/widgets/app_surface.dart';
 import '../../accounting/data/accounting_providers.dart';
 import '../../branches/data/branches_providers.dart';
+import '../../../core/time/app_clock.dart';
 
 final _money = NumberFormat('#,##0.00', 'en');
 
@@ -145,7 +146,7 @@ class _ExpenseRow extends StatelessWidget {
                     expense['branchName'],
                     // تاريخ الصرف لا الإدخال: هو ما يخصّ المصروف.
                     DateFormat('yyyy-MM-dd').format(
-                        DateTime.tryParse('${expense['spentOn']}') ?? DateTime.now()),
+                        DateTime.tryParse('${expense['spentOn']}') ?? AppClock.now()),
                     if (expense['createdByName'] != null) expense['createdByName'],
                   ].join(' · '),
                   style: AppTextStyles.labelMd(),
@@ -182,7 +183,7 @@ class _AddExpenseDialogState extends ConsumerState<_AddExpenseDialog> {
 
   String? _branchId;
   String? _accountId;
-  DateTime _spentOn = DateTime.now();
+  DateTime _spentOn = AppClock.now();
   bool _saving = false;
   String? _error;
 
@@ -273,7 +274,7 @@ class _AddExpenseDialogState extends ConsumerState<_AddExpenseDialog> {
                     context: context,
                     initialDate: _spentOn,
                     firstDate: DateTime(2020),
-                    lastDate: DateTime.now(),
+                    lastDate: AppClock.now(),
                   );
                   if (picked != null) setState(() => _spentOn = picked);
                 },

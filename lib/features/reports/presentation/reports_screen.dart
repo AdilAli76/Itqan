@@ -1,4 +1,8 @@
 import 'package:fl_chart/fl_chart.dart';
+import '../../../core/printing/report_printer.dart';
+import '../../../core/theme/branding_provider.dart';
+import '../../../core/time/app_clock.dart';
+import 'report_card.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -7,7 +11,6 @@ import '../../../core/network/api_client.dart';
 import '../../../core/responsive/adaptive_scaffold.dart';
 import '../../../core/responsive/breakpoints.dart';
 import '../../../core/theme/app_colors.dart';
-import '../../../core/time/app_clock.dart';
 import '../../../core/theme/app_text_styles.dart';
 import '../../../shared/widgets/currency_badge.dart';
 import '../../../shared/widgets/data_table_widget.dart';
@@ -69,23 +72,163 @@ class ReportsScreen extends ConsumerWidget {
                 .toList(),
           ),
           const SizedBox(height: 20),
-          Text('المبيعات', style: AppTextStyles.headlineMd()),
-          const SizedBox(height: 12),
-          const _SalesSection(),
-          const SizedBox(height: 32),
-          Text('المخزون', style: AppTextStyles.headlineMd()),
-          const SizedBox(height: 12),
-          const _InventorySection(),
-          const SizedBox(height: 32),
-          Text('أعمار الديون', style: AppTextStyles.headlineMd()),
-          const SizedBox(height: 12),
-          const _DebtAgingSection(),
+          // بطاقاتٌ تُطوى لا أقسامٌ متتالية: التقارير صارت أربعة وتزيد،
+          // فمن يريد أعمار الديون كان يمرّ على المبيعات والمخزون كلّها.
+          // والأوّل مفتوح: شاشةٌ كلّها مطويّة تحتاج نقرةً لترى أي رقم.
+          ReportCard(
+            title: 'المبيعات',
+            subtitle: 'الإيراد والفواتير والمرتجعات',
+            icon: Icons.trending_up,
+            initiallyExpanded: true,
+            onPrint: () => _printSales(ref, period),
+            child: const _SalesSection(),
+          ),
+          ReportCard(
+            title: 'المخزون',
+            subtitle: 'النواقص والأكثر حركةً',
+            icon: Icons.inventory_2_outlined,
+            onPrint: () => _printInventory(ref),
+            child: const _InventorySection(),
+          ),
+          ReportCard(
+            title: 'المصروفات',
+            subtitle: 'ما خرج، بالبند',
+            icon: Icons.payments_outlined,
+            onPrint: () => _printExpenses(ref, period),
+            child: const _ExpensesSection(),
+          ),
+          ReportCard(
+            title: 'أعمار الديون',
+            subtitle: 'ما على العملاء وكم تأخّر',
+            icon: Icons.schedule_outlined,
+            onPrint: () => _printDebtAging(ref),
+            child: const _DebtAgingSection(),
+          ),
           // القسم يُخفي نفسه لغير إصدار المؤسسات — راجع _ValuationSection.
           const _ValuationSection(),
         ],
       ),
     );
   }
+}
+
+/// اسم المنشأة على كل تقرير — ورقةٌ بلا اسم لا تُعرَف لمن هي.
+String _orgNameOf(WidgetRef ref) =>
+    ref.read(brandingProvider).valueOrNull?.displayName ?? 'إتقان ERP';
+
+Future<void> _printSales(WidgetRef ref, ReportPeriod period) async {
+  final summary = await ref.read(salesSummaryProvider.future);
+  final top = List<Map<String, dynamic>>.from(summary['topProducts'] as List? ?? const []);
+
+  await printReport(
+    title: 'تقرير المبيعات — ${period.label}',
+    orgName: _orgNameOf(ref),
+    from: period.fromDate,
+    to: AppClock.now(),
+    facts: [
+      ('إجمالي المبيعات', _currencyFormat.format((summary['totalRevenue'] as num?) ?? 0)),
+      ('عدد الفواتير', _integerFormat.format(summary['totalInvoices'] ?? 0)),
+      ('متوسط الفاتورة',
+          _currencyFormat.format((summary['averageInvoiceValue'] as num?) ?? 0)),
+      ('المرتجعات', _currencyFormat.format((summary['totalReturns'] as num?) ?? 0)),
+    ],
+    columns: const ['الصنف', 'الكمية المباعة', 'الإيراد'],
+    rows: [
+      for (final row in top)
+        [
+          '${row['productName'] ?? row['name'] ?? '—'}',
+          _integerFormat.format((row['quantitySold'] as num?) ?? (row['quantity'] as num?) ?? 0),
+          _currencyFormat.format((row['revenue'] as num?) ?? 0),
+        ],
+    ],
+    note: 'المرتجعات مطروحة من الإيراد أعلاه.',
+  );
+}
+
+Future<void> _printInventory(WidgetRef ref) async {
+  final data = await ref.read(inventorySummaryProvider.future);
+  final low = List<Map<String, dynamic>>.from(data['lowStockItems'] as List? ?? const []);
+
+  await printReport(
+    title: 'تقرير المخزون',
+    orgName: _orgNameOf(ref),
+    to: AppClock.now(),
+    facts: [
+      ('قيمة المخزون', _currencyFormat.format((data['totalInventoryValue'] as num?) ?? 0)),
+      ('تحت حدّ الطلب', _integerFormat.format(data['lowStockCount'] ?? 0)),
+      ('قاربت الانتهاء', _integerFormat.format(data['nearExpiryCount'] ?? 0)),
+      ('منتهية الصلاحية', _integerFormat.format(data['expiredCount'] ?? 0)),
+      ('خسارة المنتهي', _currencyFormat.format((data['expiredLossValue'] as num?) ?? 0)),
+    ],
+    columns: const ['الصنف', 'المتاح', 'حدّ الطلب'],
+    rows: [
+      for (final row in low)
+        [
+          '${row['productName'] ?? '—'}',
+          _integerFormat.format((row['quantity'] as num?) ?? 0),
+          _integerFormat.format((row['reorderLevel'] as num?) ?? 0),
+        ],
+    ],
+    note: 'الأرصدة لحظة الطباعة — راجع شاشة المخزون للأحدث.',
+  );
+}
+
+Future<void> _printExpenses(WidgetRef ref, ReportPeriod period) async {
+  final data = await ref.read(expensesSummaryProvider.future);
+  final byCategory = List<Map<String, dynamic>>.from(data['byCategory'] as List? ?? const []);
+
+  await printReport(
+    title: 'تقرير المصروفات — ${period.label}',
+    orgName: _orgNameOf(ref),
+    from: period.fromDate,
+    to: AppClock.now(),
+    facts: [
+      ('إجمالي المصروفات', _currencyFormat.format((data['totalExpenses'] as num?) ?? 0)),
+      ('عدد المصروفات', _integerFormat.format(data['expenseCount'] ?? 0)),
+      ('متوسط المصروف', _currencyFormat.format((data['averageExpense'] as num?) ?? 0)),
+    ],
+    columns: const ['البند', 'العدد', 'المبلغ'],
+    rows: [
+      for (final row in byCategory)
+        [
+          '${row['category'] ?? '—'}',
+          _integerFormat.format((row['count'] as num?) ?? 0),
+          _currencyFormat.format((row['amount'] as num?) ?? 0),
+        ],
+    ],
+    // بتاريخ الصرف لا الإدخال — راجع Expense.SpentOn.
+    note: 'المصروفات محسوبة بتاريخ الصرف الفعلي لا بتاريخ إدخالها.',
+  );
+}
+
+Future<void> _printDebtAging(WidgetRef ref) async {
+  final data = await ref.read(debtAgingProvider.future);
+  final rows = List<Map<String, dynamic>>.from(data['items'] as List? ?? const []);
+
+  await printReport(
+    title: 'تقرير أعمار الديون',
+    orgName: _orgNameOf(ref),
+    to: AppClock.now(),
+    facts: [
+      ('عدد المدينين', _integerFormat.format(rows.length)),
+      ('إجمالي المستحقّ', _currencyFormat.format((data['totalOutstanding'] as num?) ?? 0)),
+      // «لم يحن بعد» رقمٌ يُسأل عنه: دَينٌ في مهلته ليس متأخّراً،
+      // وخلطُه بالمتأخّر يُضخّم المشكلة ويُربك القرار.
+      ('لم يحن موعده', _currencyFormat.format((data['notYetDue'] as num?) ?? 0)),
+    ],
+    columns: const ['العميل', 'الهاتف', 'المستحقّ', 'التأخّر (يوم)', 'المرحلة'],
+    rows: [
+      for (final row in rows)
+        [
+          '${row['customerName'] ?? '—'}',
+          '${row['phone'] ?? '—'}',
+          _currencyFormat.format((row['totalOutstanding'] as num?) ?? 0),
+          _integerFormat.format((row['daysOverdue'] as num?) ?? 0),
+          '${row['stage'] ?? '—'}',
+        ],
+    ],
+    note: 'الدَّين محسوبٌ من دفتر الفواتير — راجع كشف العميل للتفصيل.',
+  );
 }
 
 class _PeriodChip extends StatelessWidget {
@@ -207,9 +350,14 @@ class _SalesSection extends ConsumerWidget {
               ],
             ),
             const SizedBox(height: 16),
+            // المصروفات على نفس الرسم: تقريرُ إيرادٍ بلا مصروف يقول رقماً
+            // يظنّه التاجر ربحاً وليس كذلك. وتُقرأ بلا انتظارها — فشلُ
+            // تحميلها يُنقص خطّاً ولا يمنع رؤية المبيعات.
             _RevenueChart(
               revenueByDay: List<Map<String, dynamic>>.from(summary['revenueByDay'] as List? ?? []),
               from: period.fromDate,
+              expensesByDay: List<Map<String, dynamic>>.from(
+                  ref.watch(expensesSummaryProvider).valueOrNull?['byDay'] as List? ?? const []),
             ),
             const SizedBox(height: 16),
             AppDataTable(
@@ -255,9 +403,22 @@ class _SalesSection extends ConsumerWidget {
 }
 
 class _RevenueChart extends StatelessWidget {
-  const _RevenueChart({required this.revenueByDay, required this.from});
+  const _RevenueChart({
+    required this.revenueByDay,
+    required this.from,
+    this.expensesByDay = const [],
+  });
+
   final List<Map<String, dynamic>> revenueByDay;
   final DateTime from;
+
+  /// المصروفات اليومية — خطٌّ ثانٍ على نفس الرسم.
+  ///
+  /// <para><b>ولماذا على نفس الرسم لا في رسمٍ مجاور:</b> ما يهمّ ليس أيّ
+  /// الخطّين أعلى، بل **المسافة بينهما** — وهي لا تُقاس بالعين بين رسمين
+  /// بمقياسين مختلفين. وخطُّ مبيعاتٍ وحده يصعد فيُفرح، وقد تكون المصروفات
+  /// صعدت معه أكثر.</para>
+  final List<Map<String, dynamic>> expensesByDay;
 
   @override
   Widget build(BuildContext context) {
@@ -266,6 +427,13 @@ class _RevenueChart extends StatelessWidget {
       final date = DateTime.tryParse(point['date'] as String? ?? '');
       if (date == null) continue;
       byDate[_dayFormat.format(date)] = (point['revenue'] as num?)?.toDouble() ?? 0;
+    }
+
+    final expenseByDate = <String, double>{};
+    for (final point in expensesByDay) {
+      final date = DateTime.tryParse(point['date'] as String? ?? '');
+      if (date == null) continue;
+      expenseByDate[_dayFormat.format(date)] = (point['amount'] as num?)?.toDouble() ?? 0;
     }
 
     // تاريخ بداية بعد اليوم يُنتج عدداً سالباً، وList.generate بعدد سالب
@@ -292,7 +460,18 @@ class _RevenueChart extends StatelessWidget {
       final day = from.add(Duration(days: i));
       return FlSpot(i.toDouble(), byDate[_dayFormat.format(day)] ?? 0);
     });
-    final maxRevenue = spots.map((s) => s.y).fold<double>(0, (a, b) => a > b ? a : b);
+    final expenseSpots = expenseByDate.isEmpty
+        ? <FlSpot>[]
+        : List.generate(dayCount, (i) {
+            final day = from.add(Duration(days: i));
+            return FlSpot(i.toDouble(), expenseByDate[_dayFormat.format(day)] ?? 0);
+          });
+
+    // المقياس يشمل الخطّين: مقياسٌ على الإيراد وحده يقصّ قمم المصروفات
+    // فتبدو أصغر ممّا هي — وهو تضليلٌ بالرسم لا خطأ في الرقم.
+    final maxRevenue = [...spots, ...expenseSpots]
+        .map((s) => s.y)
+        .fold<double>(0, (a, b) => a > b ? a : b);
     final labelStep = (dayCount / 5).ceil().clamp(1, dayCount).toDouble();
     final primary = Theme.of(context).colorScheme.primary;
 
@@ -362,6 +541,18 @@ class _RevenueChart extends StatelessWidget {
                   ),
                 ),
                 lineBarsData: [
+                  if (expenseSpots.isNotEmpty)
+                    LineChartBarData(
+                      spots: expenseSpots,
+                      isCurved: true,
+                      curveSmoothness: 0.25,
+                      color: AppColors.warning,
+                      barWidth: 2,
+                      // متقطّعٌ لا مصمت: يُميَّز عن خطّ الإيراد بلا اعتمادٍ
+                      // على اللون وحده — ومن لا يميّز الألوان يقرأ الرسم.
+                      dashArray: const [6, 4],
+                      dotData: const FlDotData(show: false),
+                    ),
                   LineChartBarData(
                     spots: spots,
                     isCurved: false,
@@ -508,6 +699,79 @@ class _InventorySection extends ConsumerWidget {
 /// الشرائح أفقية قبل الجدول: مدير يريد أولاً أن يعرف **كم مالٍ عالق وكم
 /// منه قديم**، ثم من هم. عرض الأسماء أولاً يجعله يقرأ عشرين سطراً ليصل إلى
 /// رقم واحد.
+// ---------------------------------------------------------------------------
+// المصروفات
+// ---------------------------------------------------------------------------
+
+class _ExpensesSection extends ConsumerWidget {
+  const _ExpensesSection();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final async = ref.watch(expensesSummaryProvider);
+
+    return async.when(
+      loading: () => const TableSkeleton(),
+      error: (err, _) => _ErrorBox(
+        message: 'تعذّر تحميل تقرير المصروفات',
+        onRetry: () => ref.invalidate(expensesSummaryProvider),
+      ),
+      data: (data) {
+        final crossAxisCount =
+            Breakpoints.isDesktop(context) ? 3 : (Breakpoints.isTablet(context) ? 2 : 1);
+        final total = (data['totalExpenses'] as num?)?.toDouble() ?? 0;
+        final byCategory =
+            List<Map<String, dynamic>>.from(data['byCategory'] as List? ?? const []);
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            GridView.count(
+              crossAxisCount: crossAxisCount,
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              mainAxisSpacing: 16,
+              crossAxisSpacing: 16,
+              mainAxisExtent: 168,
+              children: [
+                StatCard(
+                  label: 'إجمالي المصروفات',
+                  value: '${_currencyFormat.format(total)} د.ل',
+                  icon: Icons.payments_outlined,
+                  accentColor: AppColors.warning,
+                ),
+                StatCard(
+                  label: 'عدد المصروفات',
+                  value: _integerFormat.format(data['expenseCount'] ?? 0),
+                  icon: Icons.receipt_outlined,
+                ),
+                StatCard(
+                  label: 'متوسط المصروف',
+                  value: '${_currencyFormat.format((data['averageExpense'] as num?) ?? 0)} د.ل',
+                  icon: Icons.calculate_outlined,
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            AppDataTable(
+              title: 'المصروفات بالبند',
+              columns: const [AppColumn('البند'), AppColumn('العدد'), AppColumn('المبلغ')],
+              rows: byCategory
+                  .map((c) => [
+                        Text(c['category'] as String? ?? ''),
+                        Text(_integerFormat.format((c['count'] as num?) ?? 0)),
+                        CurrencyBadge(amount: (c['amount'] as num?)?.toDouble() ?? 0),
+                      ])
+                  .toList(),
+              emptyMessage: 'لا مصروفات في هذه المدّة',
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
 class _DebtAgingSection extends ConsumerWidget {
   const _DebtAgingSection();
 

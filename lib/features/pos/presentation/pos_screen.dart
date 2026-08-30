@@ -11,7 +11,7 @@ import '../../../core/feedback/pos_sounds.dart';
 import '../../../core/network/api_client.dart';
 import 'barcode_scanner_sheet.dart';
 import 'return_invoice_sheet.dart';
-import '../../../core/printing/print_settings_provider.dart';
+import '../../../core/printing/receipt_template.dart';
 import '../../../core/printing/receipt_printer.dart';
 import '../../../core/responsive/adaptive_scaffold.dart';
 import '../../../core/responsive/breakpoints.dart';
@@ -27,6 +27,17 @@ import '../../../shared/widgets/icon_action.dart';
 import '../../../core/network/offline_queue.dart';
 import '../../../shared/widgets/app_surface.dart';
 import '../../../shared/widgets/pagination_bar.dart';
+import '../../../core/shortcuts/keyboard_shortcuts_manager.dart';
+
+/// ما يعرضه الشريط السفلي — بنفس ترتيب [_PosScreenState._onShortcut].
+const _kPosShortcuts = [
+  AppShortcut('نقدي', 'F2'),
+  AppShortcut('خصم من الرصيد', 'F3'),
+  AppShortcut('بطاقة العميل', 'F4'),
+  AppShortcut('لوحة الكمية', 'F6'),
+  AppShortcut('إلغاء الفاتورة', 'F8'),
+  AppShortcut('تفريغ البحث', 'Esc'),
+];
 
 class _CartLine {
   _CartLine({
@@ -705,12 +716,14 @@ class _PosScreenState extends ConsumerState<PosScreen> {
     try {
       final response = await ApiClient.instance.dio.get('/invoices/$invoiceId');
       final branding = ref.read(brandingProvider).valueOrNull;
-      final widthMm = await ref.read(receiptWidthMmProvider.future);
+      final template = await ref.read(receiptTemplateProvider.future);
+      final logoBytes = await ref.read(receiptLogoProvider.future);
       await printInvoiceReceipt(
         invoice: response.data as Map<String, dynamic>,
-        orgName: branding?.displayName ?? 'Kinetic Enterprise',
+        orgName: branding?.displayName ?? 'إتقان ERP',
         currencySymbol: branding?.currencySymbol ?? 'د.ل',
-        widthMm: widthMm,
+        template: template,
+        logoBytes: logoBytes,
       );
     } catch (_) {
       if (mounted) {
@@ -739,8 +752,10 @@ class _PosScreenState extends ConsumerState<PosScreen> {
     );
   }
 
-  /// المفاتيح الوظيفية: F2 نقدي، F3 خصم من الرصيد، F4 بطاقة العميل،
-  /// F6 لوحة الكمية، F8 إلغاء الفاتورة، Esc تفريغ البحث.
+  /// المفاتيح الوظيفية — ومعروضةٌ في [_kPosShortcuts] أسفل الشاشة.
+  ///
+  /// <para>القائمتان تُقرآن معاً عمداً: خريطةٌ تتغيّر هنا ولا تتغيّر هناك
+  /// تُنتج شريطاً يكذب، وهو أسوأ من شريطٍ لا وجود له.</para>
   ///
   /// Enter لا يُلتقط هنا: هو مفتاح القارئ السلكي — يُرسله بعد كل مسحة —
   /// ويعالجه مربع البحث نفسه عبر onSubmitted. اختطافه على مستوى الشاشة كان
@@ -816,6 +831,10 @@ class _PosScreenState extends ConsumerState<PosScreen> {
             // البضاعة — الكاشير هو من يمسك الصنف بيده.
             _ExpiryBanner(branchId: _branchId),
             _buildLayout(isDesktop, scanner, cart),
+            // على سطح المكتب وحده: شاشة اللمس بلا لوحة مفاتيح، والشريط
+            // يأكل ارتفاعاً هو أثمن ما فيها. و`touch` لا `isDesktop` وحده
+            // لأن جهاز الكاشير ويندوزٌ بشاشة لمس — سطح مكتب بلا لوحة.
+            if (isDesktop && !touch) const ShortcutHintBar(shortcuts: _kPosShortcuts),
           ],
         ),
       ),

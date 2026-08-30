@@ -161,7 +161,7 @@ public class ExpensesController : ControllerBase
             Amount = request.Amount,
             Note = string.IsNullOrWhiteSpace(request.Note) ? null : request.Note.Trim(),
             AccountId = account?.Id,
-            SpentOn = request.SpentOn?.Date ?? DateTime.UtcNow.Date,
+            SpentOn = request.SpentOn?.Date ?? OrgClock.Today(org),
             CreatedBy = CurrentUserId(),
         };
         _db.Expenses.Add(expense);

@@ -12,6 +12,25 @@ public record ProductSalesPoint(Guid ProductId, string ProductName, decimal Quan
 public record BranchSalesPoint(Guid BranchId, string BranchName, decimal Revenue, int InvoiceCount);
 public record CashierSalesPoint(Guid? CashierId, string CashierName, decimal Revenue, int InvoiceCount);
 
+public record DailyExpensePoint(DateTime Date, decimal Amount, int Count);
+public record ExpenseCategoryPoint(string Category, decimal Amount, int Count);
+
+/// <summary>
+/// المصروفات في مدّة — بالبند وباليوم.
+///
+/// <para><b>الفجوة التي تسدّها:</b> شاشة التقارير كانت تعرض المبيعات
+/// والمخزون والديون، ولا تعرض ما خرج. وتقريرُ إيرادٍ بلا مصروف يقول رقماً
+/// يظنّه التاجر ربحاً وليس كذلك — وهو أخطر ما في التقارير: رقمٌ صحيحٌ في
+/// نفسه يُقرأ خطأً.</para>
+///
+/// <para>و<c>ByDay</c> هي ما يجعل الرسم البياني يقول الحقيقة: خطُّ مبيعاتٍ
+/// وحده يصعد فيُفرح، وبجانبه خطُّ المصروفات تُعرَف المسافة بينهما.</para>
+/// </summary>
+public record ExpensesSummaryDto(
+    decimal TotalExpenses, int ExpenseCount, decimal AverageExpense,
+    List<DailyExpensePoint> ByDay,
+    List<ExpenseCategoryPoint> ByCategory);
+
 public record SalesSummaryDto(
     decimal TotalRevenue, int TotalInvoices, decimal AverageInvoiceValue,
     decimal TotalReturns, int ReturnCount,
@@ -106,6 +125,52 @@ public class ReportsController : ControllerBase
 {
     private readonly AppDbContext _db;
     public ReportsController(AppDbContext db) => _db = db;
+
+    /// <summary>
+    /// المصروفات في مدّة — بالبند وباليوم.
+    ///
+    /// <para>بـ<see cref="Expense.SpentOn"/> لا <c>CreatedAt</c>: مصروفٌ
+    /// دُفع الشهر الماضي وسُجّل اليوم ينتمي إلى الشهر الماضي. وقياسُه
+    /// بتاريخ الإدخال يجعل تقرير شهرٍ يتغيّر كلّما تأخّر إدخال ورقة.</para>
+    /// </summary>
+    [HttpGet("expenses-summary")]
+    public async Task<ActionResult<ExpensesSummaryDto>> ExpensesSummary(
+        [FromQuery] DateTime? from, [FromQuery] DateTime? to)
+    {
+        var org = await _db.Organizations.FirstOrDefaultAsync();
+        var today = org is null ? DateTime.UtcNow.Date : OrgClock.Today(org);
+
+        var rangeFrom = from?.Date ?? today.AddDays(-29);
+        var rangeTo = (to?.Date ?? today).AddDays(1);
+
+        var expenses = await _db.Expenses
+            .Where(e => e.SpentOn >= rangeFrom && e.SpentOn < rangeTo)
+            .Select(e => new { e.Amount, e.SpentOn, e.Category })
+            .ToListAsync();
+
+        if (expenses.Count == 0)
+        {
+            return new ExpensesSummaryDto(0, 0, 0,
+                new List<DailyExpensePoint>(), new List<ExpenseCategoryPoint>());
+        }
+
+        var total = expenses.Sum(e => e.Amount);
+
+        var byDay = expenses
+            .GroupBy(e => e.SpentOn.Date)
+            .Select(g => new DailyExpensePoint(g.Key, g.Sum(e => e.Amount), g.Count()))
+            .OrderBy(p => p.Date)
+            .ToList();
+
+        var byCategory = expenses
+            .GroupBy(e => string.IsNullOrWhiteSpace(e.Category) ? "بلا بند" : e.Category)
+            .Select(g => new ExpenseCategoryPoint(g.Key, g.Sum(e => e.Amount), g.Count()))
+            .OrderByDescending(c => c.Amount)
+            .ToList();
+
+        return new ExpensesSummaryDto(
+            total, expenses.Count, total / expenses.Count, byDay, byCategory);
+    }
 
     [HttpGet("sales-summary")]
     public async Task<ActionResult<SalesSummaryDto>> SalesSummary([FromQuery] DateTime? from, [FromQuery] DateTime? to)
