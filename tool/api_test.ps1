@@ -23,6 +23,8 @@ param(
     # Resolve-BaseUrl أدناه.
     [string]$BaseUrl = "",
     [string]$Email = "",
+    # إقرارٌ صريح بالكتابة في دفاتر الإنتاج — راجع حارس الإنتاج أدناه.
+    [switch]$AllowProduction,
     # اسم موقع IIS الذي يُشتقّ منه العنوان حين لا يُمرَّر BaseUrl.
     [string]$SiteName = "Kinetic"
 )
@@ -60,6 +62,23 @@ function Resolve-BaseUrl([string]$Site) {
     } catch {
         return $null
     }
+}
+
+# ⚠ حارسُ الإنتاج.
+#
+# هذا السكربت **يكتب** — مئة وأربعة عشر فحصاً تُنشئ زبائن وأصنافاً وفواتير
+# باسم TEST-. ومكانه بيئة التجربة وحدها.
+#
+# وقد شُغِّل مرّة على الإنتاج لأن اشتقاق العنوان يسقط على موقع «Kinetic»
+# الافتراضي حين لا يُمرَّر شيء. فصار الإنتاج يحتاج إقراراً صريحاً: من
+# قصده كتبه، ومن نسي لا يصيبه.
+if ($SiteName -eq 'Kinetic' -and -not $AllowProduction) {
+    Write-Host ""
+    Write-Host "  رُفض: «Kinetic» هو موقع الإنتاج، وهذا الفحص يكتب بيانات TEST-." -ForegroundColor Red
+    Write-Host "  للتجربة:  .	oolpi_test.ps1 -SiteName KineticStaging" -ForegroundColor Yellow
+    Write-Host "  وإن قصدتَ الإنتاج فعلاً، أضف -AllowProduction." -ForegroundColor Yellow
+    Write-Host ""
+    exit 1
 }
 
 if (-not $BaseUrl) {

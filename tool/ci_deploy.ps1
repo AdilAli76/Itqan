@@ -135,7 +135,7 @@ if ($Target -eq 'staging') {
     Step 5 'فحص قواعد العمل على الخادم'
     $test = Join-Path $root 'tool\api_test.ps1'
     if (Test-Path $test) {
-        try { & $test } catch { Warn "تعثّر الفحص: $($_.Exception.Message)" }
+        try { & $test -SiteName $site } catch { Warn "تعثّر الفحص: $($_.Exception.Message)" }
     } else {
         Warn 'api_test.ps1 غير موجود بعدُ على هذه البيئة.'
     }
