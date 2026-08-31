@@ -7,11 +7,21 @@ using KineticEnterprise.Api.Models;
 
 namespace KineticEnterprise.Api.Controllers;
 
-public record PortalLoginRequest(string CardCode, string Pin);
+/// <param name="Pin">
+/// اختياري: البطاقة بلا رقم سرّي تدخل بالمسح وحده — راجع GlanceEntries.
+/// </param>
+public record PortalLoginRequest(string CardCode, string? Pin = null);
 
 public record PortalAccountDto(
     string CustomerName, string OrganizationName, string CardCode,
     decimal Balance, decimal CreditLimit, int LoyaltyPoints,
+    /// <summary>
+    /// هل تحقّق رقمٌ سرّي فعلاً — لا أن البطاقة تحمله.
+    ///
+    /// <para>تقرؤه الواجهة لتقول لصاحب البطاقة إن ما يراه مختصر، وكيف
+    /// يرى الكشف الكامل. وبلا هذا يظنّ أن حركاته خمس فقط.</para>
+    /// </summary>
+    bool PinVerified,
     List<PortalTransactionDto> Transactions);
 
 public record PortalTransactionDto(string Kind, decimal SignedAmount, string? Note, DateTime CreatedAt);
@@ -30,6 +40,12 @@ public record PortalTransactionDto(string Kind, decimal SignedAmount, string? No
 [AllowAnonymous]
 public class CustomerPortalController : ControllerBase
 {
+    /// <summary>ما يراه المسح وحده — يكفي «كم بقي لي؟» ولا يكشف تاريخاً.</summary>
+    private const int GlanceEntries = 5;
+
+    /// <summary>الكشف الكامل — لبطاقةٍ تحقّق رقمها السرّي.</summary>
+    private const int FullEntries = 50;
+
     private readonly IConfiguration _config;
     public CustomerPortalController(IConfiguration config) => _config = config;
 
@@ -37,7 +53,7 @@ public class CustomerPortalController : ControllerBase
     public async Task<ActionResult<PortalAccountDto>> Login(PortalLoginRequest request)
     {
         var code = (request.CardCode ?? "").Trim().ToUpperInvariant();
-        if (string.IsNullOrEmpty(code) || string.IsNullOrEmpty(request.Pin))
+        if (string.IsNullOrEmpty(code))
         {
             return Unauthorized(new { message = "رمز البطاقة أو الرقم السري غير صحيح" });
         }
@@ -83,33 +99,51 @@ public class CustomerPortalController : ControllerBase
             return Unauthorized(new { message = "رمز البطاقة أو الرقم السري غير صحيح" });
         }
 
-        // حساب في نمط «بطاقة فقط» لا رقم سرّي له، فلا سبيل لدخول البوابة.
-        // ورسالة صريحة هنا لا «رمز خاطئ»: الأخيرة تجعل صاحب الحساب يعيد
-        // المحاولة عشرات المرّات ظانّاً أنه أخطأ، بينما لا رقم أصلاً. وهي لا
-        // تكشف أكثر ممّا تكشفه رسالة البطاقة المحظورة أعلاه.
-        if (customer.PinHash is null)
+        // ── ما يفتحه المسح وحده ─────────────────────────────────────────
+        //
+        // كان الحساب بلا رقم سرّي يُمنع من البوابة كلّها. وذاك حَمى بثمنٍ
+        // باهظ: أكثر حاملي البطاقات في نسخة المحفظة بلا رقم سرّي عمداً
+        // (بطاقات مرتَّبات تُصدَر جماعياً)، فكانوا يسألون الكاشير «كم بقي
+        // لي؟» ويتوقّف الصندوق ليجيب.
+        //
+        // فصار المسح يفتح **الرصيد وآخر خمس حركات** — يجيب سؤاله الحقيقي
+        // ولا يكشف تاريخه. والكشف الكامل يشترط رقماً سرّياً تحقّق فعلاً.
+        //
+        // ⚠ **والثمن مقصود ومقبول:** من يجد بطاقةً بلا رقم سرّي يرى رصيد
+        // صاحبها وآخر خمس حركات. ولا حاجز بعد البطاقة — هي المفتاح. ومن
+        // أراد حاجزاً أصدر بطاقةً برقم سرّي، والخيار بيد الإدارة كما كان.
+        var pinVerified = false;
+
+        if (customer.PinHash is not null)
         {
-            return StatusCode(403, new
+            if (string.IsNullOrEmpty(request.Pin))
             {
-                message = "هذا الحساب يعمل بنمط «البطاقة فقط» بلا رقم سرّي — "
-                        + "لمتابعة رصيدك من البوابة راجع إدارة المتجر لإصدار رقم سرّي."
-            });
-        }
+                // رسالة صريحة لا «رمز خاطئ»: البطاقة تحمل رقماً ولم يُرسَل،
+                // وإخفاء ذلك يجعل صاحبها يعيد المسح عشرات المرّات.
+                return StatusCode(403, new
+                {
+                    message = "هذه البطاقة تحتاج رقماً سرّياً — أدخله للمتابعة."
+                });
+            }
 
-        // نفس البوابة التي تستخدمها نقطة البيع — عدّاد قفل واحد لا اثنان.
-        var pinResult = await CustomerPinGate.VerifyAsync(
-            db, customer, request.Pin, HttpContext.Connection.RemoteIpAddress?.ToString());
-        await db.SaveChangesAsync();
+            // نفس البوابة التي تستخدمها نقطة البيع — عدّاد قفل واحد لا اثنان.
+            var pinResult = await CustomerPinGate.VerifyAsync(
+                db, customer, request.Pin, HttpContext.Connection.RemoteIpAddress?.ToString());
+            await db.SaveChangesAsync();
 
-        if (pinResult.Result == PinCheck.Locked)
-        {
-            return StatusCode(429, new { message = pinResult.Message });
-        }
-        if (pinResult.Result != PinCheck.Ok)
-        {
-            // رسالة عامة عمداً هنا (بعكس نقطة البيع): البوابة مفتوحة للإنترنت،
-            // والتمييز بين "رمز خاطئ" و"رقم سري خاطئ" يكشف أي الرموز موجود فعلاً.
-            return Unauthorized(new { message = "رمز البطاقة أو الرقم السري غير صحيح" });
+            if (pinResult.Result == PinCheck.Locked)
+            {
+                return StatusCode(429, new { message = pinResult.Message });
+            }
+            if (pinResult.Result != PinCheck.Ok)
+            {
+                // رسالة عامة عمداً هنا (بعكس نقطة البيع): البوابة مفتوحة
+                // للإنترنت، والتمييز بين «رمز خاطئ» و«رقم سري خاطئ» يكشف أي
+                // الرموز موجود فعلاً.
+                return Unauthorized(new { message = "رمز البطاقة أو الرقم السري غير صحيح" });
+            }
+
+            pinVerified = true;
         }
 
         var org = await db.Organizations.FirstOrDefaultAsync();
@@ -117,7 +151,7 @@ public class CustomerPortalController : ControllerBase
         var transactions = await db.CustomerWalletTransactions
             .Where(t => t.CustomerId == customer.Id)
             .OrderByDescending(t => t.CreatedAt)
-            .Take(50)
+            .Take(pinVerified ? FullEntries : GlanceEntries)
             .ToListAsync();
 
         return new PortalAccountDto(
@@ -127,6 +161,7 @@ public class CustomerPortalController : ControllerBase
             balance,
             customer.CreditLimit,
             customer.LoyaltyPoints,
+            pinVerified,
             transactions.Select(t => new PortalTransactionDto(
                 t.Kind, t.Amount * WalletKinds.SignOf(t.Kind), t.Note, t.CreatedAt)).ToList());
     }

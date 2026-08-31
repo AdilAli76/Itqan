@@ -996,6 +996,65 @@ Api PUT "/organizations/me/settings" -Token $token -Body ($baseSettings + @{
 }
 
 # -----------------------------------------------------------------------------
+Section "٥.٨ بوّابة العميل — حدّ ما يفتحه المسح"
+
+# العطب الذي يمسكه هذا القسم: البوّابة صارت تقبل بطاقةً بلا رقم سرّي — وهو
+# عكسُ قرارٍ سابق. والحدّ المتّفق عليه أن المسح وحده يفتح **الرصيد وآخر خمس
+# حركات** لا كشف الحساب.
+#
+# وهذا حدٌّ لا يظهر خرقُه في أي شاشة: من يوسّعه سهواً (بتغيير Take أو نسيان
+# تمرير pinVerified) يُنتج بوّابةً «تعمل» وتكشف تاريخ صاحب البطاقة كاملاً
+# لمن وجدها. فيُفحَص بالعدد لا بالنظر.
+
+$portalCustomer = Api POST "/customers" -Token $token -Body @{
+    fullName = "عميل بوّابة $stamp"
+}
+if ($portalCustomer.Status -notin 200,201) {
+    Skipped "بوّابة العميل" "تعذّر إنشاء العميل (حالة $($portalCustomer.Status))"
+} else {
+    $portalId = $portalCustomer.Body.id
+    $portalCard = Api POST "/wallet-cards/issue" -Token $token -Body @{
+        customerId = $portalId; cardMode = "card"; pin = $null
+    }
+
+    if ($portalCard.Status -notin 200,201) {
+        Skipped "بوّابة العميل" "تعذّر إصدار البطاقة (حالة $($portalCard.Status))"
+    } else {
+        $portalCode = $portalCard.Body.cardCode
+
+        # ستّ حركات: أكثر من حدّ المسح بواحدة، فيظهر القصّ إن وقع.
+        1..6 | ForEach-Object {
+            Api POST "/customers/$portalId/wallet" -Token $token -Body @{
+                kind = "topup"; amount = 10; note = "TEST-portal-$_"
+            } | Out-Null
+        }
+
+        # الدخول بالمسح وحده — بلا رقم سرّي إطلاقاً.
+        $glance = Api POST "/customer-portal/login" -Body @{ cardCode = $portalCode }
+        Check "بطاقة بلا رقم سرّي تدخل البوّابة بالمسح" ($glance.Status -eq 200) `
+            "حالة $($glance.Status) — $($glance.Body.message)"
+
+        if ($glance.Status -eq 200) {
+            Check "المسح وحده لا يُعدّ تحقّقاً من رقم سرّي" `
+                ($glance.Body.pinVerified -eq $false) `
+                "pinVerified = $($glance.Body.pinVerified) — صدقُه يفتح الكشف الكامل"
+
+            $count = @($glance.Body.transactions).Count
+            Check "المسح يفتح خمس حركات لا أكثر" ($count -le 5) `
+                "رجعت $count حركة — الحدّ خمس، وتجاوزه يكشف تاريخ صاحب البطاقة لمن وجدها"
+
+            Check "الرصيد يُعرَض مع ذلك" ($null -ne $glance.Body.balance) `
+                "الرصيد غائب — وهو سؤال العميل الحقيقي"
+        }
+
+        # رمز مجهول: نفس ردّ الرقم الخاطئ، فلا يُعرَف أيّ رمز مسجَّل فعلاً.
+        $unknown = Api POST "/customer-portal/login" -Body @{ cardCode = "TEST-NOPE-$stamp" }
+        Check "رمز بطاقة مجهول يُرفض بـ401" ($unknown.Status -eq 401) `
+            "حالة $($unknown.Status) — وغيرُ 401 يكشف أيّ الرموز موجود"
+    }
+}
+
+# -----------------------------------------------------------------------------
 Section "٥.٤ الجرد الميداني"
 
 # العطب الذي يمسكه هذا القسم: الجرد الدوري يبدأ بـ counted_quantity =

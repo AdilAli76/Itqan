@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import '../../../core/network/api_client.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_text_styles.dart';
+import '../../pos/presentation/barcode_scanner_sheet.dart';
 import '../../../shared/widgets/barcode_view.dart';
 import '../../../shared/widgets/currency_badge.dart';
 
@@ -58,9 +59,12 @@ class _CustomerPortalScreenState extends State<CustomerPortalScreen> {
       _error = null;
     });
     try {
+      final pin = _pinController.text.trim();
       final response = await ApiClient.instance.dio.post('/customer-portal/login', data: {
         'cardCode': _codeController.text.trim(),
-        'pin': _pinController.text.trim(),
+        // يُحذف إن كان فارغاً لا يُرسَل نصّاً فارغاً: البطاقة بلا رقم سرّي
+        // تدخل بالمسح وحده، والخادم يميّز «لم يُرسَل» عن «أُرسل خطأً».
+        if (pin.isNotEmpty) 'pin': pin,
       });
       setState(() => _account = response.data as Map<String, dynamic>);
     } catch (e) {
@@ -68,6 +72,24 @@ class _CustomerPortalScreenState extends State<CustomerPortalScreen> {
     } finally {
       if (mounted) setState(() => _loading = false);
     }
+  }
+
+  /// مسح البطاقة بالكاميرا بدل كتابة رمزها.
+  ///
+  /// **العطب الذي يصلحه:** رمز البطاقة اثنتا عشرة خانة من حروف وأرقام
+  /// (7K4M9PQR2XYZ)، تُكتب على لوحة هاتف بحرفٍ خاطئ فتُردّ برسالة «رمز
+  /// غير صحيح» لا تقول أين الخطأ. والباركود مطبوع على البطاقة أصلاً.
+  ///
+  /// ويُرسَل الطلب فور المسح إن كان الحقل الآخر فارغاً: البطاقة بلا رقم
+  /// سرّي لا تحتاج خطوةً ثانية، ومن يحمل رقماً يكتبه ثم يضغط.
+  Future<void> _scan() async {
+    final code = await Navigator.of(context).push<String>(
+      MaterialPageRoute(builder: (_) => const BarcodeScannerSheet(), fullscreenDialog: true),
+    );
+    if (code == null || code.trim().isEmpty || !mounted) return;
+
+    _codeController.text = code.trim().toUpperCase();
+    if (_pinController.text.trim().isEmpty) await _login();
   }
 
   void _logout() {
@@ -130,7 +152,7 @@ class _CustomerPortalScreenState extends State<CustomerPortalScreen> {
         Text('حساب العميل', style: AppTextStyles.displayLg(), textAlign: TextAlign.center),
         const SizedBox(height: 6),
         Text(
-          'أدخل رمز بطاقتك ورقمك السري لعرض رصيدك',
+          'امسح بطاقتك لعرض رصيدك — أو أدخل رمزها يدوياً',
           style: AppTextStyles.bodyMd(),
           textAlign: TextAlign.center,
         ),
@@ -138,10 +160,15 @@ class _CustomerPortalScreenState extends State<CustomerPortalScreen> {
         TextField(
           controller: _codeController,
           textCapitalization: TextCapitalization.characters,
-          decoration: const InputDecoration(
+          decoration: InputDecoration(
             labelText: 'رمز البطاقة',
             hintText: 'مثال: 7K4M9PQR2XYZ',
-            prefixIcon: Icon(Icons.credit_card_outlined),
+            prefixIcon: const Icon(Icons.credit_card_outlined),
+            suffixIcon: IconButton(
+              onPressed: _loading ? null : _scan,
+              icon: const Icon(Icons.qr_code_scanner),
+              tooltip: 'امسح البطاقة',
+            ),
           ),
         ),
         const SizedBox(height: 16),
@@ -153,6 +180,9 @@ class _CustomerPortalScreenState extends State<CustomerPortalScreen> {
           onSubmitted: (_) => _login(),
           decoration: const InputDecoration(
             labelText: 'الرقم السري',
+            // «إن وُجد» لا حقلٌ مطلوب: أكثر بطاقات المرتَّبات تُصدَر بلا رقم
+            // سرّي، وحقلٌ يبدو إلزامياً يوقف صاحبها عند بابٍ مفتوح.
+            helperText: 'إن كانت بطاقتك تحمل رقماً سرّياً',
             prefixIcon: Icon(Icons.lock_outline),
             counterText: '',
           ),
@@ -183,6 +213,7 @@ class _CustomerPortalScreenState extends State<CustomerPortalScreen> {
     final account = _account!;
     final balance = (account['balance'] as num?)?.toDouble() ?? 0;
     final transactions = List<Map<String, dynamic>>.from(account['transactions'] as List? ?? []);
+    final pinVerified = account['pinVerified'] as bool? ?? false;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -255,6 +286,26 @@ class _CustomerPortalScreenState extends State<CustomerPortalScreen> {
         ),
         const SizedBox(height: 20),
         Text('آخر الحركات', style: AppTextStyles.headlineMd()),
+        // ما يفتحه المسح وحده مختصر — وقولُ ذلك صراحةً شرط.
+        //
+        // بدونه يرى صاحب بطاقةٍ بلا رقم سرّي خمس حركات ويظنّها كلّ ما جرى
+        // على حسابه، فيحسب رصيده خطأً ويظنّ النظام أضاع حركاته.
+        if (pinVerified == false) ...[
+          const SizedBox(height: 6),
+          Row(
+            children: [
+              Icon(Icons.info_outline, size: 16, color: AppColors.textSecondary),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  'تُعرض آخر خمس حركات. لكشف الحساب كاملاً اطلب من الإدارة '
+                  'إصدار رقم سرّي لبطاقتك.',
+                  style: AppTextStyles.caption(color: AppColors.textSecondary),
+                ),
+              ),
+            ],
+          ),
+        ],
         const SizedBox(height: 10),
         if (transactions.isEmpty)
           Container(

@@ -33,6 +33,9 @@ GoRouter buildAppRouter() {
       // بوابة العميل — خارج AppShell عمداً: العميل ليس مستخدَم نظام ولا يرى
       // أي شاشة إدارية، فلا شريط جانبي ولا تبويبات هنا.
       GoRoute(path: '/my-account', builder: (context, state) => const CustomerPortalScreen()),
+      // مرادفٌ أقصر يُملى على الهاتف: «سلاش كلاينت» أسهل من «ماي داش
+      // أكاونت». ويُضاف ولا يُستبدَل — رابطٌ وُزّع على العملاء لا يبطل.
+      GoRoute(path: '/client', builder: (context, state) => const CustomerPortalScreen()),
       GoRoute(
         path: '/app',
         builder: (context, state) {

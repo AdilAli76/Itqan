@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../../../core/auth/current_user.dart';
@@ -155,6 +157,14 @@ class _CustomersScreenState extends ConsumerState<CustomersScreen> {
               },
             ),
           ),
+          // إرسال رابط البوّابة — لا صلاحية عليه: هو رابطٌ عامّ واحد لا
+          // بيانات فيه، والبطاقة هي المفتاح. واشتراط صلاحية إدارة العملاء
+          // لإرساله يجعل الكاشير يعجز عن مساعدة زبونٍ أمامه.
+          IconButton(
+            tooltip: 'أرسل رابط «حسابي» للعميل',
+            icon: const Icon(Icons.ios_share, size: 18),
+            onPressed: () => _sharePortalLink(context, c),
+          ),
           // إصدار البطاقة وطباعتها لهما شاشة مخصَّصة واحدة («بطاقات المحفظة»)
           // — كان هنا مساران مكرَّران يصدران بطاقات بنموذجين مختلفين، وهو ما
           // سبّب اختلاف سلوك إدخال الرقم السري بين الشاشتين.
@@ -180,6 +190,49 @@ class _CustomersScreenState extends ConsumerState<CustomersScreen> {
         ],
       ),
     ];
+  }
+
+  /// يفتح واتساب برسالة جاهزة تحمل رابط بوّابة «حسابي».
+  ///
+  /// <para><b>الفجوة التي يسدّها:</b> البوّابة موجودة منذ زمن ولا أحد
+  /// يصلها — لا رابط في شاشة، ولا رسالة تُرسَل. فبقي العميل يسأل الكاشير
+  /// «كم بقي لي؟» ويتوقّف الصندوق ليجيب.</para>
+  ///
+  /// <para><b>ورابطٌ واحد لكل العملاء لا رابطٌ لكلٍّ منهم:</b> البطاقة هي
+  /// المفتاح — راجع CustomerPortalController. فلا شيء يُولَّد ولا يُخزَّن
+  /// ولا يُبطَل عند الفقد، ولا رابطٌ يُنسَخ من هاتفٍ إلى هاتف فيفتح حساب
+  /// صاحبه.</para>
+  ///
+  /// <para>وواتساب لا رسالةً قصيرة: هو ما يستعمله عملاؤك، ويقبل روابط
+  /// قابلة للنقر بلا تكلفة لكل رسالة.</para>
+  Future<void> _sharePortalLink(BuildContext context, Map<String, dynamic> customer) async {
+    final phone = (customer['phone'] as String? ?? '').replaceAll(RegExp(r'[^0-9]'), '');
+    final link = '${Uri.base.origin}/client';
+    final text = 'مرحباً ${customer['fullName'] ?? ''}\n'
+        'تابع رصيد بطاقتك وحركاتك من هنا:\n$link\n'
+        'امسح باركود بطاقتك عند فتح الرابط.';
+
+    // بلا رقم هاتف: يُنسَخ النصّ ليُلصق حيث شاء المستخدم، بدل فتح واتساب
+    // على فراغ. وأكثر بطاقات المرتَّبات تُستورَد جماعياً بلا أرقام.
+    if (phone.isEmpty) {
+      await Clipboard.setData(ClipboardData(text: text));
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('لا رقم هاتف لهذا العميل — نُسخت الرسالة')),
+        );
+      }
+      return;
+    }
+
+    final uri = Uri.parse('https://wa.me/$phone?text=${Uri.encodeComponent(text)}');
+    if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
+      await Clipboard.setData(ClipboardData(text: text));
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('تعذّر فتح واتساب — نُسخت الرسالة')),
+        );
+      }
+    }
   }
 
   /// يميّز نموذجَي الحساب في القائمة، ويحذّر من الاستحقاقات المنتهية أو
