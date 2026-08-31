@@ -94,7 +94,7 @@ git tag v1.3.0 && git push origin v1.3.0
 
 ### كيف يصل الموظّفين
 
-النشر ينسخ الـAPK إلى `backend\wwwrootpp\` على الخادم، ويكتب في
+النشر ينسخ الـAPK إلى `backend\wwwroot\app\` على الخادم، ويكتب في
 `appsettings.Production.json`:
 
 ```json
