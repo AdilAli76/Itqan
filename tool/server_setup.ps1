@@ -42,7 +42,16 @@ param(
     [string]$Domain,
     [string]$PackagePath = 'C:\kinetic',
     [string]$SqlInstance = '.\SQLEXPRESS',
-    [string]$Database = 'KineticEnterprise'
+    [string]$Database = 'KineticEnterprise',
+    # ⚠ اسم موقع IIS — يُمرَّر صراحةً للتجربة.
+    #
+    # كان مثبَّتاً 'Kinetic' في كل موضع، فمن شغّل المرحلة https لنطاق
+    # التجربة أضاف ترويسة مضيفها إلى **موقع الإنتاج**. وموقعان يتنازعان
+    # نفس (عنوان:منفذ:ترويسة) يمنع أحدهما من العمل — أي أن أمراً يقصد
+    # إصلاح التجربة يُسقط الإنتاج.
+    #
+    # للتجربة:  -SiteName KineticStaging
+    [string]$SiteName = 'Kinetic'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -378,9 +387,9 @@ GRANT EXECUTE TO [$poolIdentity];
     }
 
     if ($isIp) {
-        New-Website -Name 'Kinetic' -PhysicalPath $apiPath -Port 80 -ApplicationPool $poolName -Force | Out-Null
+        New-Website -Name $SiteName -PhysicalPath $apiPath -Port 80 -ApplicationPool $poolName -Force | Out-Null
     } else {
-        New-Website -Name 'Kinetic' -PhysicalPath $apiPath -Port 80 -HostHeader $Domain -ApplicationPool $poolName -Force | Out-Null
+        New-Website -Name $SiteName -PhysicalPath $apiPath -Port 80 -HostHeader $Domain -ApplicationPool $poolName -Force | Out-Null
     }
     Ok "موقع Kinetic -> $apiPath (المنفذ 80)"
     Ok 'الويب على / والـAPI على /api — من المصدر نفسه، فلا CORS'
@@ -418,7 +427,7 @@ GRANT EXECUTE TO [$poolIdentity];
     Write-Host '  التالي — الشهادة (الخطوة الوحيدة المتبقّية قبل الإطلاق):' -ForegroundColor Yellow
     Write-Host '    1) وجّه سجل DNS من A إلى IP هذا الخادم، وتأكّد أن 80 و443 مفتوحان.' -ForegroundColor Gray
     Write-Host '    2) نزّل win-acme من https://www.win-acme.com ثم:' -ForegroundColor Gray
-    Write-Host '         .\wacs.exe --target iis --siteid (Get-Website Kinetic).Id' -ForegroundColor White
+    Write-Host "         .\wacs.exe --target iis --siteid (Get-Website $SiteName).Id" -ForegroundColor White
     Write-Host '       يُصدر شهادة Let''s Encrypt ويربطها بالمنفذ 443 ويجدّدها تلقائياً.' -ForegroundColor Gray
     Write-Host '    3) ثم:  .\server_setup.ps1 -Stage verify -Domain ' -NoNewline -ForegroundColor Gray
     Write-Host $Domain -ForegroundColor Gray
@@ -434,7 +443,7 @@ if ($Stage -eq 'https') {
     Import-Module WebAdministration
 
     Head 'الارتباطات الحالية'
-    $site = Get-Website -Name 'Kinetic' -ErrorAction SilentlyContinue
+    $site = Get-Website -Name $SiteName -ErrorAction SilentlyContinue
     if (-not $site) { throw 'موقع Kinetic غير موجود — نفّذ -Stage iis أولاً' }
     foreach ($b in $site.Bindings.Collection) {
         Ok "$($b.protocol) $($b.bindingInformation)"
@@ -445,7 +454,7 @@ if ($Stage -eq 'https') {
     # فالموقع يجب أن يستقبله باسمه لا كعنوان مجرّد.
     $hasHost = $site.Bindings.Collection | Where-Object { $_.bindingInformation -like "*:80:$Domain" }
     if (-not $hasHost) {
-        New-WebBinding -Name 'Kinetic' -Protocol http -Port 80 -HostHeader $Domain
+        New-WebBinding -Name $SiteName -Protocol http -Port 80 -HostHeader $Domain
         Ok "أُضيف ارتباط http على $Domain"
     } else {
         Ok "ارتباط $Domain موجود"
@@ -480,10 +489,10 @@ if ($Stage -eq 'https') {
         $https = $site.Bindings.Collection |
                  Where-Object { $_.protocol -eq 'https' -and $_.bindingInformation -like "*:443:$Domain" }
         if (-not $https) {
-            New-WebBinding -Name 'Kinetic' -Protocol https -Port 443 -HostHeader $Domain -SslFlags 1
+            New-WebBinding -Name $SiteName -Protocol https -Port 443 -HostHeader $Domain -SslFlags 1
             # الارتباط يُلتقط بترويسة مضيفه: Get-WebBinding بلا -HostHeader
             # يُرجع أوّل ارتباط https في الموقع، فتُربط الشهادة بالنطاق الخطأ.
-            $binding = Get-WebBinding -Name 'Kinetic' -Protocol https -Port 443 -HostHeader $Domain
+            $binding = Get-WebBinding -Name $SiteName -Protocol https -Port 443 -HostHeader $Domain
             $binding.AddSslCertificate($cert[0].GetCertHashString(), $certStore)
             Ok "أُضيف ارتباط https على 443 لـ$Domain"
         } else {
