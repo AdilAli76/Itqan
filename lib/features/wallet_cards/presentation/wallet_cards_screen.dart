@@ -3,6 +3,7 @@ import 'dart:async';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import '../../../shared/widgets/adaptive_form_dialog.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../../../core/network/api_client.dart';
@@ -676,14 +677,10 @@ class _IssueCardDialogState extends ConsumerState<_IssueCardDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      title: Text(_issuedCode == null ? 'إصدار بطاقة محفظة' : 'تم إصدار البطاقة'),
-      content: SizedBox(
-        width: 400,
-        child: SingleChildScrollView(
-          child: _issuedCode == null ? _buildForm() : _buildResult(),
-        ),
-      ),
+    return AdaptiveFormDialog(
+      title: _issuedCode == null ? 'إصدار بطاقة محفظة' : 'تم إصدار البطاقة',
+      maxWidth: 400,
+      body: _issuedCode == null ? _buildForm() : _buildResult(),
       actions: _issuedCode == null
           ? [
               TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('إلغاء')),

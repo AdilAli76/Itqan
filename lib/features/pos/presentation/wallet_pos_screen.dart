@@ -871,6 +871,13 @@ class _CashTenderedDialog extends StatefulWidget {
 
 class _CashTenderedDialogState extends State<_CashTenderedDialog> {
   String _text = '';
+  final _controller = TextEditingController();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
 
   double get _tendered => double.tryParse(_text) ?? 0;
   double get _change => _tendered - widget.due;
@@ -913,12 +920,31 @@ class _CashTenderedDialogState extends State<_CashTenderedDialog> {
                 ],
               ),
             const SizedBox(height: 10),
-            NumericKeypad(
-              value: _text,
-              onChanged: (v) => setState(() => _text = v),
-              size: KeypadSize.compact,
-              onSubmit: () {},
-            ),
+            // على الهاتف: لوحة النظام. حوارٌ صغير تفتح فوقه لوحةُ الهاتف
+            // فتزاحمه لوحةٌ مرسومة داخله — اثنتان على شاشةٍ واحدة.
+            if (Breakpoints.isMobile(context))
+              TextField(
+                controller: _controller,
+                autofocus: true,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                textInputAction: TextInputAction.done,
+                textAlign: TextAlign.center,
+                style: AppTextStyles.displayLg(),
+                decoration: InputDecoration(
+                  labelText: 'المبلغ المستلَم',
+                  suffixText: widget.symbol,
+                  border: const OutlineInputBorder(),
+                ),
+                onChanged: (v) => setState(() => _text = v),
+                onSubmitted: (_) => Navigator.pop(context, _tendered),
+              )
+            else
+              NumericKeypad(
+                value: _text,
+                onChanged: (v) => setState(() => _text = v),
+                size: KeypadSize.compact,
+                onSubmit: () {},
+              ),
           ],
         ),
       ),

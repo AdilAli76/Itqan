@@ -111,6 +111,13 @@ class _PosScreenState extends ConsumerState<PosScreen> {
 
   String _padValue = '';
 
+  /// حقل الكمية على الهاتف — يُزامَن من _padValue في البناء.
+  ///
+  /// المصدر يبقى واحداً (_padValue) لأنه يُصفَّر في ستّة مواضع؛ ومتحكّمٌ
+  /// يُصفَّر في بعضها دون بعض يُبقي رقماً قديماً معروضاً على الشاشة بينما
+  /// المنطق يراه فارغاً.
+  final _padFieldController = TextEditingController();
+
   /// المبلغ المستلَم نقداً — يُكتب على شاشة البيع نفسها لا في نافذة منفصلة.
   /// فارغ يعني «المبلغ بالضبط»، وهو الحالة الغالبة.
   final _tenderedController = TextEditingController();
@@ -164,6 +171,7 @@ class _PosScreenState extends ConsumerState<PosScreen> {
     _debounce?.cancel();
     _searchController.dispose();
     _tenderedController.dispose();
+    _padFieldController.dispose();
     _searchFocusNode.dispose();
     super.dispose();
   }
@@ -1169,22 +1177,55 @@ class _PosScreenState extends ConsumerState<PosScreen> {
             ],
           ),
           const SizedBox(height: 8),
-          KeypadDisplay(
-            value: _padValue,
-            placeholder: line == null ? '—' : _formatQuantity(line.quantity),
-          ),
-          const SizedBox(height: 10),
-          NumericKeypad(
-            value: _padValue,
-            onChanged: (v) => setState(() => _padValue = v),
-            size: touch ? KeypadSize.large : KeypadSize.compact,
-            allowDecimal: true,
-            decimalPlaces: 3,
-            onSubmit: _applyPadQuantity,
-            // التركيز يبقى لحقل المسح: قارئ الباركود جهاز لوحة مفاتيح،
-            // ولو خطفت اللوحة التركيز لتوقف المسح عن العمل.
-            autofocus: false,
-          ),
+          // ── على الهاتف: لوحة النظام لا لوحةٌ نرسمها ─────────────────
+          //
+          // لوحةٌ مرسومة داخل شاشة هاتف تتقاسم المساحة مع القائمة فتصغر
+          // أزرارها، وتظهر مكرَّرةً بجانب لوحة النظام إن فُتحت. ولوحة
+          // الهاتف تعرف تكبير الخطّ وأرقام لغة الجهاز بلا سطرٍ منّا.
+          //
+          // ويبقى المرسوم على اللوحي وسطح المكتب: الكاشير هناك على شاشة
+          // لمسٍ كبيرة بلا لوحة نظام، أو على فأرة.
+          if (Breakpoints.isMobile(context))
+            Builder(builder: (_) {
+              if (_padFieldController.text != _padValue) {
+                _padFieldController.value = TextEditingValue(
+                  text: _padValue,
+                  selection: TextSelection.collapsed(offset: _padValue.length),
+                );
+              }
+              return TextField(
+              controller: _padFieldController,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              textInputAction: TextInputAction.done,
+              textAlign: TextAlign.center,
+              style: AppTextStyles.displayLg(),
+              decoration: InputDecoration(
+                labelText: 'الكمية',
+                hintText: line == null ? '—' : _formatQuantity(line.quantity),
+                border: const OutlineInputBorder(),
+              ),
+              onChanged: (v) => setState(() => _padValue = v),
+              onSubmitted: (_) => _applyPadQuantity(),
+            );
+            })
+          else ...[
+            KeypadDisplay(
+              value: _padValue,
+              placeholder: line == null ? '—' : _formatQuantity(line.quantity),
+            ),
+            const SizedBox(height: 10),
+            NumericKeypad(
+              value: _padValue,
+              onChanged: (v) => setState(() => _padValue = v),
+              size: touch ? KeypadSize.large : KeypadSize.compact,
+              allowDecimal: true,
+              decimalPlaces: 3,
+              onSubmit: _applyPadQuantity,
+              // التركيز يبقى لحقل المسح: قارئ الباركود جهاز لوحة مفاتيح،
+              // ولو خطفت اللوحة التركيز لتوقف المسح عن العمل.
+              autofocus: false,
+            ),
+          ],
           const SizedBox(height: 10),
           SizedBox(
             height: touch ? 56 : 44,

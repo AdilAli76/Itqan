@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import '../../../shared/widgets/adaptive_form_dialog.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -408,17 +409,14 @@ class _CustomerFormDialogState extends State<_CustomerFormDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      title: Text(_isEdit ? 'تعديل عميل' : 'إضافة عميل جديد'),
-      content: Form(
+    // التمرير وتثبيت الأزرار في AdaptiveFormDialog — وعلى الهاتف تصير
+    // صفحةً كاملة: الحوار كان يأخذ نصف الشاشة، ولوحة المفاتيح نصف الباقي.
+    return AdaptiveFormDialog(
+      title: _isEdit ? 'تعديل عميل' : 'إضافة عميل جديد',
+      maxWidth: 380,
+      body: Form(
         key: _formKey,
-        child: SizedBox(
-          width: 380,
-          child: SingleChildScrollView(
-            // بلا تمرير يفيض الحوار على أي شاشة أقصر من محتواه،
-            // فيخرج زرّا الحفظ والإلغاء عن المتناول ويصبح الحوار
-            // مصيدة لا مخرج منها. أربعة حقول تكفي لذلك على الهاتف.
-            child: Column(
+        child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
@@ -612,8 +610,6 @@ class _CustomerFormDialogState extends State<_CustomerFormDialog> {
                 ],
               ],
             ),
-          ),
-        ),
       ),
       actions: [
         TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('إلغاء')),

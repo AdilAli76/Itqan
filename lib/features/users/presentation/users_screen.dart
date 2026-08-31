@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import '../../../shared/widgets/adaptive_form_dialog.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../../../core/network/api_client.dart';
@@ -296,14 +297,12 @@ class _UserFormDialogState extends ConsumerState<_UserFormDialog> {
   Widget build(BuildContext context) {
     final branchesAsync = ref.watch(branchesProvider);
 
-    return AlertDialog(
-      title: Text(_isEdit ? 'تعديل مستخدم' : 'إضافة مستخدم جديد'),
-      content: SizedBox(
-        width: 400,
-        child: Form(
-          key: _formKey,
-          child: SingleChildScrollView(
-            child: Column(
+    return AdaptiveFormDialog(
+      title: _isEdit ? 'تعديل مستخدم' : 'إضافة مستخدم جديد',
+      maxWidth: 400,
+      body: Form(
+        key: _formKey,
+        child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -409,8 +408,6 @@ class _UserFormDialogState extends ConsumerState<_UserFormDialog> {
                 ],
               ],
             ),
-          ),
-        ),
       ),
       actions: [
         TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('إلغاء')),

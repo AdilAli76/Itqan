@@ -1,5 +1,6 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import '../../../shared/widgets/adaptive_form_dialog.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
@@ -207,12 +208,10 @@ class _AddExpenseDialogState extends ConsumerState<_AddExpenseDialog> {
             .toList() ??
         const <Map<String, dynamic>>[];
 
-    return AlertDialog(
-      title: const Text('مصروف جديد'),
-      content: SizedBox(
-        width: 420,
-        child: SingleChildScrollView(
-          child: Column(
+    return AdaptiveFormDialog(
+      title: 'مصروف جديد',
+      maxWidth: 420,
+      body: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -307,8 +306,6 @@ class _AddExpenseDialogState extends ConsumerState<_AddExpenseDialog> {
               ],
             ],
           ),
-        ),
-      ),
       actions: [
         TextButton(onPressed: () => Navigator.pop(context), child: const Text('إلغاء')),
         FilledButton(

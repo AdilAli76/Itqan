@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:file_picker/file_picker.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import '../../../shared/widgets/adaptive_form_dialog.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../../../core/auth/current_user.dart';
@@ -737,17 +738,15 @@ class _CreatePurchaseOrderDialogState extends ConsumerState<_CreatePurchaseOrder
     final suppliersAsync = ref.watch(suppliersProvider);
     final resultsAsync = ref.watch(purchaseOrderProductResultsProvider);
 
-    return AlertDialog(
-      title: const Text('أمر شراء جديد'),
-      content: SizedBox(
-        width: 480,
-        child: Form(
+    return AdaptiveFormDialog(
+      title: 'أمر شراء جديد',
+      maxWidth: 480,
+      body: Form(
           key: _formKey,
           // onUserInteraction: الخطأ يظهر عند الكتابة لا بعد الضغط على
           // «إنشاء» — في أمر بعشرة أسطر، الفارق بين تصحيح سطر واحد فور
           // كتابته وبين البحث عن السطر الخاطئ بين عشرة بعد الرفض.
           autovalidateMode: AutovalidateMode.onUserInteraction,
-          child: SingleChildScrollView(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               mainAxisSize: MainAxisSize.min,
@@ -905,8 +904,6 @@ class _CreatePurchaseOrderDialogState extends ConsumerState<_CreatePurchaseOrder
               ],
             ),
           ),
-        ),
-      ),
       actions: [
         TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('إلغاء')),
         FilledButton(
