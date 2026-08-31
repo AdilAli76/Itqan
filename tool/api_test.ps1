@@ -812,9 +812,9 @@ if ($catA.Status -notin 200,201 -or $catB.Status -notin 200,201) {
             "متخطّى $($pay.Body.skipped) — التعديل بصفر قرارٌ صريح بالإيقاف"
 
         if ($pay.Status -eq 200) {
-            $b1 = Api GET "/customers/$($m1.Body.id)/wallet" -Token $token
-            $b2 = Api GET "/customers/$($m2.Body.id)/wallet" -Token $token
-            $b3 = Api GET "/customers/$($m3.Body.id)/wallet" -Token $token
+            $b1 = Api GET "/customers/$($m1.Body.id)" -Token $token
+            $b2 = Api GET "/customers/$($m2.Body.id)" -Token $token
+            $b3 = Api GET "/customers/$($m3.Body.id)" -Token $token
 
             Check "المنتسب العادي قبض مرتَّب فئته" `
                 ([Math]::Abs([double]$b1.Body.walletBalance - 100) -lt 0.01) "رصيده $($b1.Body.walletBalance)"
@@ -824,7 +824,7 @@ if ($catA.Status -notin 200,201 -or $catB.Status -notin 200,201) {
                 ([Math]::Abs([double]$b3.Body.walletBalance) -lt 0.01) "رصيده $($b3.Body.walletBalance)"
 
             if ($prepaid.Status -in 200,201) {
-                $bp = Api GET "/customers/$($prepaid.Body.id)/wallet" -Token $token
+                $bp = Api GET "/customers/$($prepaid.Body.id)" -Token $token
                 Check "الرصيد المدفوع مسبقاً لم يمسّه المرتَّب" `
                     ([Math]::Abs([double]$bp.Body.walletBalance) -lt 0.01) `
                     "رصيده $($bp.Body.walletBalance) — شحنُه يعني صرف مالٍ لمن دفع ماله"
@@ -838,7 +838,7 @@ if ($catA.Status -notin 200,201 -or $catB.Status -notin 200,201) {
                 ($again.Status -eq 200 -and [int]$again.Body.customersPaid -eq 0) `
                 "دُفع لـ$($again.Body.customersPaid) — المضاعفة على ألف بطاقة لا تعود"
 
-            $b1After = Api GET "/customers/$($m1.Body.id)/wallet" -Token $token
+            $b1After = Api GET "/customers/$($m1.Body.id)" -Token $token
             Check "الرصيد لم يتضاعف" `
                 ([Math]::Abs([double]$b1After.Body.walletBalance - 100) -lt 0.01) `
                 "رصيده $($b1After.Body.walletBalance) — المتوقّع 100 كما هو"
@@ -850,7 +850,7 @@ if ($catA.Status -notin 200,201 -or $catB.Status -notin 200,201) {
         }
         Check "رفع مرتب الفئة يمرّ" ($raise.Status -in 200,204) "حالة $($raise.Status)"
 
-        $b1AfterRaise = Api GET "/customers/$($m1.Body.id)/wallet" -Token $token
+        $b1AfterRaise = Api GET "/customers/$($m1.Body.id)" -Token $token
         Check "رفع المرتب لا يمسّ ما صُرف" `
             ([Math]::Abs([double]$b1AfterRaise.Body.walletBalance - 100) -lt 0.01) `
             "رصيده $($b1AfterRaise.Body.walletBalance) — تعديل الماضي يجعل الكشف لا يطابق ما قُبض"
@@ -1024,8 +1024,8 @@ if ($portalCustomer.Status -notin 200,201) {
 
         # ستّ حركات: أكثر من حدّ المسح بواحدة، فيظهر القصّ إن وقع.
         1..6 | ForEach-Object {
-            Api POST "/customers/$portalId/wallet" -Token $token -Body @{
-                kind = "topup"; amount = 10; note = "TEST-portal-$_"
+            Api POST "/customers/$portalId/wallet-adjustments" -Token $token -Body @{
+                amountDelta = 10; note = "TEST-portal-$_"
             } | Out-Null
         }
 
@@ -1778,9 +1778,18 @@ if ($siSupplier.Status -notin 200,201 -or $siProduct.Status -notin 200,201) {
                     "حالة $($dup.Status) — قبولها يُضاعف الدَّين للمورّد"
 
                 # ── الترحيل ────────────────────────────────────────────────
+                # ── الترحيل يتطلّب وحدة المحاسبة ────────────────────────
+                #
+                # يُتخطّى لا يُعدّ فشلاً على إصدارٍ لا يحملها — كما يفعل
+                # القسم ٥.٥. وفشلٌ سببه ترخيصٌ لا عطب يُدرّب قارئه على
+                # تجاهل الأحمر، فيُهمَل الفشل الحقيقي بعده.
                 $posted = Api POST "/supplier-invoices/$($siInvoice.Body.id)/post" -Token $token -Body @{}
-                Check "الفاتورة رُحّلت" ($posted.Status -eq 200 -and $posted.Body.status -eq 'posted') `
-                    "حالة $($posted.Status) — $($posted.Body.message)"
+                if ($posted.Status -eq 400 -and "$($posted.Body.message)" -match 'المحاسبة') {
+                    Skipped "ترحيل فاتورة المورّد" "وحدة المحاسبة غير مفعَّلة على هذا الإصدار"
+                } else {
+                    Check "الفاتورة رُحّلت" ($posted.Status -eq 200 -and $posted.Body.status -eq 'posted') `
+                        "حالة $($posted.Status) — $($posted.Body.message)"
+                }
 
                 if ($posted.Status -eq 200) {
                     $siJournal = Api GET "/accounting/journal" -Token $token
