@@ -83,7 +83,7 @@ git tag v1.3.0 && git push origin v1.3.0
 متغيّر بيئة، وهو ما يحذّر منه السكربت نفسه. فيبقى بيد صاحبه بعد كل نشرة:
 
 ```
-.	oolpi_test.ps1 -SiteName KineticStaging
+.	oolpi_test.ps1 -SiteName KineticStaging
 ```
 
 ويرفض `Kinetic` إلا بـ`-AllowProduction` صريحة — فهو يكتب سجلّات `TEST-`،
@@ -109,7 +109,7 @@ git tag v1.3.0 && git push origin v1.3.0
 .	ool	ime_sync.ps1 -Install
 ```
 
-مهمّة كل ساعة بحساب `SYSTEM`، تكتب في `C:\Backups\Kinetic	imesync.log`.
+مهمّة كل ساعة بحساب `SYSTEM`، تكتب في `C:\Backups\Kinetic\timesync.log`.
 
 **ولماذا يعني هذا أكثر من عدّاء نشر:** كل فاتورة وكل قيدٍ في الدفتر يحمل
 وقت هذا الخادم. وفي نظامٍ قاعدته حرمة القيد فالوقت جزءٌ من القيد — ودفترٌ
