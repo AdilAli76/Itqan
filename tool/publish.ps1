@@ -200,7 +200,8 @@ $toolOut = Join-Path $Output 'tool'
 New-Item -ItemType Directory -Path $toolOut | Out-Null
 foreach ($f in @('server_setup.ps1', 'setup_staging.ps1', 'backup.ps1',
                  'deploy_update.ps1', 'schema_check.ps1', 'api_test.ps1',
-                 'install_local.ps1', 'runner_setup.ps1', 'ci_deploy.ps1')) {
+                 'install_local.ps1', 'runner_setup.ps1', 'ci_deploy.ps1',
+                 'time_sync.ps1')) {
     $p = Join-Path $root "tool\$f"
     if (Test-Path $p) { Copy-Item $p $toolOut; Ok $f }
 }
