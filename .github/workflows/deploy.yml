@@ -29,6 +29,10 @@ on:
         description: 'تخطّي الترحيلات (نُفِّذت للتوّ)'
         type: boolean
         default: false
+      mandatory_update:
+        description: 'تحديث التطبيق إلزامي (يُستعمل حين يتغيّر عقد الـAPI)'
+        type: boolean
+        default: false
 
 # نشرتان معاً على خادم واحد تتنازعان نفس الملفات المقفولة. الطابور لا
 # الإلغاء: نشرةٌ تُلغى في منتصفها تترك ملفات نسختين مختلطة.
@@ -66,3 +70,4 @@ jobs:
           -Target "${{ inputs.target }}"
           -Token "${{ github.token }}"
           -SkipDb:$${{ inputs.skip_db }}
+          -MandatoryUpdate:$${{ inputs.mandatory_update }}

@@ -27,7 +27,10 @@ param(
     [Parameter(Mandatory = $true)] [string]$Tag,
     [Parameter(Mandatory = $true)] [ValidateSet('staging', 'production')] [string]$Target,
     [Parameter(Mandatory = $true)] [string]$Token,
-    [switch]$SkipDb
+    [switch]$SkipDb,
+    # يجعل شريط التحديث في التطبيق إلزامياً — للحالة التي يتغيّر فيها عقد
+    # الـAPI فتصير النسخة القديمة عاطلة لا متأخّرة.
+    [switch]$MandatoryUpdate
 )
 
 $ErrorActionPreference = 'Stop'
@@ -139,7 +142,104 @@ if (-not (Test-Path $update)) { throw "deploy_update.ps1 غير موجود في 
 #
 # ولا سرّ يُخزَّن على الخادم ولا في GitHub مقابل فحصٍ يُشغَّل بأمر واحد.
 
-# ── 5. الملخّص ──────────────────────────────────────────────────────────
+# ── 5. نسخة الأندرويد ونقطة التحديث ─────────────────────────────────────
+#
+# الحلقة كانت مقطوعة في وصلة واحدة: يُبنى APK آلياً، ويُرفَق آلياً، ثم
+# ينتظر أن يُكتب رقمُه ورابطه بيدٍ في appsettings — فيبقى موظّفوك على نسخة
+# قديمة لا لأن التحديث غير موجود، بل لأن أحداً لم يُخبرهم.
+#
+# والملف يُخدَم من نطاقك لا من GitHub: المستودع خاصّ، فزرّ «تنزيل» في
+# التطبيق كان سيقود الموظّف إلى صفحة تطلب حساباً لا يملكه.
+#
+# ويأتي **بعد** الترقية: deploy_update ينسخ backend فوق القديم، وما يُوضع
+# قبله في wwwroot قد يُدهَس.
+Step 5 'نسخة الأندرويد ونقطة التحديث'
+
+$apk = $rel.assets | Where-Object { $_.name -like 'itqan-*.apk' } | Select-Object -First 1
+if (-not $apk) {
+    Warn 'لا حزمة أندرويد في هذا الإصدار — تُخطّى نقطة التحديث.'
+}
+else {
+    $version = $Tag -replace '^v', ''
+
+    # الاسم يُشتقّ من ارتباط الموقع لا يُفترَض: التجربة تُعطي رابط التجربة
+    # والإنتاج رابط الإنتاج، بلا أن يُكتب أيّهما هنا.
+    $hostName = $null
+    try {
+        Import-Module WebAdministration -ErrorAction Stop
+        $hostName = (Get-WebBinding -Name $site -Protocol https -ErrorAction SilentlyContinue |
+                     ForEach-Object { ($_.bindingInformation -split ':')[2] } |
+                     Where-Object { $_ } | Select-Object -First 1)
+        if (-not $hostName) {
+            $hostName = (Get-WebBinding -Name $site -ErrorAction SilentlyContinue |
+                         ForEach-Object { ($_.bindingInformation -split ':')[2] } |
+                         Where-Object { $_ } | Select-Object -First 1)
+        }
+    } catch { }
+
+    if (-not $hostName) {
+        Warn 'تعذّر اشتقاق نطاق الموقع — تُخطّى نقطة التحديث.'
+    }
+    else {
+        $appDir = Join-Path $root 'backend\wwwroot\app'
+        New-Item -ItemType Directory -Force -Path $appDir | Out-Null
+        $apkPath = Join-Path $appDir $apk.name
+
+        Invoke-WebRequest -Headers $bin -Uri $apk.url -OutFile $apkPath -UseBasicParsing
+        Ok "$($apk.name)  ($([math]::Round((Get-Item $apkPath).Length / 1MB, 1)) ميغابايت)"
+
+        # آخر ثلاث نسخ تبقى — كما تفعل publish.ps1 بالحزم. ولا تُحذف كلها:
+        # جهازٌ فتح رابط النسخة السابقة ولم يُكمل التنزيل يجدها.
+        Get-ChildItem -Path $appDir -Filter 'itqan-*.apk' |
+            Sort-Object LastWriteTime -Descending | Select-Object -Skip 3 |
+            ForEach-Object { Remove-Item $_.FullName -Force -ErrorAction SilentlyContinue }
+
+        $downloadUrl = "https://$hostName/app/$($apk.name)"
+
+        # ملف الأسرار يُنسخ قبل التعديل: خطأٌ في كتابته يُسقط الموقع كلّه —
+        # سلسلة الاتصال ومفتاح JWT فيه.
+        $settingsPath = Join-Path $root 'backend\appsettings.Production.json'
+        $settingsBackup = "$settingsPath.before-appversion"
+        Copy-Item $settingsPath $settingsBackup -Force
+
+        try {
+            $cfg = Get-Content $settingsPath -Raw | ConvertFrom-Json
+            if (-not $cfg.AppVersion) {
+                $cfg | Add-Member -NotePropertyName AppVersion -NotePropertyValue ([pscustomobject]@{}) -Force
+            }
+            $cfg.AppVersion | Add-Member -NotePropertyName Latest -NotePropertyValue $version -Force
+            $cfg.AppVersion | Add-Member -NotePropertyName AndroidDownloadUrl -NotePropertyValue $downloadUrl -Force
+            $cfg.AppVersion | Add-Member -NotePropertyName Mandatory -NotePropertyValue ([bool]$MandatoryUpdate) -Force
+
+            $cfg | ConvertTo-Json -Depth 20 | Set-Content $settingsPath -Encoding UTF8
+
+            # يُقرأ بعد الكتابة: ConvertTo-Json قد يُفسد بنيةً عميقة، وملفٌ
+            # تالف لا يظهر خطؤه إلا حين يفشل الموقع في الإقلاع.
+            $check = Get-Content $settingsPath -Raw | ConvertFrom-Json
+            if ([string]::IsNullOrWhiteSpace($check.Jwt.Key) -or
+                [string]::IsNullOrWhiteSpace($check.ConnectionStrings.Default)) {
+                throw 'الملف المكتوب ناقص مفتاح JWT أو سلسلة الاتصال.'
+            }
+            Ok "نقطة التحديث: $version — $downloadUrl"
+            if ($MandatoryUpdate) { Warn 'التحديث معلَّم إلزامياً.' }
+        }
+        catch {
+            Copy-Item $settingsBackup $settingsPath -Force
+            throw "تعذّر تحديث AppVersion، وأُعيد ملف الأسرار كما كان: $($_.Exception.Message)"
+        }
+
+        # المجمّع يُعاد تشغيله: الإعدادات تُقرأ عند الإقلاع، فبلا هذا يبقى
+        # الخادم يُعلن النسخة السابقة حتى إعادة تشغيلٍ عارضة.
+        try {
+            Restart-WebAppPool -Name $pool -ErrorAction Stop
+            Ok "أُعيد تشغيل $pool"
+        } catch {
+            Warn "تعذّرت إعادة تشغيل $pool — أعِدها يدوياً لتُقرأ نقطة التحديث."
+        }
+    }
+}
+
+# ── 6. الملخّص ──────────────────────────────────────────────────────────
 if ($env:GITHUB_STEP_SUMMARY) {
     $lines = @(
         "## $Target",
