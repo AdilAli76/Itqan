@@ -1,5 +1,6 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import '../../../shared/widgets/adaptive_form_dialog.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
@@ -375,9 +376,19 @@ class _CategoryDialogState extends ConsumerState<_CategoryDialog> {
   Widget build(BuildContext context) {
     final isNew = widget.category == null;
 
-    return AlertDialog(
-      title: Text(isNew ? 'فئة جديدة' : 'تعديل الفئة'),
-      content: EnterAdvancesFocus(
+    return AdaptiveFormDialog(
+      title: isNew ? 'فئة جديدة' : 'تعديل الفئة',
+      actions: [
+        TextButton(
+          onPressed: _saving ? null : () => Navigator.pop(context),
+          child: const Text('تراجع'),
+        ),
+        FilledButton(
+          onPressed: _saving ? null : _save,
+          child: Text(_saving ? 'جارٍ الحفظ…' : 'حفظ'),
+        ),
+      ],
+      body: EnterAdvancesFocus(
         child: SizedBox(
           width: 420,
           child: Column(
@@ -432,16 +443,6 @@ class _CategoryDialogState extends ConsumerState<_CategoryDialog> {
           ),
         ),
       ),
-      actions: [
-        TextButton(
-          onPressed: _saving ? null : () => Navigator.pop(context),
-          child: const Text('تراجع'),
-        ),
-        FilledButton(
-          onPressed: _saving ? null : _save,
-          child: Text(_saving ? 'جارٍ الحفظ…' : 'حفظ'),
-        ),
-      ],
     );
   }
 
@@ -761,9 +762,19 @@ class _AdvanceDialogState extends ConsumerState<_AdvanceDialog> {
     // الطريق الصحيح حين يكبر العدد.
     final customers = ref.watch(customersProvider).valueOrNull?.items ?? const [];
 
-    return AlertDialog(
-      title: const Text('سلفة جديدة'),
-      content: EnterAdvancesFocus(
+    return AdaptiveFormDialog(
+      title: 'سلفة جديدة',
+      actions: [
+        TextButton(
+          onPressed: _saving ? null : () => Navigator.pop(context),
+          child: const Text('تراجع'),
+        ),
+        FilledButton(
+          onPressed: _saving ? null : _save,
+          child: Text(_saving ? 'جارٍ الصرف…' : 'صرف السلفة'),
+        ),
+      ],
+      body: EnterAdvancesFocus(
         child: SizedBox(
           width: 440,
           child: SingleChildScrollView(
@@ -816,16 +827,6 @@ class _AdvanceDialogState extends ConsumerState<_AdvanceDialog> {
           ),
         ),
       ),
-      actions: [
-        TextButton(
-          onPressed: _saving ? null : () => Navigator.pop(context),
-          child: const Text('تراجع'),
-        ),
-        FilledButton(
-          onPressed: _saving ? null : _save,
-          child: Text(_saving ? 'جارٍ الصرف…' : 'صرف السلفة'),
-        ),
-      ],
     );
   }
 

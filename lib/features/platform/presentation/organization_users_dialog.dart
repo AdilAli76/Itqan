@@ -1,5 +1,6 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import '../../../shared/widgets/adaptive_form_dialog.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 // intl يصدّر TextDirection خاصّاً به بثوابت أخرى (LTR/RTL) فيحجب نوع
@@ -294,9 +295,19 @@ class _EditUserDialogState extends ConsumerState<_EditUserDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('تصحيح بيانات الحساب'),
-      content: EnterAdvancesFocus(
+    return AdaptiveFormDialog(
+      title: 'تصحيح بيانات الحساب',
+      actions: [
+        TextButton(
+          onPressed: _saving ? null : () => Navigator.pop(context),
+          child: const Text('تراجع'),
+        ),
+        FilledButton(
+          onPressed: _saving ? null : _save,
+          child: Text(_saving ? 'جارٍ الحفظ…' : 'حفظ'),
+        ),
+      ],
+      body: EnterAdvancesFocus(
         child: SizedBox(
           width: 420,
           child: Column(
@@ -335,16 +346,6 @@ class _EditUserDialogState extends ConsumerState<_EditUserDialog> {
           ),
         ),
       ),
-      actions: [
-        TextButton(
-          onPressed: _saving ? null : () => Navigator.pop(context),
-          child: const Text('تراجع'),
-        ),
-        FilledButton(
-          onPressed: _saving ? null : _save,
-          child: Text(_saving ? 'جارٍ الحفظ…' : 'حفظ'),
-        ),
-      ],
     );
   }
 

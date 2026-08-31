@@ -1,5 +1,6 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import '../../../shared/widgets/adaptive_form_dialog.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -38,11 +39,20 @@ class _BulkCardsDialogState extends ConsumerState<BulkCardsDialog> {
 
     if (_issued != null) return _resultView();
 
-    return AlertDialog(
-      title: const Text('إصدار بطاقات جماعي'),
-      content: SizedBox(
-        width: 460,
-        child: Column(
+    return AdaptiveFormDialog(
+      title: 'إصدار بطاقات جماعي',
+      maxWidth: 460,
+      actions: [
+        TextButton(
+          onPressed: _busy ? null : () => Navigator.pop(context),
+          child: const Text('تراجع'),
+        ),
+        FilledButton(
+          onPressed: (_busy || _categoryId == null) ? null : _issue,
+          child: Text(_busy ? 'جارٍ الإصدار…' : 'إصدار'),
+        ),
+      ],
+      body: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -106,17 +116,6 @@ class _BulkCardsDialogState extends ConsumerState<BulkCardsDialog> {
             ],
           ],
         ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: _busy ? null : () => Navigator.pop(context),
-          child: const Text('تراجع'),
-        ),
-        FilledButton(
-          onPressed: (_busy || _categoryId == null) ? null : _issue,
-          child: Text(_busy ? 'جارٍ الإصدار…' : 'إصدار'),
-        ),
-      ],
     );
   }
 

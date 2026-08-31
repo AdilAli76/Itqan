@@ -508,12 +508,35 @@ class _ReceiveExpiryDialogState extends State<_ReceiveExpiryDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('الكمية الواصلة'),
-      content: SizedBox(
-        width: 400,
-        child: SingleChildScrollView(
-          child: Column(
+    return AdaptiveFormDialog(
+      title: 'الكمية الواصلة',
+      maxWidth: 400,
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('إلغاء')),
+        FilledButton(
+          onPressed: () {
+            final lines = widget.items.map((item) {
+              final productId = item['productId'] as String;
+              return {
+                'productId': productId,
+                'quantity': double.tryParse(_qtyControllers[productId]!.text.trim()),
+                'batchNumber': _batchControllers[productId]!.text.trim().isEmpty
+                    ? null
+                    : _batchControllers[productId]!.text.trim(),
+                'expiryDate': _expiryDates[productId]?.toIso8601String(),
+              };
+            }).toList();
+            Navigator.pop(context, {
+              'lines': lines,
+              'supplierNoteNumber':
+                  _noteController.text.trim().isEmpty ? null : _noteController.text.trim(),
+              'receivedOn': _receivedOn.toIso8601String(),
+            });
+          },
+          child: const Text('متابعة الاستلام'),
+        ),
+      ],
+      body: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -606,33 +629,6 @@ class _ReceiveExpiryDialogState extends State<_ReceiveExpiryDialog> {
               }),
             ],
           ),
-        ),
-      ),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: const Text('إلغاء')),
-        FilledButton(
-          onPressed: () {
-            final lines = widget.items.map((item) {
-              final productId = item['productId'] as String;
-              return {
-                'productId': productId,
-                'quantity': double.tryParse(_qtyControllers[productId]!.text.trim()),
-                'batchNumber': _batchControllers[productId]!.text.trim().isEmpty
-                    ? null
-                    : _batchControllers[productId]!.text.trim(),
-                'expiryDate': _expiryDates[productId]?.toIso8601String(),
-              };
-            }).toList();
-            Navigator.pop(context, {
-              'lines': lines,
-              'supplierNoteNumber':
-                  _noteController.text.trim().isEmpty ? null : _noteController.text.trim(),
-              'receivedOn': _receivedOn.toIso8601String(),
-            });
-          },
-          child: const Text('متابعة الاستلام'),
-        ),
-      ],
     );
   }
 }
@@ -1049,11 +1045,22 @@ class _QuickProductDialogState extends State<_QuickProductDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('صنف جديد'),
-      content: SizedBox(
-        width: 420,
-        child: Column(
+    return AdaptiveFormDialog(
+      title: 'صنف جديد',
+      maxWidth: 420,
+      actions: [
+        TextButton(
+          onPressed: _saving ? null : () => Navigator.pop(context),
+          child: const Text('إلغاء'),
+        ),
+        FilledButton(
+          onPressed: _saving ? null : _save,
+          child: _saving
+              ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+              : const Text('إنشاء وإضافة'),
+        ),
+      ],
+      body: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             TextField(
@@ -1100,19 +1107,6 @@ class _QuickProductDialogState extends State<_QuickProductDialog> {
             ],
           ],
         ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: _saving ? null : () => Navigator.pop(context),
-          child: const Text('إلغاء'),
-        ),
-        FilledButton(
-          onPressed: _saving ? null : _save,
-          child: _saving
-              ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-              : const Text('إنشاء وإضافة'),
-        ),
-      ],
     );
   }
 }
@@ -1370,12 +1364,14 @@ class _ReturnToSupplierDialogState extends State<_ReturnToSupplierDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('إرجاع إلى المورّد'),
-      content: SizedBox(
-        width: 460,
-        child: SingleChildScrollView(
-          child: Column(
+    return AdaptiveFormDialog(
+      title: 'إرجاع إلى المورّد',
+      maxWidth: 460,
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('إلغاء')),
+        FilledButton(onPressed: _submit, child: const Text('تأكيد الإرجاع')),
+      ],
+      body: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -1427,12 +1423,6 @@ class _ReturnToSupplierDialogState extends State<_ReturnToSupplierDialog> {
               ],
             ],
           ),
-        ),
-      ),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: const Text('إلغاء')),
-        FilledButton(onPressed: _submit, child: const Text('تأكيد الإرجاع')),
-      ],
     );
   }
 

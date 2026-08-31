@@ -482,9 +482,18 @@ class _ResetPasswordDialogState extends State<_ResetPasswordDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      title: Text('كلمة مرور جديدة: ${widget.user['fullName']}'),
-      content: Form(
+    return AdaptiveFormDialog(
+      title: 'كلمة مرور جديدة: ${widget.user['fullName']}',
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('إلغاء')),
+        FilledButton(
+          onPressed: _saving ? null : _submit,
+          child: _saving
+              ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+              : const Text('حفظ'),
+        ),
+      ],
+      body: Form(
         key: _formKey,
         child: SizedBox(
           width: 320,
@@ -500,15 +509,6 @@ class _ResetPasswordDialogState extends State<_ResetPasswordDialog> {
           ),
         ),
       ),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('إلغاء')),
-        FilledButton(
-          onPressed: _saving ? null : _submit,
-          child: _saving
-              ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-              : const Text('حفظ'),
-        ),
-      ],
     );
   }
 

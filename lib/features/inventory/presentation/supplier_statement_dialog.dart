@@ -1,5 +1,6 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import '../../../shared/widgets/adaptive_form_dialog.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
@@ -198,12 +199,19 @@ class _PayDialogState extends ConsumerState<_PayDialog> {
   Widget build(BuildContext context) {
     final branchesAsync = ref.watch(branchesProvider);
 
-    return AlertDialog(
-      title: const Text('تسجيل سداد'),
-      content: SizedBox(
-        width: 400,
-        child: SingleChildScrollView(
-          child: Column(
+    return AdaptiveFormDialog(
+      title: 'تسجيل سداد',
+      maxWidth: 400,
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('إلغاء')),
+        FilledButton(
+          onPressed: _saving ? null : _submit,
+          child: _saving
+              ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+              : const Text('تسجيل'),
+        ),
+      ],
+      body: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -287,17 +295,6 @@ class _PayDialogState extends ConsumerState<_PayDialog> {
               ],
             ],
           ),
-        ),
-      ),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: const Text('إلغاء')),
-        FilledButton(
-          onPressed: _saving ? null : _submit,
-          child: _saving
-              ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-              : const Text('تسجيل'),
-        ),
-      ],
     );
   }
 

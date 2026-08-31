@@ -1,5 +1,6 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import '../../../shared/widgets/adaptive_form_dialog.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/auth/current_user.dart';
 import '../../../core/feedback/pos_sounds.dart';
@@ -738,11 +739,13 @@ class _WalletCustomerSearchDialogState extends ConsumerState<_WalletCustomerSear
     final symbol = ref.watch(brandingProvider).valueOrNull?.currencySymbol ?? 'د.ل';
     final resultsAsync = ref.watch(posCustomerResultsProvider);
 
-    return AlertDialog(
-      title: const Text('بحث عن صاحب رصيد'),
-      content: SizedBox(
-        width: 420,
-        child: Column(
+    return AdaptiveFormDialog(
+      title: 'بحث عن صاحب رصيد',
+      maxWidth: 420,
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('إلغاء')),
+      ],
+      body: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             TextField(
@@ -789,10 +792,6 @@ class _WalletCustomerSearchDialogState extends ConsumerState<_WalletCustomerSear
             ),
           ],
         ),
-      ),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: const Text('إلغاء')),
-      ],
     );
   }
 }
@@ -886,11 +885,24 @@ class _CashTenderedDialogState extends State<_CashTenderedDialog> {
   Widget build(BuildContext context) {
     final short = _text.isNotEmpty && _change < 0;
 
-    return AlertDialog(
-      title: const Text('المستلَم من الزبون'),
-      content: SizedBox(
-        width: 340,
-        child: Column(
+    return AdaptiveFormDialog(
+      title: 'المستلَم من الزبون',
+      maxWidth: 340,
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('تراجع')),
+        // «بالضبط» تمرّ بلا رقم: كاشيرٌ يستلم المبلغ تماماً لا يكتبه مرّتين.
+        TextButton(
+          onPressed: () => Navigator.pop(context, -1.0),
+          child: const Text('بالضبط'),
+        ),
+        FilledButton(
+          // الناقص يُمنع: بيعٌ نقدي بمالٍ لم يُستلَم كلّه ليس بيعاً نقدياً،
+          // وتسجيلُه كذلك يُخفي عجزاً في الدرج.
+          onPressed: (_text.isEmpty || short) ? null : () => Navigator.pop(context, _tendered),
+          child: const Text('تأكيد'),
+        ),
+      ],
+      body: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             Row(
@@ -947,21 +959,6 @@ class _CashTenderedDialogState extends State<_CashTenderedDialog> {
               ),
           ],
         ),
-      ),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: const Text('تراجع')),
-        // «بالضبط» تمرّ بلا رقم: كاشيرٌ يستلم المبلغ تماماً لا يكتبه مرّتين.
-        TextButton(
-          onPressed: () => Navigator.pop(context, -1.0),
-          child: const Text('بالضبط'),
-        ),
-        FilledButton(
-          // الناقص يُمنع: بيعٌ نقدي بمالٍ لم يُستلَم كلّه ليس بيعاً نقدياً،
-          // وتسجيلُه كذلك يُخفي عجزاً في الدرج.
-          onPressed: (_text.isEmpty || short) ? null : () => Navigator.pop(context, _tendered),
-          child: const Text('تأكيد'),
-        ),
-      ],
     );
   }
 }

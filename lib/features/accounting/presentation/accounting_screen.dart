@@ -1,5 +1,6 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import '../../../shared/widgets/adaptive_form_dialog.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
@@ -450,12 +451,19 @@ class _ManualEntryDialogState extends ConsumerState<_ManualEntryDialog> {
     final diff = totalDebit - totalCredit;
     final balanced = diff.abs() < 0.01 && totalDebit > 0;
 
-    return AlertDialog(
-      title: const Text('قيد يدوي'),
-      content: SizedBox(
-        width: 620,
-        child: SingleChildScrollView(
-          child: Column(
+    return AdaptiveFormDialog(
+      title: 'قيد يدوي',
+      maxWidth: 620,
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('إلغاء')),
+        FilledButton(
+          onPressed: _saving || !balanced ? null : _submit,
+          child: _saving
+              ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+              : const Text('ترحيل'),
+        ),
+      ],
+      body: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -576,17 +584,6 @@ class _ManualEntryDialogState extends ConsumerState<_ManualEntryDialog> {
               ],
             ],
           ),
-        ),
-      ),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: const Text('إلغاء')),
-        FilledButton(
-          onPressed: _saving || !balanced ? null : _submit,
-          child: _saving
-              ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-              : const Text('ترحيل'),
-        ),
-      ],
     );
   }
 

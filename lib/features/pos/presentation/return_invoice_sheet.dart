@@ -1,5 +1,6 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import '../../../shared/widgets/adaptive_form_dialog.dart';
 import 'package:intl/intl.dart';
 
 import '../../../core/network/api_client.dart';
@@ -106,12 +107,28 @@ class _ReturnInvoiceSheetState extends State<ReturnInvoiceSheet> {
   Widget build(BuildContext context) {
     final invoice = _invoice;
 
-    return AlertDialog(
-      title: const Text('إرجاع فاتورة'),
-      content: SizedBox(
-        width: 420,
-        child: SingleChildScrollView(
-          child: Column(
+    return AdaptiveFormDialog(
+      title: 'إرجاع فاتورة',
+      maxWidth: 420,
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('إلغاء')),
+        if (invoice == null)
+          FilledButton(
+            onPressed: _busy ? null : _search,
+            child: _busy
+                ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                : const Text('بحث'),
+          )
+        else
+          FilledButton(
+            onPressed: _busy ? null : _refund,
+            style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
+            child: _busy
+                ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                : const Text('تأكيد الإرجاع'),
+          ),
+      ],
+      body: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -173,26 +190,6 @@ class _ReturnInvoiceSheetState extends State<ReturnInvoiceSheet> {
               ],
             ],
           ),
-        ),
-      ),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: const Text('إلغاء')),
-        if (invoice == null)
-          FilledButton(
-            onPressed: _busy ? null : _search,
-            child: _busy
-                ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-                : const Text('بحث'),
-          )
-        else
-          FilledButton(
-            onPressed: _busy ? null : _refund,
-            style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
-            child: _busy
-                ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-                : const Text('تأكيد الإرجاع'),
-          ),
-      ],
     );
   }
 

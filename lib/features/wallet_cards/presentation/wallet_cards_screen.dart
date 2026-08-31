@@ -582,21 +582,19 @@ class _ReasonDialogState extends State<_ReasonDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('سبب الحظر'),
-      content: SizedBox(
-        width: 320,
-        child: TextField(
-          controller: _controller,
-          autofocus: true,
-          decoration: const InputDecoration(labelText: 'السبب (اختياري)', hintText: 'مثال: بلاغ فقدان'),
-        ),
-      ),
+    return AdaptiveFormDialog(
+      title: 'سبب الحظر',
+      maxWidth: 320,
       actions: [
         TextButton(onPressed: () => Navigator.pop(context), child: const Text('إلغاء')),
         FilledButton(
             onPressed: () => Navigator.pop(context, _controller.text.trim()), child: const Text('حظر')),
       ],
+      body: TextField(
+          controller: _controller,
+          autofocus: true,
+          decoration: const InputDecoration(labelText: 'السبب (اختياري)', hintText: 'مثال: بلاغ فقدان'),
+        ),
     );
   }
 }
@@ -963,12 +961,14 @@ class _CardModeDialogState extends State<_CardModeDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('نمط التحقّق'),
-      content: SizedBox(
-        width: 380,
-        child: SingleChildScrollView(
-          child: Column(
+    return AdaptiveFormDialog(
+      title: 'نمط التحقّق',
+      maxWidth: 380,
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('إلغاء')),
+        FilledButton(onPressed: _submit, child: const Text('حفظ')),
+      ],
+      body: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -1017,12 +1017,6 @@ class _CardModeDialogState extends State<_CardModeDialog> {
               ],
             ],
           ),
-        ),
-      ),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: const Text('إلغاء')),
-        FilledButton(onPressed: _submit, child: const Text('حفظ')),
-      ],
     );
   }
 

@@ -1,5 +1,6 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import '../../../shared/widgets/adaptive_form_dialog.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/auth/current_user.dart';
 import '../../../core/network/api_client.dart';
@@ -172,11 +173,19 @@ class _EditSupportInfoDialogState extends State<_EditSupportInfoDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('تعديل بيانات الدعم الفني'),
-      content: SizedBox(
-        width: 380,
-        child: Form(
+    return AdaptiveFormDialog(
+      title: 'تعديل بيانات الدعم الفني',
+      maxWidth: 380,
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('إلغاء')),
+        FilledButton(
+          onPressed: _saving ? null : _submit,
+          child: _saving
+              ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+              : const Text('حفظ'),
+        ),
+      ],
+      body: Form(
           key: _formKey,
           // onUserInteraction بدل الوضع الافتراضي (عند الإرسال فقط): الخطأ
           // يظهر أثناء الكتابة لا بعد الضغط على «حفظ»، فيصحّحه المستخدم في
@@ -244,16 +253,6 @@ class _EditSupportInfoDialogState extends State<_EditSupportInfoDialog> {
             ),
           ),
         ),
-      ),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('إلغاء')),
-        FilledButton(
-          onPressed: _saving ? null : _submit,
-          child: _saving
-              ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-              : const Text('حفظ'),
-        ),
-      ],
     );
   }
 

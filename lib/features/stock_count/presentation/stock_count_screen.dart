@@ -1,5 +1,6 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import '../../../shared/widgets/adaptive_form_dialog.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../../../core/network/api_client.dart';
@@ -645,11 +646,17 @@ class _RecountReasonDialogState extends State<_RecountReasonDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('سبب إعادة العدّ'),
-      content: SizedBox(
-        width: 360,
-        child: Column(
+    return AdaptiveFormDialog(
+      title: 'سبب إعادة العدّ',
+      maxWidth: 360,
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('إلغاء')),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, _controller.text),
+          child: const Text('إعادة العدّ'),
+        ),
+      ],
+      body: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -671,14 +678,6 @@ class _RecountReasonDialogState extends State<_RecountReasonDialog> {
             ),
           ],
         ),
-      ),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: const Text('إلغاء')),
-        FilledButton(
-          onPressed: () => Navigator.pop(context, _controller.text),
-          child: const Text('إعادة العدّ'),
-        ),
-      ],
     );
   }
 }

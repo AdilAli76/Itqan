@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:dio/dio.dart';
 import 'package:flutter/gestures.dart' show PointerDeviceKind;
 import 'package:flutter/material.dart';
+import '../../../shared/widgets/adaptive_form_dialog.dart';
 import 'package:flutter/services.dart' show KeyDownEvent, KeyEvent, LogicalKeyboardKey;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/auth/current_user.dart';
@@ -2305,12 +2306,17 @@ class _PrescriptionDialogState extends State<_PrescriptionDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('وصفة طبية مطلوبة'),
-      content: SizedBox(
-        width: 460,
-        child: SingleChildScrollView(
-          child: Form(
+    return AdaptiveFormDialog(
+      title: 'وصفة طبية مطلوبة',
+      maxWidth: 460,
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('إلغاء البيع'),
+        ),
+        FilledButton(onPressed: _submit, child: const Text('تسجيل الوصفة وإتمام البيع')),
+      ],
+      body: Form(
             key: _formKey,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -2406,15 +2412,6 @@ class _PrescriptionDialogState extends State<_PrescriptionDialog> {
               ],
             ),
           ),
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('إلغاء البيع'),
-        ),
-        FilledButton(onPressed: _submit, child: const Text('تسجيل الوصفة وإتمام البيع')),
-      ],
     );
   }
 }

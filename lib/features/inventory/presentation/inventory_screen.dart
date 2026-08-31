@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import '../../../shared/widgets/adaptive_form_dialog.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../../../core/network/api_client.dart';
@@ -472,11 +473,19 @@ class _ProductFormDialogState extends ConsumerState<_ProductFormDialog> {
     final categoriesAsync = ref.watch(categoriesProvider);
     final suppliersAsync = ref.watch(suppliersProvider);
 
-    return AlertDialog(
-      title: Text(_isEdit ? 'تعديل صنف' : 'إضافة صنف جديد'),
-      content: SizedBox(
-        width: 420,
-        child: Form(
+    return AdaptiveFormDialog(
+      title: _isEdit ? 'تعديل صنف' : 'إضافة صنف جديد',
+      maxWidth: 420,
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('إلغاء')),
+        FilledButton(
+          onPressed: _saving ? null : _submit,
+          child: _saving
+              ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+              : const Text('حفظ'),
+        ),
+      ],
+      body: Form(
           key: _formKey,
           child: SingleChildScrollView(
             child: Column(
@@ -698,16 +707,6 @@ class _ProductFormDialogState extends ConsumerState<_ProductFormDialog> {
             ),
           ),
         ),
-      ),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('إلغاء')),
-        FilledButton(
-          onPressed: _saving ? null : _submit,
-          child: _saving
-              ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-              : const Text('حفظ'),
-        ),
-      ],
     );
   }
 
@@ -836,9 +835,18 @@ class _StockAdjustmentDialogState extends State<_StockAdjustmentDialog> {
   Widget build(BuildContext context) {
     final trackExpiry = widget.product['trackExpiry'] as bool? ?? false;
 
-    return AlertDialog(
-      title: Text('تعديل كمية: ${widget.product['name']}'),
-      content: Form(
+    return AdaptiveFormDialog(
+      title: 'تعديل كمية: ${widget.product['name']}',
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('إلغاء')),
+        FilledButton(
+          onPressed: _saving ? null : _submit,
+          child: _saving
+              ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+              : const Text('حفظ'),
+        ),
+      ],
+      body: Form(
         key: _formKey,
         child: SizedBox(
           width: 360,
@@ -908,15 +916,6 @@ class _StockAdjustmentDialogState extends State<_StockAdjustmentDialog> {
           ),
         ),
       ),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('إلغاء')),
-        FilledButton(
-          onPressed: _saving ? null : _submit,
-          child: _saving
-              ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-              : const Text('حفظ'),
-        ),
-      ],
     );
   }
 
@@ -1104,11 +1103,17 @@ class _LockReasonDialogState extends State<_LockReasonDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('سبب الإيقاف'),
-      content: SizedBox(
-        width: 360,
-        child: Column(
+    return AdaptiveFormDialog(
+      title: 'سبب الإيقاف',
+      maxWidth: 360,
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('إلغاء')),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, _controller.text),
+          child: const Text('إيقاف'),
+        ),
+      ],
+      body: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -1129,14 +1134,6 @@ class _LockReasonDialogState extends State<_LockReasonDialog> {
             ),
           ],
         ),
-      ),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: const Text('إلغاء')),
-        FilledButton(
-          onPressed: () => Navigator.pop(context, _controller.text),
-          child: const Text('إيقاف'),
-        ),
-      ],
     );
   }
 }
@@ -1355,9 +1352,18 @@ class _SupplierFormDialogState extends State<_SupplierFormDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      title: Text(_isEdit ? 'تعديل مورد' : 'إضافة مورد جديد'),
-      content: Form(
+    return AdaptiveFormDialog(
+      title: _isEdit ? 'تعديل مورد' : 'إضافة مورد جديد',
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('إلغاء')),
+        FilledButton(
+          onPressed: _saving ? null : _submit,
+          child: _saving
+              ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+              : const Text('حفظ'),
+        ),
+      ],
+      body: Form(
         key: _formKey,
         child: SizedBox(
           width: 360,
@@ -1400,15 +1406,6 @@ class _SupplierFormDialogState extends State<_SupplierFormDialog> {
           ),
         ),
       ),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('إلغاء')),
-        FilledButton(
-          onPressed: _saving ? null : _submit,
-          child: _saving
-              ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-              : const Text('حفظ'),
-        ),
-      ],
     );
   }
 

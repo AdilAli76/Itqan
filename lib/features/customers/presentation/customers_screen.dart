@@ -700,9 +700,18 @@ class _WalletAdjustmentDialogState extends State<_WalletAdjustmentDialog> {
   Widget build(BuildContext context) {
     final balance = (widget.customer['walletBalance'] as num?)?.toDouble() ?? 0;
 
-    return AlertDialog(
-      title: Text('رصيد المحفظة: ${widget.customer['fullName']}'),
-      content: Form(
+    return AdaptiveFormDialog(
+      title: 'رصيد المحفظة: ${widget.customer['fullName']}',
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('إلغاء')),
+        FilledButton(
+          onPressed: _saving ? null : _submit,
+          child: _saving
+              ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+              : const Text('حفظ'),
+        ),
+      ],
+      body: Form(
         key: _formKey,
         child: SizedBox(
           width: 340,
@@ -740,15 +749,6 @@ class _WalletAdjustmentDialogState extends State<_WalletAdjustmentDialog> {
           ),
         ),
       ),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('إلغاء')),
-        FilledButton(
-          onPressed: _saving ? null : _submit,
-          child: _saving
-              ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-              : const Text('حفظ'),
-        ),
-      ],
     );
   }
 
@@ -871,11 +871,19 @@ class _SponsorFormDialogState extends State<_SponsorFormDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('جهة ممولة جديدة'),
-      content: SizedBox(
-        width: 340,
-        child: Column(
+    return AdaptiveFormDialog(
+      title: 'جهة ممولة جديدة',
+      maxWidth: 340,
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('إلغاء')),
+        FilledButton(
+          onPressed: _saving ? null : _submit,
+          child: _saving
+              ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+              : const Text('حفظ'),
+        ),
+      ],
+      body: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -896,16 +904,6 @@ class _SponsorFormDialogState extends State<_SponsorFormDialog> {
             ],
           ],
         ),
-      ),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: const Text('إلغاء')),
-        FilledButton(
-          onPressed: _saving ? null : _submit,
-          child: _saving
-              ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-              : const Text('حفظ'),
-        ),
-      ],
     );
   }
 }
