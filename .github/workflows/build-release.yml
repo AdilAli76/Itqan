@@ -66,7 +66,23 @@ jobs:
             exit 1
           fi
           KS="$RUNNER_TEMP/itqan-release.jks"
-          echo "$KEYSTORE_B64" | base64 -d > "$KS"
+
+          # الفراغات تُزال قبل فكّ الترميز: القيمة تُلصَق يدوياً في صفحة
+          # الأسرار، فتحمل سطراً جديداً أو مسافةً في آخرها. و«base64 -d»
+          # صارم فيفشل بـ«invalid input» بلا أن يقول أين — وقع فعلاً.
+          printf '%s' "$KEYSTORE_B64" | tr -d '[:space:]' | base64 -d > "$KS" || {
+            echo "::error::تعذّر فكّ ترميز المفتاح. تأكّد أن ANDROID_KEYSTORE_BASE64 هو ناتج ToBase64String كاملاً بلا قصّ."
+            exit 1
+          }
+
+          # الحجم يُفحَص: فكُّ ترميزٍ لنصٍّ مقصوص «ينجح» ويُنتج ملفاً تالفاً،
+          # فيفشل Gradle برسالة عن كلمة مرور خاطئة — وتُطارَد كلمةٌ سليمة.
+          SIZE=$(stat -c%s "$KS")
+          echo "حجم المفتاح: $SIZE بايت"
+          if [ "$SIZE" -lt 1000 ]; then
+            echo "::error::المفتاح $SIZE بايت فقط — القيمة مقصوصة. أعد نسخها كاملة."
+            exit 1
+          fi
           {
             echo "storePassword=$STORE_PASSWORD"
             echo "keyPassword=${KEY_PASSWORD:-$STORE_PASSWORD}"
