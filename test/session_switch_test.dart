@@ -2,7 +2,6 @@ import 'dart:io';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:kinetic_enterprise/core/auth/permissions.dart';
 
 /// يحرس تبديل الحساب على نفس الجهاز.
 ///
@@ -52,7 +51,15 @@ void main() {
 
     // حذفُ أحدها لاحقاً لا يُنتج خطأ ترجمة ولا يُسقط شاشة — يُنتج حساباً
     // يرى صلاحيات غيره. فيُثبَّت هنا.
-    for (final p in ['myPermissionsProvider', 'isPlatformAdminProvider', 'brandingProvider']) {
+    for (final p in [
+      'myPermissionsProvider',
+      'isPlatformAdminProvider',
+      // أُضيفا مع مهندسي البيع: مهندسٌ يدخل بعد مالك كان يرى أزرار
+      // المالك، ورقم ترخيص سابقه يُطبع في عقد عميله هو.
+      'isPlatformOwnerProvider',
+      'resellerLicenseProvider',
+      'brandingProvider',
+    ]) {
       expect(body.contains('ref.invalidate($p)'), isTrue, reason: '$p لا يُبطَل');
     }
   });

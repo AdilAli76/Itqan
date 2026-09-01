@@ -254,6 +254,15 @@ class _HeaderAccountArea extends ConsumerWidget {
               Text(_roleLabels[role] ?? role, style: AppTextStyles.bodyMd(color: AppColors.textSecondary)),
               const SizedBox(width: 8),
             ],
+            // «غيّر كلمة مروري» بجوار الخروج لا في شاشة الإعدادات: شاشة
+            // الإعدادات مقصورة على المديرين، وتغيير المرء كلمته حقٌّ لكل
+            // حساب لا صلاحيةٌ تُمنح — والكاشير هو أوّل من يحتاجه بعد كلمةٍ
+            // أُمليت عليه هاتفياً.
+            IconButton(
+              onPressed: () => context.go('/change-password'),
+              icon: const Icon(Icons.password_outlined, size: 20),
+              tooltip: 'تغيير كلمة المرور',
+            ),
             IconButton(
               onPressed: () async {
                 await performLogout(ref);

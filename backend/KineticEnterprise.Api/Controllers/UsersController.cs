@@ -199,6 +199,15 @@ public class UsersController : ControllerBase
         }
 
         user.PasswordHash = BCrypt.Net.BCrypt.HashPassword(request.NewPassword);
+
+        // ويُلزَم بتغييرها — إلا أن يكون هو نفسه من أعادها.
+        //
+        // الكلمة هنا **يختارها المدير** فيعرفها، فبقاؤها كلمةَ الحساب
+        // الدائمة تعني حساباً يعرف كلمتَه اثنان. وإعفاءُ من يُعيدها لنفسه
+        // لازم: بلا ذلك يقع في حلقة — يغيّرها فتُرفع الراية عليه فيُطالَب
+        // بتغييرها.
+        user.MustChangePassword = user.Id != CurrentUserId();
+
         _db.LogAudit(user.OrganizationId, CurrentUserId(), "user.password_reset", "app_users", user.Id,
             newValues: new { user.FullName });
         await _db.SaveChangesAsync();

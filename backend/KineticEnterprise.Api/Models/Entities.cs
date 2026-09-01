@@ -415,6 +415,20 @@ public class AppUser
     /// </summary>
     public string? ResellerLicense { get; set; }
 
+    /// <summary>
+    /// كلمةُ مرورٍ مؤقّتة تنتظر التغيير — يُرفع عند كل إعادة تعيين من غير
+    /// صاحب الحساب، ويُخفض حين يغيّرها هو.
+    ///
+    /// <para><b>العطب الذي يصلحه:</b> إعادة التعيين تُولّد كلمةً تُملى
+    /// هاتفياً وتُسلَّم للعميل «ليغيّرها» — ولا شيء كان يُلزمه. فتبقى الكلمة
+    /// التي أملاها مشغّل النظام هي كلمة الحساب الدائمة، ويعرفها اثنان.</para>
+    ///
+    /// <para>والفرض على الخادم لا في الشاشة: شاشةٌ تُلحّ تُتجاوز بفتح مسارٍ
+    /// آخر، والتوكن يبقى صالحاً ثماني ساعات. راجع
+    /// [MustChangePasswordFilter].</para>
+    /// </summary>
+    public bool MustChangePassword { get; set; }
+
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }
 

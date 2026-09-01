@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import '../../features/auth/presentation/change_password_screen.dart';
 import '../../features/auth/presentation/login_screen.dart';
 import '../../features/customer_portal/presentation/customer_portal_screen.dart';
 import '../shell/app_shell.dart';
@@ -30,6 +31,18 @@ GoRouter buildAppRouter() {
         ),
       ),
       GoRoute(path: '/login', builder: (context, state) => const LoginScreen()),
+      // تغيير كلمة المرور — خارج AppShell عمداً في حالته الإجبارية: من
+      // يحمل كلمةً مؤقّتة يردّ له الخادم كل نداءٍ آخر بـ403، فقشرةٌ بشريط
+      // جانبي وتبويبات تعرض عليه نظاماً لا يعمل شيءٌ فيه.
+      //
+      // و`?forced=1` يميّز الحالتين: الطوعيّة لها زرّ إلغاء، والإجبارية
+      // لا مخرج منها إلا الحفظ.
+      GoRoute(
+        path: '/change-password',
+        builder: (context, state) => ChangePasswordScreen(
+          forced: state.uri.queryParameters['forced'] == '1',
+        ),
+      ),
       // بوابة العميل — خارج AppShell عمداً: العميل ليس مستخدَم نظام ولا يرى
       // أي شاشة إدارية، فلا شريط جانبي ولا تبويبات هنا.
       GoRoute(path: '/my-account', builder: (context, state) => const CustomerPortalScreen()),

@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../auth/current_user.dart';
+import '../auth/session_expiry_watch.dart';
 import '../network/api_client.dart';
 import '../network/realtime_listener.dart';
 import '../network/realtime_service.dart';
@@ -50,6 +51,12 @@ class _AppShellState extends ConsumerState<AppShell> {
     // أبداً — السبب ليس الشبكة بل توكن مرفوض — ولا حارس مسار في النظام
     // يكتشف ذلك. فيبقى المستخدم عالقاً بلا تفسير ولا مخرج.
     ApiClient.instance.sessionExpired.addListener(_onSessionExpired);
+
+    // وإنذارٌ **قبل** الانتهاء لا بعده: الاعتراض أعلاه يمنع الشاشة العالقة
+    // ولا يمنع القذف المفاجئ إلى شاشة الدخول في منتصف فاتورة. راجع
+    // [SessionExpiryWatch].
+    _sessionWatch = SessionExpiryWatch(onWarn: _warnSessionEnding);
+    _sessionWatch.schedule();
     readJwtClaims().then((claims) {
       if (mounted) setState(() => _isPlatformAdmin = claims?['is_platform_admin'] == 'True');
     });
@@ -69,7 +76,56 @@ class _AppShellState extends ConsumerState<AppShell> {
   @override
   void dispose() {
     ApiClient.instance.sessionExpired.removeListener(_onSessionExpired);
+    // مؤقّتٌ حيّ بعد تفكيك الشجرة يُفشل الاختبارات بـ«A Timer is still
+    // pending»، ويحاول عرض حوارٍ على سياقٍ ميت في التطبيق.
+    _sessionWatch.dispose();
     super.dispose();
+  }
+
+  late final SessionExpiryWatch _sessionWatch;
+
+  /// حوار «توشك جلستك أن تنتهي» — بزرّ يمدّها.
+  ///
+  /// <para><c>barrierDismissible: false</c> عمداً: نقرةٌ خارج النافذة
+  /// تُغلقها بلا قرار، فيفقد المستخدم الإنذار الوحيد الذي سيصله.</para>
+  Future<void> _warnSessionEnding() async {
+    if (!mounted) return;
+
+    final extend = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('توشك الجلسة أن تنتهي'),
+        content: const Text(
+          'ستنتهي جلستك خلال خمس دقائق وتعود إلى شاشة الدخول. '
+          'مدِّدها إن كنت في منتصف عمل.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('اتركها تنتهي'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('مدِّد'),
+          ),
+        ],
+      ),
+    );
+
+    if (extend != true || !mounted) return;
+
+    final ok = await _sessionWatch.extend();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(ok
+            ? 'مُدّدت الجلسة'
+            // ولا يُقال «حاول مجدداً» بلا معنى: الفشل هنا غالباً حسابٌ
+            // عُطِّل أو شبكةٌ انقطعت، وكلاهما ينتهي بالخروج بعد دقائق.
+            : 'تعذّر تمديد الجلسة — احفظ عملك وسجّل الدخول من جديد'),
+      ),
+    );
   }
 
   void _onSessionExpired() {
@@ -160,6 +216,14 @@ class _AppShellState extends ConsumerState<AppShell> {
                   onPressed: _openPalette,
                   icon: const Icon(Icons.search),
                   tooltip: 'بحث شامل عن شاشة (Ctrl+K)',
+                ),
+                // ونظيره في شريط سطح المكتب ([_HeaderAccountArea]): الكاشير
+                // يعمل على هاتف غالباً، وهو أوّل من يحتاج تغيير كلمةٍ
+                // أُمليت عليه — فوضعُه في الشريط الأوسع وحده يحرمه منه.
+                IconButton(
+                  onPressed: () => context.go('/change-password'),
+                  icon: const Icon(Icons.password_outlined),
+                  tooltip: 'تغيير كلمة المرور',
                 ),
                 IconButton(onPressed: _logout, icon: const Icon(Icons.logout), tooltip: 'تسجيل الخروج'),
               ],

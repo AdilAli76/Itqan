@@ -101,6 +101,15 @@ builder.Services.AddControllers(options =>
     // بوّابة حالة الترخيص عامّة لا على كل وحدة تحكّم: بوّابة تُضاف يدوياً
     // تُنسى في أول وحدة جديدة. راجع [LicenseGateAttribute].
     options.Filters.Add<KineticEnterprise.Api.Authorization.LicenseGateAttribute>();
+
+    // وقفل الكلمة المؤقّتة عامٌّ لنفس السبب: أربعون وحدة تحكّم، وسمةٌ
+    // تُنسى على واحدة تترك الحساب يعمل بكلمةٍ أملاها غيرُ صاحبه هاتفياً.
+    // راجع [MustChangePasswordFilter] — وقائمة المُعفَين فيه.
+    //
+    // **وترتيبه بعد بوّابة الترخيص مقصود**: منظمةٌ منتهي ترخيصها تُقابَل
+    // برسالة الترخيص لا برسالة كلمة المرور — الأولى تقول لصاحبها ما يفعل،
+    // والثانية تُرسله في طريقٍ لا يحلّ مشكلته.
+    options.Filters.Add<KineticEnterprise.Api.Authorization.MustChangePasswordFilter>();
 });
 builder.Services.AddSignalR();
 

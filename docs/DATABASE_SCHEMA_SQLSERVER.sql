@@ -183,6 +183,9 @@ CREATE TABLE app_users (
   -- رقم ترخيص البائع — يُطبع في عقد كل عميل باعه، فيُعرَف من باع لمن من
   -- الورقة وحدها. تفرّده عبر فهرس مُصفَّى أدناه لنفس سبب username.
   reseller_license NVARCHAR(40) NULL,
+  -- كلمةٌ مؤقّتة تنتظر التغيير: تُرفع عند كل إعادة تعيين من غير صاحب
+  -- الحساب، وتُخفض حين يغيّرها هو. راجع MustChangePasswordFilter.
+  must_change_password BIT NOT NULL DEFAULT 0,
   created_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
   CONSTRAINT UQ_app_users_org_email UNIQUE (organization_id, email)
 );

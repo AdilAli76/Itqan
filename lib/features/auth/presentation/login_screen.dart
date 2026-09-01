@@ -53,7 +53,15 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       // مزامنة لمنظمة أخرى على الجهاز نفسه.
       await ref.read(offlineQueueProvider.notifier).reloadForCurrentUser();
 
-      if (mounted) context.go('/app');
+      if (!mounted) return;
+      // كلمةٌ مؤقّتة ← شاشة التغيير لا التطبيق: الخادم يردّ كل نداءٍ آخر
+      // بـ403، فالدخول إلى القشرة يعني شاشاتٍ تفشل كلّها برسالةٍ واحدة لا
+      // يفهم منها المستخدم أن المطلوب تغيير كلمته.
+      if (response.data['mustChangePassword'] == true) {
+        context.go('/change-password?forced=1');
+        return;
+      }
+      context.go('/app');
     } catch (_) {
       setState(() => _error = 'بيانات الدخول غير صحيحة، أو تعذّر الاتصال بالسيرفر');
     } finally {

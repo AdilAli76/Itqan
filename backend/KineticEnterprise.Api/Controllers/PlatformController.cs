@@ -355,7 +355,7 @@ ORDER BY is_platform_admin DESC, created_at;";
         {
             await using var cmd = conn.CreateCommand();
             cmd.CommandText = @"
-UPDATE dbo.app_users SET password_hash = @hash
+UPDATE dbo.app_users SET password_hash = @hash, must_change_password = 1
 OUTPUT inserted.email
 WHERE id = @userId;";
             AddParam(cmd, "@hash", hash);
