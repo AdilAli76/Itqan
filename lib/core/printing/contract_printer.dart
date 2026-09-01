@@ -86,6 +86,12 @@ Future<void> printSubscriptionContract({
   required String currencySymbol,
   // بيانات مزوّد النظام — من إعدادات المنصة.
   required String providerName,
+  /// رقم ترخيص البائع — مالك المنصّة أو مهندس البيع الذي أبرم هذا العقد.
+  ///
+  /// <para>يُطبع تحت بيانات الطرف الأول فيُعرَف من باع لمن من الورقة
+  /// وحدها، بعد سنوات وبلا فتح النظام. وفارغٌ يعني عقداً أُبرم قبل وجود
+  /// المهندسين — فلا يُطبع سطرٌ فارغ.</para>
+  String? sellerLicense,
   String? providerOwner,
   String? providerPhone,
   String? providerEmail,
@@ -203,6 +209,11 @@ Future<void> printSubscriptionContract({
             partyBox('الطرف الأول — مزوّد النظام', [
               providerName,
               if (providerOwner != null) providerOwner,
+              // رقم ترخيص البائع مع الطرف الأول لا في حاشية: هو ما يُميّز
+              // مهندساً من مهندس تحت نفس اسم الشركة المزوّدة، ونزوله إلى
+              // آخر الورقة يجعله سطراً لا يُقرأ.
+              if (sellerLicense != null && sellerLicense.isNotEmpty)
+                'ترخيص البائع: $sellerLicense',
               if (providerPhone != null) 'هاتف: $providerPhone',
               if (providerAddress != null) providerAddress,
             ]),

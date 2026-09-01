@@ -28,6 +28,7 @@
   "/permissions/me": "permissions_me.json",
   "/platform-settings": "platform-settings.json",
   "/platform/organizations/dashboard": "platform_dashboard.json",
+  "/platform/engineers": "platform_engineers.json",
   "/platform/organizations": "platform_organizations.json",
   "/prescriptions": "prescriptions.json",
   "/products/expiry-alerts": "products_expiry-alerts.json",

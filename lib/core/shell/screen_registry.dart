@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../auth/permissions.dart';
 import '../../features/dashboard/presentation/super_admin_dashboard_screen.dart';
 import '../../features/branches/presentation/branch_identity_screen.dart';
 import '../../features/inventory/presentation/inventory_screen.dart';
@@ -92,13 +94,62 @@ Widget buildScreenForRoute(String route) {
       return const MedicineReferenceScreen();
     case '/prescriptions':
       return const PrescriptionsScreen();
+    // شاشات المنصّة خلف حارس.
+    //
+    // إخفاؤها من القائمة ليس منعاً: المسار يُفتح بكتابته في المتصفّح أو من
+    // رابطٍ محفوظ، فكانت تُفتح لأي مستخدم ثم يردّها الخادم فارغة — شاشةٌ
+    // بيضاء يظنّها المستخدم عطباً ويتّصل بالدعم.
+    //
+    // والخادم يبقى الحارس الفعلي ([PlatformScope]) — هذا يمنع الشاشة
+    // البيضاء لا يمنع الوصول.
     case '/platform':
-      return const PlatformDashboardScreen();
+      return const _PlatformOnly(child: PlatformDashboardScreen());
     case '/platform/organizations':
-      return const PlatformOrganizationsScreen();
+      return const _PlatformOnly(child: PlatformOrganizationsScreen());
     case '/platform/organizations/new':
-      return const CreateOrganizationScreen();
+      return const _PlatformOnly(child: CreateOrganizationScreen());
     default:
       return const SizedBox.shrink();
   }
+}
+
+
+/// شاشةٌ لا يفتحها إلا حساب منصّة — وإلا رسالةٌ تقول لماذا.
+///
+/// <para>ولا يُعاد توجيهٌ صامت إلى لوحة التحكّم: من فتح رابطاً محفوظاً
+/// فوجد نفسه في شاشةٍ أخرى بلا كلمة يظنّ الرابط تالفاً ويعيد المحاولة.
+/// والرسالة توقف المحاولة.</para>
+class _PlatformOnly extends ConsumerWidget {
+  const _PlatformOnly({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final async = ref.watch(isPlatformAdminProvider);
+
+    return async.when(
+      // لا شيء أثناء القراءة: وميضُ رسالة «هذه الشاشة لمشغّل النظام» ثم
+      // ظهور الشاشة يُقلق مالك المنصّة نفسه في كل فتحة.
+      loading: () => const SizedBox.shrink(),
+      error: (_, __) => const _PlatformDenied(),
+      data: (isPlatform) => isPlatform ? child : const _PlatformDenied(),
+    );
+  }
+}
+
+class _PlatformDenied extends StatelessWidget {
+  const _PlatformDenied();
+
+  @override
+  Widget build(BuildContext context) => Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Text(
+            'هذه الشاشة لمشغّل النظام وحده.',
+            style: Theme.of(context).textTheme.titleMedium,
+            textAlign: TextAlign.center,
+          ),
+        ),
+      );
 }

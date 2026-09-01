@@ -28,6 +28,11 @@ const _notifications = NavItem(Icons.notifications_outlined, 'الإشعارات
 
 // يظهر فقط لمالك المنصة (is_platform_admin في التوكن) — تزويد عملاء جدد
 // على نفس السيرفر ليس جزءاً من صلاحيات أي عميل عادي مهما كان دوره.
+/// البند الوحيد الذي يراه حساب المنصّة — واللوحة تحته بتبويباتها.
+const kPlatformItem = NavItem(Icons.hub_outlined, 'لوحة المنصّة', '/platform');
+
+// المساران القديمان: لا يظهران في القائمة بعد دمجها، ويبقيان صالحَي الفتح
+// من رابطٍ محفوظ أو من لوحة الأوامر.
 const kPlatformNavItem = NavItem(Icons.add_business_outlined, 'إنشاء منظمة جديدة', '/platform/organizations/new');
 const kPlatformManageItem = NavItem(Icons.apartment_outlined, 'الشركات المشترَكة', '/platform/organizations');
 
@@ -198,15 +203,21 @@ List<NavGroup> navGroupsFor({
       // مالك المنصّة **مشغّلٌ لا مستأجر**: عملُه إدارة عملاء واشتراكات، لا
       // ضبط إعدادات منظمةٍ واحدة. وخلطُهما جعله يدخل كأي مدير فيجد ثلاثة
       // بنودٍ زائدة، ولا يرى حال أعماله كمشغّل في أي شاشة.
+      // بندٌ واحد لا ثلاثة.
+      //
+      // كانت «لوحة المنصّة» و«الشركات المشترَكة» و«إنشاء منظمة جديدة» ثلاثة
+      // بنودٍ متجاورة لعملٍ واحد، فيُفتح ثلاث تبويبات لمتابعة عميلٍ واحد:
+      // يرى رقمه في اللوحة، ويبحث عنه في القائمة، ويُنشئ التالي من ثالثة.
+      // وصارت اللوحة صفحةً بتبويبات — راجع [PlatformDashboardScreen].
+      //
+      // والمساران القديمان يبقيان مسجَّلين في [screenRegistry]: روابط
+      // محفوظة ولوحة أوامر تشير إليهما، وحذفهما يُنتج شاشة بيضاء لمن حفظ
+      // الرابط.
       if (isPlatformAdmin)
         const NavGroup(
           icon: Icons.hub_outlined,
           label: 'المنصّة',
-          items: [
-            NavItem(Icons.dashboard_outlined, 'لوحة المنصّة', '/platform'),
-            kPlatformManageItem,
-            kPlatformNavItem,
-          ],
+          items: [kPlatformItem],
         ),
     ];
 
@@ -232,4 +243,11 @@ List<NavGroup> filterByPermissions(List<NavGroup> groups, bool Function(String r
 /// بمسارها، ولا علاقة لها بالعرض.
 final kNavItems = <NavItem>[
   for (final group in navGroupsFor(isPlatformAdmin: true)) ...group.items,
+  // شاشتا المنصّة القديمتان: خرجتا من القائمة حين دُمجت بنودها في «لوحة
+  // المنصّة»، وتبقيان هنا لأن هذه القائمة **ليست للعرض** — [AppShell]
+  // يبحث فيها عن الشاشة بمسارها ليفتحها في تبويب. وحذفهما منها كان يجعل
+  // زرّ «إدارة العملاء» في اللوحة يسقط على `kNavItems.first` فيفتح لوحة
+  // التحكّم بدلاً من الشاشة المطلوبة — عطبٌ صامت لا رسالة له.
+  kPlatformManageItem,
+  kPlatformNavItem,
 ];

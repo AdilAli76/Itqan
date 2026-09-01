@@ -237,6 +237,20 @@ public class PlatformOrganizationRecord
     public string LegalName { get; set; } = "";
     public string DisplayName { get; set; } = "";
     public bool IsActive { get; set; } = true;
+
+    /// <summary>
+    /// حساب المنصّة الذي باع هذه المنظمة — من أنشأها يملكها.
+    ///
+    /// <para><b>وهو مدار العزل بين المهندسين:</b> مهندسٌ يرى ما نُسب إليه
+    /// وحده، ومالك المنصّة يرى الكلّ. والحقل هنا على **الفهرس العالمي** لا
+    /// على جدول المنظمات: الفهرس هو ما يُقرأ بلا عزل صفوف، وهو الوحيد الذي
+    /// يستطيع مالك المنصّة قراءته كلّه أصلاً.</para>
+    ///
+    /// <para>و<c>null</c> = بلا نسبة — منظمات أُنشئت قبل وجود المهندسين.
+    /// يراها المالك ولا يراها أي مهندس، وهو الصواب: لا أحد باعها غيره.</para>
+    /// </summary>
+    public Guid? OwnerUserId { get; set; }
+
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }
 
@@ -376,7 +390,49 @@ public class AppUser
     // (عملاء) جدد عبر PlatformController، منفصلة تماماً عن super_admin
     // العادي الذي يبقى محصوراً داخل منظمته وحدها. راجع PlatformController.cs.
     public bool IsPlatformAdmin { get; set; }
+
+    /// <summary>
+    /// دور هذا الحساب على مستوى المنصّة: <c>owner</c> أو <c>engineer</c>،
+    /// و<c>null</c> لمن ليس حساب منصّة أصلاً.
+    ///
+    /// <para><b>لماذا حقلٌ ثانٍ بجوار [IsPlatformAdmin] لا استبدالٌ له:</b>
+    /// العلم القديم يعني «يدخل شاشات المنصّة»، وهو صحيح للاثنين. وتحويله
+    /// إلى نصّ كان سيمسّ كل فحصٍ في الخادم والواجهة والتوكن دفعةً واحدة —
+    /// وواحدٌ منها يُنسى فيصير المهندس مالكاً أو المالك عاجزاً. فالعلم يبقى
+    /// بوّابة الدخول، وهذا يقول ما حدوده بعدها.</para>
+    ///
+    /// <para>و<c>null</c> مع علمٍ مرفوع = مالك: حسابات المنصّة القائمة قبل
+    /// هذا الترحيل أُنشئت كلّها مالكةً، وتفسير غيابها بـ«مهندس» كان يسلبها
+    /// صلاحياتها لحظة الترقية.</para>
+    /// </summary>
+    public string? PlatformRole { get; set; }
+
+    /// <summary>
+    /// رقم ترخيص مهندس البيع — يولّده النظام ويُطبع في عقد كل عميل باعه.
+    ///
+    /// <para>فيُعرَف من باع لمن من الورقة وحدها، بعد سنوات وبلا فتح
+    /// النظام. ولمالك المنصّة أيضاً رقم — فهو يبيع كذلك.</para>
+    /// </summary>
+    public string? ResellerLicense { get; set; }
+
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+}
+
+/// <summary>أدوار المنصّة — المصدر الوحيد لأسمائها.</summary>
+public static class PlatformRoles
+{
+    public const string Owner = "owner";
+    public const string Engineer = "engineer";
+
+    /// <summary>
+    /// أمالكٌ هذا؟ — الغياب يعني مالكاً لا مهندساً.
+    ///
+    /// <para><b>الفشل المغلق هنا كان سيكون خطأ:</b> كل حساب منصّة أُنشئ قبل
+    /// هذا الترحيل يحمل <c>null</c>، وتفسيره «مهندس» كان يسلب مالك المنصّة
+    /// حذفَ المنظمات وإنشاءَ المهندسين لحظة الترقية — بلا أن يعرف السبب.
+    /// </para>
+    /// </summary>
+    public static bool IsOwner(string? platformRole) => platformRole != Engineer;
 }
 
 /// <summary>

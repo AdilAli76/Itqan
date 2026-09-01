@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../../shared/widgets/adaptive_dialog.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
+import '../../../core/auth/permissions.dart';
 import '../../../core/network/api_client.dart';
 import '../../../core/printing/contract_printer.dart';
 import '../../../core/responsive/adaptive_scaffold.dart';
@@ -68,16 +69,33 @@ class PlatformOrganizationsScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final orgsAsync = ref.watch(platformOrganizationsProvider);
-
-    return AdaptiveScaffold(
+    return const AdaptiveScaffold(
       title: 'الشركات المشترَكة',
       activeRoute: '/platform/organizations',
       // القائمة تمرّر نفسها: لفّها بمُمرِّر خارجي يعطيها ارتفاعاً غير محدود
       // فتنهار بـ«Vertical viewport was given unbounded height» — شاشةٌ
       // بيضاء عند المستخدم بلا رسالة. راجع AdaptiveScaffold.scrollable.
       scrollable: false,
-      body: orgsAsync.when(
+      body: PlatformOrganizationsBody(),
+    );
+  }
+}
+
+/// قائمة العملاء بلا هيكل شاشة — لتصلح تبويباً داخل لوحة المنصّة.
+///
+/// <para><b>ولماذا فُصلت:</b> «لوحة المنصّة» و«الشركات المشترَكة» و«إنشاء
+/// منظمة» كانت ثلاثة بنودٍ متجاورة لعملٍ واحد. ودمجُها بفتح الشاشة كاملةً
+/// داخل تبويب يعني هيكلَ شاشةٍ داخل هيكل شاشة — شريطَي عنوان وقائمتَي
+/// أوامر. فالجسم وحده هو ما يُعاد استعماله، والشاشة أعلاه تبقى غلافاً
+/// رقيقاً للمسار القديم.</para>
+class PlatformOrganizationsBody extends ConsumerWidget {
+  const PlatformOrganizationsBody({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final orgsAsync = ref.watch(platformOrganizationsProvider);
+
+    return orgsAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         // رسالة الخادم كما هي لا نصٌّ عامّ.
         //
@@ -109,17 +127,37 @@ class PlatformOrganizationsScreen extends ConsumerWidget {
         data: (orgs) {
           if (orgs.isEmpty) {
             return Center(
-              child: Text('لا شركات بعد — أنشئ أول عميل من «إنشاء منظمة جديدة»',
+              child: Text('لا شركات بعد — أنشئ أول عميل من «عميل جديد»',
                   style: AppTextStyles.bodyMd()),
             );
           }
-          return ListView.builder(
-            padding: const EdgeInsets.all(16),
-            itemCount: orgs.length,
-            itemBuilder: (context, i) => _OrgCard(org: orgs[i]),
+
+          // المُرشِّح لمالك المنصّة وحده: المهندس لا يرى إلا عملاءه، فقائمةٌ
+          // منسدلة بخيارٍ واحد ضوضاء تُوحي بوجود ما لا يراه.
+          final isOwner = ref.watch(isPlatformOwnerProvider).valueOrNull ?? false;
+          final filter = ref.watch(organizationFilterProvider);
+          final shown = (isOwner && filter != null)
+              ? orgs.where((o) => '${o['ownerUserId']}' == filter).toList()
+              : orgs;
+
+          return Column(
+            children: [
+              if (isOwner) const _EngineerFilter(),
+              Expanded(
+                child: shown.isEmpty
+                    ? Center(
+                        child: Text('لا شركات لهذا المهندس بعد',
+                            style: AppTextStyles.bodyMd()),
+                      )
+                    : ListView.builder(
+                        padding: const EdgeInsets.all(16),
+                        itemCount: shown.length,
+                        itemBuilder: (context, i) => _OrgCard(org: shown[i]),
+                      ),
+              ),
+            ],
           );
         },
-      ),
     );
   }
 }
@@ -194,7 +232,11 @@ class _OrgCard extends ConsumerWidget {
                   // إعادة طباعة العقد بالشروط المحفوظة — لا بقيم تُكتب من
                   // جديد. نسختان بمبلغين مختلفين أسوأ من غياب العقد.
                   OutlinedButton.icon(
-                    onPressed: () => _printContract(context, org),
+                    onPressed: () => _printContract(
+                      context,
+                      org,
+                      ref.read(resellerLicenseProvider).valueOrNull,
+                    ),
                     icon: const Icon(Icons.description_outlined, size: 18),
                     label: const Text('طباعة العقد'),
                   ),
@@ -214,15 +256,19 @@ class _OrgCard extends ConsumerWidget {
                   // فكان محو عميلٍ انتهى عقده يستلزم فتح قاعدة البيانات —
                   // وهو أخطر ما يُدفَع إليه مالك المنصّة، لأن الحذف اليدوي
                   // ينسى المرفقات ويترك صفّاً في الفهرس العالمي.
-                  OutlinedButton.icon(
-                    onPressed: () => showDialog(
-                      context: context,
-                      builder: (_) => _DeleteOrgDialog(org: org),
+                  // الحذف لمالك المنصّة وحده — والخادم يرفضه من غيره
+                  // ([PlatformScope.IsOwner])، فإخفاؤه هنا يمنع زرّاً
+                  // يُضغط ليُقابَل بـ403 لا أكثر.
+                  if (ref.watch(isPlatformOwnerProvider).valueOrNull ?? false)
+                    OutlinedButton.icon(
+                      onPressed: () => showDialog(
+                        context: context,
+                        builder: (_) => _DeleteOrgDialog(org: org),
+                      ),
+                      style: OutlinedButton.styleFrom(foregroundColor: AppColors.danger),
+                      icon: const Icon(Icons.delete_forever_outlined, size: 18),
+                      label: const Text('حذف'),
                     ),
-                    style: OutlinedButton.styleFrom(foregroundColor: AppColors.danger),
-                    icon: const Icon(Icons.delete_forever_outlined, size: 18),
-                    label: const Text('حذف'),
-                  ),
                 ],
               ),
             ],
@@ -257,6 +303,52 @@ class _OrgCard extends ConsumerWidget {
           Text(value, style: AppTextStyles.labelMd()),
         ],
       );
+}
+
+/// مُرشِّح قائمة العملاء بالمهندس البائع — لمالك المنصّة وحده.
+///
+/// <para>ويُعرض «بلا نسبة» خياراً صريحاً: منظمات أُنشئت قبل وجود المهندسين
+/// لا تخصّ أحداً منهم، وإخفاؤها خلف «الكلّ» وحده كان يجعل مجموع المرشَّحات
+/// أقلّ من القائمة بلا تفسير.</para>
+class _EngineerFilter extends ConsumerWidget {
+  const _EngineerFilter();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final engineers = ref.watch(platformEngineersProvider);
+    final selected = ref.watch(organizationFilterProvider);
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      child: Row(
+        children: [
+          const Icon(Icons.filter_alt_outlined, size: 18),
+          const SizedBox(width: 8),
+          Expanded(
+            child: DropdownButtonFormField<String?>(
+              initialValue: selected,
+              isDense: true,
+              decoration: const InputDecoration(labelText: 'البائع'),
+              items: [
+                const DropdownMenuItem<String?>(value: null, child: Text('كل البائعين')),
+                const DropdownMenuItem<String?>(value: 'null', child: Text('بلا نسبة')),
+                // قائمةٌ فارغة حين يتعذّر تحميل المهندسين لا رسالة خطأ:
+                // المُرشِّح راحةُ نظر، وإسقاط القائمة كلّها لأجله عقوبةٌ لا
+                // تناسب.
+                ...engineers.valueOrNull?.map((e) => DropdownMenuItem<String?>(
+                          value: '${e['id']}',
+                          child: Text('${e['fullName']} · ${e['resellerLicense']}'),
+                        )) ??
+                    const <DropdownMenuItem<String?>>[],
+              ],
+              onChanged: (v) =>
+                  ref.read(organizationFilterProvider.notifier).state = v,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 class _EditOrgDialog extends ConsumerStatefulWidget {
@@ -579,7 +671,13 @@ const _tierLimits = {
   'enterprise': (999, 999),
 };
 
-Future<void> _printContract(BuildContext context, Map<String, dynamic> org) async {
+/// طباعة العقد بشروطه المحفوظة.
+///
+/// ورقم ترخيص البائع يُمرَّر من موضع النداء لا يُقرأ هنا: الدالّة خارج شجرة
+/// الودجات فلا `ref` لها، وقراءته من التخزين مباشرةً تُنشئ طريقاً ثانياً
+/// إلى دعاوى التوكن يفترق عن [resellerLicenseProvider].
+Future<void> _printContract(
+    BuildContext context, Map<String, dynamic> org, String? sellerLicense) async {
   Map<String, dynamic> platform = const {};
   try {
     final res = await ApiClient.instance.dio.get('/platform-settings');
@@ -609,6 +707,7 @@ Future<void> _printContract(BuildContext context, Map<String, dynamic> org) asyn
     maintenanceRate: ((org['maintenanceRate'] as num?) ?? 0).toDouble(),
     currencySymbol: 'د.ل',
     providerName: platform['companyName'] as String? ?? 'مزوّد النظام',
+    sellerLicense: sellerLicense,
     providerOwner: platform['ownerName'] as String?,
     providerPhone: platform['phone'] as String?,
     providerEmail: platform['email'] as String?,

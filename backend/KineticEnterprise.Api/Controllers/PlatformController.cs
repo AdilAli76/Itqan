@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Data.SqlClient;
+using KineticEnterprise.Api.Authorization;
 using KineticEnterprise.Api.Data;
 using KineticEnterprise.Api.Models;
 
@@ -38,7 +39,15 @@ public record PlatformOrganizationDto(
     /// والطرح في رأسه — وهو ما يُخطئ فيه.</para>
     List<string> GrantedModules,
     List<string> RevokedModules,
-    List<string> EffectiveModules);
+    List<string> EffectiveModules,
+    /// حساب المنصّة الذي باع هذه المنظمة — عليه يُرشَّح مالك المنصّة.
+    ///
+    /// <para>و<c>null</c> = بلا نسبة (منظمة أُنشئت قبل وجود المهندسين).
+    /// يراها المالك وحده.</para>
+    Guid? OwnerUserId,
+    /// اسم البائع ورقم ترخيصه — للعرض، فالمعرّف وحده لا يُقرأ.
+    string? OwnerName,
+    string? OwnerLicense);
 
 /// <summary>مستخدم في منظمة عميل — كما يراه مالك المنصّة.</summary>
 public record OrganizationUserDto(
@@ -142,7 +151,29 @@ public class PlatformController : ControllerBase
         }
 
         var orgs = await _db.PlatformOrganizations.OrderByDescending(o => o.CreatedAt).ToListAsync();
+
+        // الترشيح **بعد** القراءة لا في الاستعلام: الفهرس العالمي صغير
+        // (صفٌّ لكل عميل)، والشرط في LINQ يحتاج معرّف الطالب مقروءاً من
+        // التوكن على أي حال. والوضوح هنا أهمّ من صفّين أقلّ.
+        //
+        // ومهندسٌ يرى ما باعه وحده: لا شيء في قاعدة البيانات يمنعه — الفهرس
+        // غير محميّ بعزل الصفوف عمداً ليراه المالك كلّه. فالمنع هنا، وهو
+        // السبب في كون [PlatformScope] نقطةً واحدة لا فحصاً مبعثراً.
+        if (!PlatformScope.IsOwner(User))
+        {
+            orgs = orgs.Where(o => PlatformScope.CanSee(User, o.OwnerUserId)).ToList();
+        }
+
         var ids = orgs.Select(o => o.Id).ToList();
+
+        // أسماء البائعين دفعةً واحدة لا استعلاماً لكل صفّ: مئة عميل يعني
+        // مئة رحلة إلى القاعدة في نداءٍ يُفتح مع كل شاشة.
+        var sellerIds = orgs.Where(o => o.OwnerUserId != null)
+            .Select(o => o.OwnerUserId!.Value).Distinct().ToList();
+        var sellers = await _db.AppUsers
+            .Where(u => sellerIds.Contains(u.Id))
+            .Select(u => new { u.Id, u.FullName, u.ResellerLicense })
+            .ToDictionaryAsync(u => u.Id, u => (Name: u.FullName, License: u.ResellerLicense));
 
         // القراءة عبر SQL خام لا عبر DbSet: جداول المنظمات والفروع
         // والمستخدمين محكومة بسياسة عزل تُرجع منظمة الطالب وحدها، ومالك
@@ -162,7 +193,10 @@ public class PlatformController : ControllerBase
                 ModuleList(d?.RevokedModulesJson),
                 LicenseLimits.EffectiveModules(
                     d?.Edition ?? Editions.Standard,
-                    d?.GrantedModulesJson, d?.RevokedModulesJson).ToList());
+                    d?.GrantedModulesJson, d?.RevokedModulesJson).ToList(),
+                o.OwnerUserId,
+                o.OwnerUserId is null ? null : sellers.GetValueOrDefault(o.OwnerUserId.Value).Name,
+                o.OwnerUserId is null ? null : sellers.GetValueOrDefault(o.OwnerUserId.Value).License);
         }).ToList();
     }
 
@@ -176,9 +210,18 @@ public class PlatformController : ControllerBase
     [HttpGet("dashboard")]
     public async Task<ActionResult<PlatformDashboardDto>> Dashboard()
     {
-        if (User.FindFirstValue("is_platform_admin") != "True") return Forbid();
+        if (!PlatformScope.IsPlatformUser(User)) return Forbid();
 
         var orgs = await _db.PlatformOrganizations.ToListAsync();
+
+        // ومهندس البيع يرى **أرقامه هو**: لوحةٌ تقول له «٦٣ مستخدماً» وقائمةٌ
+        // تحته بأربعة عملاء تفضح عملاء زملائه بالجمع لا بالاسم — وهو تسريب
+        // بالأرقام لا يقلّ عن تسريبٍ بالأسماء.
+        if (!PlatformScope.IsOwner(User))
+        {
+            orgs = orgs.Where(o => PlatformScope.CanSee(User, o.OwnerUserId)).ToList();
+        }
+
         if (orgs.Count == 0)
         {
             return new PlatformDashboardDto(0, 0, 0, 0, 0, 0, 0, new List<ExpiringLicenseDto>());
@@ -237,7 +280,8 @@ public class PlatformController : ControllerBase
     [HttpGet("{id:guid}/users")]
     public async Task<ActionResult<List<OrganizationUserDto>>> GetOrganizationUsers(Guid id)
     {
-        if (User.FindFirstValue("is_platform_admin") != "True") return Forbid();
+        if (!PlatformScope.IsPlatformUser(User)) return Forbid();
+        if (!await CanTouchAsync(id)) return NotFoundOrForbid();
 
         await using var db = OpenPlatformContext();
         var conn = db.Database.GetDbConnection();
@@ -292,7 +336,8 @@ ORDER BY is_platform_admin DESC, created_at;";
     public async Task<ActionResult<ResetOrgUserPasswordResponse>> ResetOrganizationUserPassword(
         Guid id, Guid userId, ResetOrgUserPasswordRequest request)
     {
-        if (User.FindFirstValue("is_platform_admin") != "True") return Forbid();
+        if (!PlatformScope.IsPlatformUser(User)) return Forbid();
+        if (!await CanTouchAsync(id)) return NotFoundOrForbid();
 
         var reason = (request?.Reason ?? "").Trim();
         if (reason.Length == 0) return BadRequest(new { message = "سبب إعادة التعيين إلزامي" });
@@ -349,7 +394,8 @@ WHERE id = @userId;";
     public async Task<IActionResult> UpdateOrganizationUser(
         Guid id, Guid userId, UpdateOrgUserRequest request)
     {
-        if (User.FindFirstValue("is_platform_admin") != "True") return Forbid();
+        if (!PlatformScope.IsPlatformUser(User)) return Forbid();
+        if (!await CanTouchAsync(id)) return NotFoundOrForbid();
 
         var email = (request?.Email ?? "").Trim().ToLowerInvariant();
         var fullName = (request?.FullName ?? "").Trim();
@@ -612,10 +658,8 @@ LEFT JOIN dbo.licenses l ON l.organization_id = o.id;";
     [HttpPut("{id:guid}")]
     public async Task<IActionResult> Update(Guid id, UpdatePlatformOrganizationRequest request)
     {
-        if (User.FindFirstValue("is_platform_admin") != "True")
-        {
-            return Forbid();
-        }
+        if (!PlatformScope.IsPlatformUser(User)) return Forbid();
+        if (!await CanTouchAsync(id)) return NotFoundOrForbid();
         if (string.IsNullOrWhiteSpace(request.LegalName) || string.IsNullOrWhiteSpace(request.DisplayName))
         {
             return BadRequest(new { message = "الاسم القانوني والاسم المعروض إلزاميان" });
@@ -724,6 +768,35 @@ LEFT JOIN dbo.licenses l ON l.organization_id = o.id;";
     }
 
     /// <summary>
+    /// أيملك الطالبُ حقَّ العمل على هذه المنظمة؟
+    ///
+    /// <para>المالك على الكلّ، والمهندس على ما باعه. راجع
+    /// [PlatformScope].</para>
+    /// </summary>
+    private async Task<bool> CanTouchAsync(Guid organizationId)
+    {
+        if (PlatformScope.IsOwner(User)) return true;
+
+        var owner = await _db.PlatformOrganizations
+            .Where(o => o.Id == organizationId)
+            .Select(o => o.OwnerUserId)
+            .FirstOrDefaultAsync();
+
+        return PlatformScope.CanSee(User, owner);
+    }
+
+    /// <summary>
+    /// ردٌّ واحد لـ«ليست لك» و«غير موجودة».
+    ///
+    /// <para><b>ولماذا 404 لا 403:</b> 403 على معرّفٍ بعينه يقول «هذه
+    /// المنظمة موجودة ولكنها ليست لك» — فيستطيع مهندسٌ أن يستدلّ بها على
+    /// عملاء زملائه واحداً واحداً. و404 لا يفرّق بين ما لا يخصّه وما لا
+    /// وجود له، وهو كل ما يحتاج أن يعرفه.</para>
+    /// </summary>
+    private ActionResult NotFoundOrForbid() =>
+        NotFound(new { message = "لا توجد منظمة بهذا المعرّف ضمن عملائك" });
+
+    /// <summary>
     /// قائمة وحدات من نصّ JSON للعرض — التالف يُقرأ فارغاً.
     ///
     /// <para>لا تُستعمل للفرض: الفرض كلّه في
@@ -802,7 +875,8 @@ LEFT JOIN dbo.licenses l ON l.organization_id = o.id;";
     [HttpPost("{id:guid}/status")]
     public async Task<IActionResult> ChangeStatus(Guid id, ChangeSubscriptionStatusRequest request)
     {
-        if (User.FindFirstValue("is_platform_admin") != "True") return Forbid();
+        if (!PlatformScope.IsPlatformUser(User)) return Forbid();
+        if (!await CanTouchAsync(id)) return NotFoundOrForbid();
 
         var allowed = new[] { "active", "grace_period", "expired", "revoked" };
         if (!allowed.Contains(request.Status))
@@ -850,7 +924,8 @@ LEFT JOIN dbo.licenses l ON l.organization_id = o.id;";
     [HttpPost("{id:guid}/warn")]
     public async Task<IActionResult> Warn(Guid id, WarnOrganizationRequest request)
     {
-        if (User.FindFirstValue("is_platform_admin") != "True") return Forbid();
+        if (!PlatformScope.IsPlatformUser(User)) return Forbid();
+        if (!await CanTouchAsync(id)) return NotFoundOrForbid();
         if (string.IsNullOrWhiteSpace(request.Message))
         {
             return BadRequest(new { message = "نصّ التحذير إلزامي" });
@@ -882,7 +957,12 @@ LEFT JOIN dbo.licenses l ON l.organization_id = o.id;";
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> Delete(Guid id, [FromQuery] string confirm)
     {
-        if (User.FindFirstValue("is_platform_admin") != "True") return Forbid();
+        // مالك المنصّة وحده — قرارُك أنت لا قرار المهندس.
+        //
+        // الحذف بلا رجعة: يمحو فواتير العميل وقيوده ومرفقاته وحسابات
+        // مستخدميه. ومهندسٌ يخسر عميلاً قد يمحوه غضباً أو خطأً، والإيقاف
+        // يكفيه لمنع الدخول ويُبقي ما يُسترجَع.
+        if (!PlatformScope.IsOwner(User)) return Forbid();
 
         var index = await _db.PlatformOrganizations.FirstOrDefaultAsync(o => o.Id == id);
         if (index is null) return NotFound();
@@ -947,7 +1027,7 @@ LEFT JOIN dbo.licenses l ON l.organization_id = o.id;";
     [HttpPost]
     public async Task<ActionResult<CreateOrganizationResponse>> Create(CreateOrganizationRequest request)
     {
-        if (User.FindFirstValue("is_platform_admin") != "True")
+        if (!PlatformScope.IsPlatformUser(User))
         {
             return Forbid();
         }
@@ -1111,6 +1191,12 @@ LEFT JOIN dbo.licenses l ON l.organization_id = o.id;";
             LegalName = request.LegalName,
             DisplayName = request.DisplayName,
             IsActive = true,
+            // من أنشأها يملكها — ولا يُؤخذ من الطلب.
+            //
+            // حقلٌ في الجسم كان يجعل مهندساً ينسب عميلاً لمهندسٍ آخر بتعديل
+            // نداء، وهو **أخطر** من رؤية عميلٍ ليس له: النسبة هي ما يُبنى
+            // عليه العزل كلّه. وإعادة النسبة قرار المالك وحده من نقطته.
+            OwnerUserId = PlatformScope.UserId(User),
         });
         await _db.SaveChangesAsync();
 

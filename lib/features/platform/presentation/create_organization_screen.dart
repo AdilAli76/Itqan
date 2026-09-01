@@ -453,6 +453,7 @@ class _CreateOrganizationFormState extends ConsumerState<_CreateOrganizationForm
       maintenanceRate: double.tryParse(_maintenanceController.text.trim()) ?? 0,
       currencySymbol: 'د.ل',
       providerName: platform['companyName'] as String? ?? 'مزوّد النظام',
+    sellerLicense: ref.read(resellerLicenseProvider).valueOrNull,
       providerOwner: platform['ownerName'] as String?,
       providerPhone: platform['phone'] as String?,
       providerEmail: platform['email'] as String?,

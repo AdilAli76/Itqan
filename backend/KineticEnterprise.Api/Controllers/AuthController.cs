@@ -89,6 +89,24 @@ public class AuthController : ControllerBase
         if (user.IsPlatformAdmin)
         {
             claims.Add(new Claim("is_platform_admin", "True"));
+            // الدور في التوكن لا في نداءٍ ثانٍ: كل نقطة منصّة تفحصه، وقراءته
+            // من القاعدة في كل طلب استعلامٌ إضافي على مسارٍ ساخن.
+            //
+            // والغياب يعني مالكاً — راجع [PlatformRoles.IsOwner]. وتوكن
+            // أُصدر قبل هذا الترحيل يبقى صالحاً ثماني ساعات، وتفسيره
+            // «مهندس» كان يسلب مالك المنصّة صلاحياته حتى ينتهي.
+            claims.Add(new Claim(
+                "platform_role",
+                user.PlatformRole ?? PlatformRoles.Owner));
+
+            // ورقم ترخيص البائع معه: يُطبع في عقد كل عميل يبيعه صاحب هذا
+            // التوكن. وقراءته بنداءٍ ثانٍ عند كل طباعة تعني عقداً يخرج بلا
+            // رقم إن تعثّر النداء — وذاك أسوأ من ألّا يُطبع أصلاً، لأنه
+            // يخرج موقَّعاً ناقصاً ولا يلاحظه أحد.
+            if (!string.IsNullOrWhiteSpace(user.ResellerLicense))
+            {
+                claims.Add(new Claim("reseller_license", user.ResellerLicense));
+            }
         }
 
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_config["Jwt:Key"]!));

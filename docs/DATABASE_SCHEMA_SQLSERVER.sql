@@ -174,9 +174,22 @@ CREATE TABLE app_users (
   -- مالك المنصة (مشغّل النظام) فقط — يمنح صلاحية تزويد منظمات (عملاء) جدد
   -- عبر PlatformController، منفصلة عن super_admin العادي المحصور بمنظمته.
   is_platform_admin BIT NOT NULL DEFAULT 0,
+  -- دور حساب المنصّة بعد البوّابة: مالكٌ يرى الكلّ، أو مهندس بيع يرى ما
+  -- باعه. وNULL يعني **مالكاً** — حسابات المنصّة القائمة قبل هذا العمود
+  -- أُنشئت كلّها مالكة. راجع PlatformRoles.IsOwner وPlatformScope.
+  platform_role NVARCHAR(20) NULL
+    CONSTRAINT CK_app_users_platform_role
+    CHECK (platform_role IS NULL OR platform_role IN ('owner','engineer')),
+  -- رقم ترخيص البائع — يُطبع في عقد كل عميل باعه، فيُعرَف من باع لمن من
+  -- الورقة وحدها. تفرّده عبر فهرس مُصفَّى أدناه لنفس سبب username.
+  reseller_license NVARCHAR(40) NULL,
   created_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
   CONSTRAINT UQ_app_users_org_email UNIQUE (organization_id, email)
 );
+GO
+
+CREATE UNIQUE INDEX UQ_app_users_reseller_license
+  ON app_users(reseller_license) WHERE reseller_license IS NOT NULL;
 GO
 
 -- فهرس مُصفَّى (WHERE username IS NOT NULL) بدل UNIQUE CONSTRAINT عادي —
@@ -196,6 +209,14 @@ CREATE TABLE platform_organizations (
   legal_name NVARCHAR(200) NOT NULL,
   display_name NVARCHAR(200) NOT NULL,
   is_active BIT NOT NULL DEFAULT 1,
+  -- حساب المنصّة الذي باع هذه المنظمة — مدار العزل بين مهندسي البيع.
+  --
+  -- هنا لا على جدول organizations: هذا الجدول هو الوحيد غير المحميّ بعزل
+  -- الصفوف (عمداً — يقرؤه مالك المنصّة كلّه)، فعليه يقع الترشيح.
+  --
+  -- ولا مفتاح أجنبي إلى app_users عمداً: حذف حساب مهندس غادر يجب ألّا
+  -- يمنعه عميلٌ منسوب إليه. والنسبة المعلّقة تُصلَح من نقطة assign.
+  owner_user_id UNIQUEIDENTIFIER NULL,
   created_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
 );
 GO

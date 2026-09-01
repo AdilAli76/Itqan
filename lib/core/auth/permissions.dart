@@ -234,6 +234,27 @@ final isPlatformAdminProvider = FutureProvider<bool>((ref) async {
   return claims?['is_platform_admin'] == 'True';
 });
 
+/// أمالكُ المنصّة هو، أم مهندس بيع يعمل تحت ترخيصه؟
+///
+/// **والغياب يعني مالكاً لا مهندساً.** كل حساب منصّة أُنشئ قبل وجود
+/// المهندسين مالكٌ، وتوكنٌ أُصدر قبل الترقية يبقى صالحاً ثماني ساعات —
+/// فتفسير غياب الدعوى «مهندس» كان يسلب المالك أزراره حتى ينتهي توكنه،
+/// بلا شيء في الشاشة يدلّه على السبب. يقابل `PlatformRoles.IsOwner`.
+///
+/// وهذا إخفاءُ واجهة لا حماية: الحارس الفعلي `PlatformScope` على الخادم.
+final isPlatformOwnerProvider = FutureProvider<bool>((ref) async {
+  final claims = await readJwtClaims();
+  if (claims?['is_platform_admin'] != 'True') return false;
+  return claims?['platform_role'] != 'engineer';
+});
+
+/// رقم ترخيص البائع — يُطبع في عقد كل عميل يبيعه صاحب هذا التوكن.
+final resellerLicenseProvider = FutureProvider<String?>((ref) async {
+  final claims = await readJwtClaims();
+  final value = claims?['reseller_license'];
+  return (value is String && value.isNotEmpty) ? value : null;
+});
+
 /// يُبطل كل ما يخصّ المستخدم — يُستدعى عند الدخول وعند الخروج.
 ///
 /// **العطب الذي يصلحه:** هذه المُوفِّرات تُخزَّن لعمر التطبيق، ولا شيء
@@ -250,6 +271,10 @@ final isPlatformAdminProvider = FutureProvider<bool>((ref) async {
 void invalidateUserScopedProviders(WidgetRef ref) {
   ref.invalidate(myPermissionsProvider);
   ref.invalidate(isPlatformAdminProvider);
+  // ومُوفِّرا الدور والرقم معهما: نسيانُ أحدهما هو عين العطب الذي أوجد هذه
+  // الدالّة — مهندسٌ يدخل بعد مالك فيرى أزرار المالك حتى يُغلق التطبيق.
+  ref.invalidate(isPlatformOwnerProvider);
+  ref.invalidate(resellerLicenseProvider);
   ref.invalidate(brandingProvider);
 }
 

@@ -2537,6 +2537,75 @@ END
 GO
 
 -- ----------------------------------------------------------------------------
+--  مهندسو البيع — وكلاءُ يبيعون النظام تحت ترخيص مالك المنصّة
+--
+--  كان is_platform_admin ادّعاءً ثنائياً: إمّا مالك المنصّة كاملاً وإمّا لا
+--  شيء. فلا سبيل إلى وكيلٍ يبيع في بلدٍ آخر دون أن يرى عملاء غيره ويحذفهم.
+--
+--  platform_role يقول ما حدوده بعد البوّابة، وreseller_license يُطبع في عقد
+--  كل عميل باعه فيُعرَف من باع لمن من الورقة وحدها.
+--
+--  ⚠ NULL في platform_role يعني **مالكاً** لا مهندساً: كل حساب منصّة قائم
+--  اليوم أُنشئ مالكاً، وتفسير الغياب «مهندس» كان يسلبه صلاحياته لحظة
+--  الترقية بلا رسالة تدلّ على السبب. راجع PlatformRoles.IsOwner.
+-- ----------------------------------------------------------------------------
+IF NOT EXISTS (SELECT 1 FROM sys.columns
+               WHERE object_id = OBJECT_ID('dbo.app_users') AND name = 'platform_role')
+BEGIN
+    ALTER TABLE dbo.app_users ADD platform_role NVARCHAR(20) NULL;
+    PRINT N'أُضيف عمود app_users.platform_role';
+END
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.columns
+               WHERE object_id = OBJECT_ID('dbo.app_users') AND name = 'reseller_license')
+BEGIN
+    ALTER TABLE dbo.app_users ADD reseller_license NVARCHAR(40) NULL;
+    PRINT N'أُضيف عمود app_users.reseller_license';
+END
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.check_constraints WHERE name = 'CK_app_users_platform_role')
+   AND EXISTS (SELECT 1 FROM sys.columns
+               WHERE object_id = OBJECT_ID('dbo.app_users') AND name = 'platform_role')
+BEGIN
+    ALTER TABLE dbo.app_users ADD CONSTRAINT CK_app_users_platform_role
+        CHECK (platform_role IS NULL OR platform_role IN ('owner','engineer'));
+    PRINT N'أُضيف قيد app_users.platform_role';
+END
+GO
+
+-- الفهرس الفريد على رقم الترخيص **مفلتَر على غير الفارغ**: أغلب الحسابات
+-- بلا رقم، وفهرسٌ فريد غير مفلتَر يعتبر كل NULL قيمةً مكرّرة فيرفض الثاني.
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'UQ_app_users_reseller_license')
+   AND EXISTS (SELECT 1 FROM sys.columns
+               WHERE object_id = OBJECT_ID('dbo.app_users') AND name = 'reseller_license')
+CREATE UNIQUE INDEX UQ_app_users_reseller_license
+    ON dbo.app_users(reseller_license) WHERE reseller_license IS NOT NULL;
+GO
+
+-- ----------------------------------------------------------------------------
+--  نسبة العميل إلى بائعه — مدار العزل بين المهندسين
+--
+--  على الفهرس العالمي لا على جدول المنظمات: الفهرس هو الجدول غير المحميّ
+--  بعزل الصفوف (عمداً — يقرؤه مالك المنصّة كلّه)، وهو ما يُرشَّح عليه.
+--
+--  وNULL = بلا نسبة: منظمات أُنشئت قبل وجود المهندسين. يراها المالك ولا
+--  يراها أي مهندس — لا أحد باعها غيره.
+-- ----------------------------------------------------------------------------
+IF NOT EXISTS (SELECT 1 FROM sys.columns
+               WHERE object_id = OBJECT_ID('dbo.platform_organizations') AND name = 'owner_user_id')
+BEGIN
+    ALTER TABLE dbo.platform_organizations ADD owner_user_id UNIQUEIDENTIFIER NULL;
+    PRINT N'أُضيف عمود platform_organizations.owner_user_id';
+END
+GO
+
+-- ولا مفتاح أجنبي إلى app_users عمداً: حذف حساب مهندس غادر يجب ألّا يمنعه
+-- عميلٌ منسوب إليه، والنسبة المعلّقة تُصلَح بنقطة assign. ومرجعٌ يمنع الحذف
+-- كان سيترك حساباً معطَّلاً إلى الأبد بلا سبب مفهوم.
+
+-- ----------------------------------------------------------------------------
 --  فهارس الأداء — ملف منفصل لأنه يُنفَّذ ويُعاد بلا خطر
 -- ----------------------------------------------------------------------------
 PRINT N'لا تنسَ تنفيذ docs\INDEXES.sql على هذه القاعدة أيضاً.';

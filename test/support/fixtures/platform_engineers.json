@@ -1,0 +1,32 @@
+[
+  {
+    "id": "bbbb0000-0000-0000-0000-000000000001",
+    "fullName": "عادل إدريس",
+    "email": "owner@itqan.ly",
+    "resellerLicense": "KE-0001",
+    "isActive": true,
+    "platformRole": "owner",
+    "createdAt": "2026-01-04T09:00:00",
+    "organizationCount": 9
+  },
+  {
+    "id": "bbbb0000-0000-0000-0000-000000000002",
+    "fullName": "مهندس دنقل",
+    "email": "dongola@itqan.ly",
+    "resellerLicense": "KE-0002",
+    "isActive": true,
+    "platformRole": "engineer",
+    "createdAt": "2026-06-18T11:30:00",
+    "organizationCount": 3
+  },
+  {
+    "id": "bbbb0000-0000-0000-0000-000000000003",
+    "fullName": "مهندس بنغازي",
+    "email": "benghazi@itqan.ly",
+    "resellerLicense": "KE-0003",
+    "isActive": false,
+    "platformRole": "engineer",
+    "createdAt": "2026-07-02T08:15:00",
+    "organizationCount": 0
+  }
+]

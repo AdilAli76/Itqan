@@ -145,6 +145,12 @@ void main() {
                       isSuperAdmin: true,
                       codes: {},
                     )),
+                // وحساب منصّة مالك: شاشات المنصّة صارت خلف حارس
+                // ([_PlatformOnly] في screen_registry)، ولا توكن في
+                // الاختبار — فكانت تُصوَّر ثلاثتها برسالة المنع بدل
+                // محتواها، ولقطةٌ لرسالة منع تمرّ خضراء وتُخفي الشاشة.
+                isPlatformAdminProvider.overrideWith((ref) async => true),
+                isPlatformOwnerProvider.overrideWith((ref) async => true),
               ],
               child: MaterialApp(
                 debugShowCheckedModeBanner: false,
@@ -225,6 +231,8 @@ void main() {
                       isSuperAdmin: true,
                       codes: {},
                     )),
+                isPlatformAdminProvider.overrideWith((ref) async => true),
+                isPlatformOwnerProvider.overrideWith((ref) async => true),
               ],
               child: MaterialApp(
                 debugShowCheckedModeBanner: false,

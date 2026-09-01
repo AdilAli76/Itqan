@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
+import '../../../core/auth/permissions.dart';
 import '../../../core/network/api_client.dart';
 import '../../../core/responsive/adaptive_scaffold.dart';
 import '../../../core/responsive/breakpoints.dart';
@@ -11,6 +12,9 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_text_styles.dart';
 import '../../../shared/widgets/app_surface.dart';
 import '../../../shared/widgets/stat_card.dart';
+import '../data/platform_organizations_providers.dart';
+import 'platform_engineers_body.dart';
+import 'platform_organizations_screen.dart';
 
 final _money = NumberFormat('#,##0.00', 'en');
 final _integer = NumberFormat('#,##0', 'en');
@@ -45,43 +49,102 @@ class PlatformDashboardScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final async = ref.watch(platformDashboardProvider);
+    // تبويب حسابات البيع لمالك المنصّة وحده — الخادم يردّ 403 لغيره،
+    // وتبويبٌ يُفتح ليُقابَل برسالة منعٍ أسوأ من تبويب غائب.
+    final isOwner = ref.watch(isPlatformOwnerProvider).valueOrNull ?? false;
+    final count = isOwner ? 3 : 2;
 
-    return AdaptiveScaffold(
-      title: 'لوحة المنصّة',
-      activeRoute: '/platform',
-      // القائمة تمرّر نفسها: لفّها بمُمرِّر خارجي يعطيها ارتفاعاً غير
-      // محدود فتنهار بـ«Vertical viewport was given unbounded height» —
-      // شاشةٌ بيضاء عند المستخدم. راجع AdaptiveScaffold.scrollable.
-      scrollable: false,
-      actions: [
-        TextButton.icon(
-          onPressed: () => ref.invalidate(platformDashboardProvider),
-          icon: const Icon(Icons.refresh, size: 18),
-          label: const Text('تحديث'),
-        ),
-      ],
-      body: async.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (err, _) => Center(
-          child: Padding(
-            padding: const EdgeInsets.all(24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(_errorText(err, 'تعذّر تحميل اللوحة'),
-                    style: AppTextStyles.bodyMd(color: AppColors.danger)),
-                const SizedBox(height: 12),
-                TextButton(
-                  onPressed: () => ref.invalidate(platformDashboardProvider),
-                  child: const Text('إعادة المحاولة'),
+    // [DefaultTabController] لا متحكّمٌ يُدار باليد.
+    //
+    // قراءة الدور غير متزامنة، فتبدأ الشاشة بتبويبين ثم تصير ثلاثة حين
+    // تصل — ومتحكّمٌ يُنشأ في build ويُتلَف فيه وقع في عطبين معاً:
+    // SingleTickerProviderStateMixin يرفض مؤقّتاً ثانياً، وdispose تُتلف
+    // متحكّماً متلَفاً سلفاً. وهذا الودجت يتكفّل بتبديل الطول بنفسه.
+    return DefaultTabController(
+      length: count,
+      child: AdaptiveScaffold(
+        title: 'لوحة المنصّة',
+        activeRoute: '/platform',
+        // القائمة تمرّر نفسها: لفّها بمُمرِّر خارجي يعطيها ارتفاعاً غير
+        // محدود فتنهار بـ«Vertical viewport was given unbounded height» —
+        // شاشةٌ بيضاء عند المستخدم. راجع AdaptiveScaffold.scrollable.
+        scrollable: false,
+        actions: [
+          // «عميل جديد» زرٌّ لا تبويب: النموذج طويل يُملأ مرّةً وينتهي،
+          // وتبويبٌ يحمله يُترك نصف ممتلئ كلّما نُقر على تبويب آخر.
+          TextButton.icon(
+            onPressed: () => ref.read(openTabsProvider.notifier).open(
+                  '/platform/organizations/new',
+                  title: 'إنشاء منظمة جديدة',
+                  icon: Icons.add_business_outlined,
                 ),
+            icon: const Icon(Icons.add_business_outlined, size: 18),
+            label: const Text('عميل جديد'),
+          ),
+          TextButton.icon(
+            onPressed: () {
+              ref.invalidate(platformDashboardProvider);
+              ref.invalidate(platformOrganizationsProvider);
+              ref.invalidate(platformEngineersProvider);
+            },
+            icon: const Icon(Icons.refresh, size: 18),
+            label: const Text('تحديث'),
+          ),
+        ],
+        body: Column(
+          children: [
+            TabBar(
+              tabs: [
+                const Tab(text: 'نظرة عامة'),
+                const Tab(text: 'العملاء'),
+                if (isOwner) const Tab(text: 'حسابات البيع'),
               ],
             ),
+            Expanded(
+              child: TabBarView(
+                children: [
+                  const _OverviewTab(),
+                  const PlatformOrganizationsBody(),
+                  if (isOwner) const PlatformEngineersBody(),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// أرقام المنصّة — التبويب الأول.
+class _OverviewTab extends ConsumerWidget {
+  const _OverviewTab();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final async = ref.watch(platformDashboardProvider);
+
+    return async.when(
+      loading: () => const Center(child: CircularProgressIndicator()),
+      error: (err, _) => Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(_errorText(err, 'تعذّر تحميل اللوحة'),
+                  style: AppTextStyles.bodyMd(color: AppColors.danger),
+                  textAlign: TextAlign.center),
+              const SizedBox(height: 12),
+              TextButton(
+                onPressed: () => ref.invalidate(platformDashboardProvider),
+                child: const Text('إعادة المحاولة'),
+              ),
+            ],
           ),
         ),
-        data: (data) => _Body(data: data),
       ),
+      data: (data) => _Body(data: data),
     );
   }
 }
@@ -213,6 +276,8 @@ class _ExpiringRow extends ConsumerWidget {
             style: AppTextStyles.bodyMd(
                 color: expired ? AppColors.danger : AppColors.warning),
           ),
+          // القائمة صارت تبويباً في هذه اللوحة نفسها، فلا فتحَ لتبويب
+          // ثانٍ يحمل الشاشة مرّتين. والمسار يبقى مسجَّلاً لروابط محفوظة.
           onTap: () => ref
               .read(openTabsProvider.notifier)
               .open('/platform/organizations',
