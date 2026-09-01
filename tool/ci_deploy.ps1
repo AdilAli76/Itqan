@@ -218,7 +218,56 @@ if (-not (Test-Path $update)) { throw "deploy_update.ps1 غير موجود في 
 #
 # ويأتي **بعد** الترقية: deploy_update ينسخ backend فوق القديم، وما يُوضع
 # قبله في wwwroot قد يُدهَس.
-Step 5 'نسخة الأندرويد ونقطة التحديث'
+Step 5 'نسخ الأجهزة ونقطة التحديث'
+
+# ── تطبيق سطح المكتب ────────────────────────────────────────────────────
+#
+# **الحلقة التي تُغلَق هنا:** التطبيق يُبنى ويدخل الحزمة تحت desktop/، ثمّ
+# لا شيء يُخرجه منها: deploy_update ينسخ backend وsql وtool فقط، والمجلد
+# المؤقّت يُمحى معه. فالتطبيق يُبنى في كل نشرة ويضيع في كل نشرة.
+#
+# ويُفكّ **من الحزمة المتحقَّق من بصمتها** لا يُنزَّل ثانيةً: هو جزء منها،
+# وتنزيله منفرداً يُدخل احتمال أن يصل الجهازَ بناءٌ غير الذي جُرِّب.
+#
+# ويُوضع في موضعين لغرضين مختلفين:
+#   $root\desktop        — نسخةٌ على الخادم تُنسخ إلى أجهزة المحلّ بالشبكة.
+#   wwwroot\app\*.zip    — رابط تنزيل من نطاقك، كما يفعل الأندرويد تماماً.
+$deskVersion = $Tag -replace '^v', ''
+$deskZipName = "itqan-desktop-$deskVersion.zip"
+
+# يُهيَّأ صراحةً: يُقرأ في كتلةٍ أخرى بعد عشرات الأسطر، ومتغيّرٌ لم يُعرَّف
+# قطّ يُقرأ $null بصمت — وهو ما يجعل الفرق بين «تعذّر» و«لم يُحاوَل» غير
+# مرئي في السجلّ.
+$deskReady = $false
+
+try {
+    $extract = Join-Path $env:RUNNER_TEMP "kinetic-desktop-$deskVersion"
+    if (Test-Path $extract) { Remove-Item $extract -Recurse -Force }
+    Expand-Archive -LiteralPath $pkg -DestinationPath $extract -Force
+
+    $deskSrc = Join-Path $extract 'desktop'
+    if (-not (Test-Path $deskSrc)) {
+        Warn 'لا مجلد desktop في هذه الحزمة — حزمةٌ بُنيت قبل إضافته.'
+    }
+    else {
+        # النسخة على الخادم: تُستبدل كاملةً لا تُدمَج. ملفٌّ من نسخةٍ سابقة
+        # يبقى بجوار ملفّات الجديدة يُنتج تطبيقاً يفتح ثم يُغلق بلا رسالة.
+        $deskDst = Join-Path $root 'desktop'
+        if (Test-Path $deskDst) { Remove-Item $deskDst -Recurse -Force }
+        Copy-Item $deskSrc $deskDst -Recurse -Force
+        Ok "سطح المكتب على الخادم: $deskDst"
+
+        # وملفُّ عنوان الخادم بجواره — فمن نسخ المجلد إلى جهازٍ في المحلّ
+        # لا يُقابَل بسؤال «أدخل عنوان الخادم». راجع ApiClient.
+        # (يُكتب بعد اشتقاق النطاق أدناه، فيُؤجَّل إلى هناك.)
+        $deskReady = $true
+    }
+} catch {
+    # فشل سطح المكتب لا يُسقط نشرةً نجحت: الخادم يعمل والأندرويد يُخدَم،
+    # وهذا ملفٌّ يُنسخ. يُسجَّل بوضوح ويُكمَل.
+    Warn "تعذّر تجهيز تطبيق سطح المكتب: $($_.Exception.Message)"
+}
+
 
 $apk = $rel.assets | Where-Object { $_.name -like 'itqan-*.apk' } | Select-Object -First 1
 if (-not $apk) {
@@ -261,6 +310,38 @@ else {
 
         $downloadUrl = "https://$hostName/app/$($apk.name)"
 
+        # ── رابط تنزيل سطح المكتب ───────────────────────────────────────
+        #
+        # يُضغَط **بعد** الترقية: deploy_update ينسخ backend فوق القديم،
+        # وwwwroot معه — فأي ملفٍّ يُوضع قبله يُدهَس. نفس سبب تأخير الأندرويد.
+        $desktopUrl = $null
+        if ($deskReady) {
+            try {
+                # وserver.txt يُكتب الآن لا قبل اشتقاق النطاق: عنوان الخادم
+                # هو ما يجعل النسخة المنسوخة إلى جهازٍ في المحلّ تعمل بلا
+                # سؤالٍ عن عنوان لا يعرفه من يفتحها.
+                @(
+                    '# عنوان خادم إتقان — كتبته نشرة الخادم.',
+                    '# غيّره فقط إن نُقل الخادم إلى نطاق آخر.',
+                    "https://$hostName/api"
+                ) | Set-Content -LiteralPath (Join-Path $root 'desktop\server.txt') -Encoding utf8
+
+                $deskZip = Join-Path $appDir $deskZipName
+                if (Test-Path $deskZip) { Remove-Item $deskZip -Force }
+                Compress-Archive -Path (Join-Path $root 'desktop\*') -DestinationPath $deskZip -Force
+
+                # آخر ثلاث نسخ تبقى — كما تفعل حزم الأندرويد أعلاه.
+                Get-ChildItem -Path $appDir -Filter 'itqan-desktop-*.zip' |
+                    Sort-Object LastWriteTime -Descending | Select-Object -Skip 3 |
+                    ForEach-Object { Remove-Item $_.FullName -Force -ErrorAction SilentlyContinue }
+
+                $desktopUrl = "https://$hostName/app/$deskZipName"
+                Ok "$deskZipName  ($([math]::Round((Get-Item $deskZip).Length / 1MB, 1)) ميغابايت)"
+            } catch {
+                Warn "تعذّر تجهيز رابط سطح المكتب: $($_.Exception.Message)"
+            }
+        }
+
         # ملف الأسرار يُنسخ قبل التعديل: خطأٌ في كتابته يُسقط الموقع كلّه —
         # سلسلة الاتصال ومفتاح JWT فيه.
         $settingsPath = Join-Path $root 'backend\appsettings.Production.json'
@@ -274,6 +355,12 @@ else {
             }
             $cfg.AppVersion | Add-Member -NotePropertyName Latest -NotePropertyValue $version -Force
             $cfg.AppVersion | Add-Member -NotePropertyName AndroidDownloadUrl -NotePropertyValue $downloadUrl -Force
+            # DownloadUrl لسطح المكتب: كان معرَّفاً في عقد AppVersionDto منذ
+            # بنائه **ولا يكتبه أحد** — أي أن مدقّق التحديث على سطح المكتب
+            # كان يجد رابطاً فارغاً أبداً، فيقول «تحديث متاح» بلا ما يُنزَّل.
+            if ($desktopUrl) {
+                $cfg.AppVersion | Add-Member -NotePropertyName DownloadUrl -NotePropertyValue $desktopUrl -Force
+            }
             $cfg.AppVersion | Add-Member -NotePropertyName Mandatory -NotePropertyValue ([bool]$MandatoryUpdate) -Force
 
             $cfg | ConvertTo-Json -Depth 20 | Set-Content $settingsPath -Encoding UTF8
@@ -285,7 +372,9 @@ else {
                 [string]::IsNullOrWhiteSpace($check.ConnectionStrings.Default)) {
                 throw 'الملف المكتوب ناقص مفتاح JWT أو سلسلة الاتصال.'
             }
-            Ok "نقطة التحديث: $version — $downloadUrl"
+            Ok "نقطة التحديث: $version"
+            Ok "  أندرويد   : $downloadUrl"
+            if ($desktopUrl) { Ok "  سطح المكتب: $desktopUrl" }
             if ($MandatoryUpdate) { Warn 'التحديث معلَّم إلزامياً.' }
         }
         catch {
