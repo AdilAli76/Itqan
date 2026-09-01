@@ -2,6 +2,11 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart' show ValueNotifier, kIsWeb;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
+// استيرادٌ شرطي: `dart:io` غير موجود على الويب، واستيرادُه مباشرةً يُسقط
+// `flutter build web` كلّه — والويب هو ما يُنشر على خادمك.
+import 'installed_server_web.dart'
+    if (dart.library.io) 'installed_server_io.dart';
+
 /// عميل HTTP موحّد لكل النظام — بديل مباشر لـ Supabase.instance.client.
 /// يحقن توكن JWT تلقائياً في كل طلب، ويُنشأ مرة واحدة عبر [ApiClient.instance].
 class ApiClient {
@@ -79,9 +84,29 @@ class ApiClient {
   ///
   /// المخبوز وقت البناء يتقدّم على المحفوظ: من بنى نسخةً لعميل بعينه قصد
   /// أن تعمل على خادمه وحده، ولا يصحّ أن يُغيّره مستخدم على الجهاز.
+  /// عنوانٌ كتبه المُركِّب في ملفٍّ بجوار التطبيق — للتركيب المحلّي.
+  ///
+  /// **الحاجة التي يسدّها:** النسخة المحلّية بلا إنترنت تعمل على جهاز
+  /// المحلّ نفسه، وعنوانها معلومٌ لحظةَ التركيب. وبلا هذا كان الزبون يُقابَل
+  /// بشاشة «أدخل عنوان الخادم» في أوّل فتحة — سؤالٌ لا يعرف جوابه عن
+  /// جهازٍ أمامه.
+  ///
+  /// **ولماذا ملفٌّ لا خبزٌ وقت البناء:** الخبز يعني نسختين من التطبيق
+  /// تُبنيان وتُوقَّعان وتُختبران — بينما الفرق سطرٌ نصّي. وهو عين ما
+  /// أُصلح في الأندرويد من قبل: «نسخة APK لكل عميل».
+  static String? _installedBaseUrl;
+
+  /// العنوان الفعّال، بترتيب الأولوية.
+  ///
+  /// المخبوز وقت البناء يتقدّم على المحفوظ: من بنى نسخةً لعميل بعينه قصد
+  /// أن تعمل على خادمه وحده، ولا يصحّ أن يُغيّره مستخدم على الجهاز.
+  ///
+  /// ثم ما اختاره المستخدم، ثم ما كتبه المُركِّب: من غيّر العنوان بيده قصد
+  /// ذلك، وملفُّ التركيب افتراضٌ أوّليّ لا أمرٌ يُلغي قراره.
   static String get resolvedBaseUrl {
     if (_definedBaseUrl.isNotEmpty) return _definedBaseUrl;
     if (_savedBaseUrl != null && _savedBaseUrl!.isNotEmpty) return _savedBaseUrl!;
+    if (_installedBaseUrl != null && _installedBaseUrl!.isNotEmpty) return _installedBaseUrl!;
     if (kIsWeb) return '${Uri.base.origin}/api';
     return '';
   }
@@ -97,6 +122,11 @@ class ApiClient {
   /// يُستدعى مرّة قبل runApp.
   static Future<void> loadSavedServer() async {
     if (!canChangeServer) return;
+
+    // ملفُّ التركيب أوّلاً ثم المحفوظ فوقه: القراءة بهذا الترتيب تجعل
+    // اختيار المستخدم يغلب، ويبقى الملف افتراضاً حين لا اختيار.
+    _installedBaseUrl = readInstalledServer();
+
     try {
       _savedBaseUrl = await const FlutterSecureStorage().read(key: _serverKey);
       instance._applyBaseUrl();

@@ -410,6 +410,52 @@ else {
     Info 'الخدمة تعمل لكن الخادم لا يردّ — راجع سجل الأحداث.'
 }
 
+# ── 8.5 تطبيق سطح المكتب ────────────────────────────────────────────────
+#
+# الزبون يفتح أيقونةً على سطح المكتب لا متصفّحاً على عنوانٍ يحفظه. والمتصفّح
+# يبقى بديلاً لأجهزة المحلّ الأخرى.
+#
+# وserver.txt بجوار الملف التنفيذي يُغني عن شاشة «أدخل عنوان الخادم» —
+# سؤالٌ لا يعرف جوابه صاحب محلّ عن جهازٍ أمامه. راجع ApiClient.
+$desktopDir = Join-Path $PackagePath 'desktop'
+$desktopExe = Join-Path $desktopDir 'kinetic_enterprise.exe'
+
+if (Test-Path $desktopExe) {
+    Head '٨.٥ تطبيق سطح المكتب'
+
+    # /api لا العنوان وحده: ApiClient يضيف المسارات إلى هذه القاعدة، وهي
+    # نفس ما يشتقّه الويب من أصل الصفحة.
+    $serverFile = Join-Path $desktopDir 'server.txt'
+    @(
+        '# عنوان خادم إتقان على هذا الجهاز — كتبه سكربت التركيب.',
+        '# غيّره فقط إن نُقل الخادم إلى جهاز آخر.',
+        "$baseUrl/api"
+    ) | Set-Content -LiteralPath $serverFile -Encoding utf8
+    Ok "server.txt: $baseUrl/api"
+
+    # الاختصار على سطح المكتب **العامّ** لا مكتب من يُركّب: التركيب يُنفَّذ
+    # بحساب مسؤول، وسطحُ مكتبه ليس سطح مكتب من يعمل على الجهاز يومياً.
+    try {
+        $desktopPath = [Environment]::GetFolderPath('CommonDesktopDirectory')
+        $lnk = Join-Path $desktopPath 'منظومة إتقان.lnk'
+        $shell = New-Object -ComObject WScript.Shell
+        $sc = $shell.CreateShortcut($lnk)
+        $sc.TargetPath = $desktopExe
+        # مجلد العمل بجوار الملف التنفيذي: بدونه يبحث التطبيق عن server.txt
+        # ومجلد data في مجلد من شغّله — فيفتح على شاشة إعداد بلا سبب ظاهر.
+        $sc.WorkingDirectory = $desktopDir
+        $sc.Description = 'منظومة إتقان ERP'
+        $sc.Save()
+        Ok "اختصار على سطح المكتب: $lnk"
+    } catch {
+        Warn "تعذّر إنشاء الاختصار: $($_.Exception.Message)"
+        Warn "شغّل التطبيق يدوياً من: $desktopExe"
+    }
+} else {
+    Warn 'لا مجلد desktop في الحزمة — الوصول عبر المتصفّح وحده.'
+    Warn 'ابنِ حزمةً حديثة (publish.ps1) ليُضمَّن تطبيق سطح المكتب.'
+}
+
 # ── 9. البصمة والخطوات المتبقّية ────────────────────────────────────────
 Head '٩. ما تبقّى — خطوتان يدويتان'
 
@@ -429,6 +475,11 @@ Write-Host ''
 
 Head 'تمّ'
 Write-Host ''
+if (Test-Path $desktopExe) {
+    Write-Host '  افتح «منظومة إتقان» من أيقونة سطح المكتب.' -ForegroundColor Green
+    Write-Host '  والترخيص يُفعَّل من داخل التطبيق: الترخيص والاشتراك ← تفعيل النسخة.' -ForegroundColor Green
+    Write-Host ''
+}
 Write-Host "  العنوان على هذا الجهاز:  $baseUrl" -ForegroundColor Green
 if (-not $LocalhostOnly) {
     $ip = (Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |

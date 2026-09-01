@@ -71,6 +71,17 @@ public static class LicenseVerification
         lock (_gate) { _cache.Remove(organizationId); }
     }
 
+    /// <summary>
+    /// يفحص مفتاحاً **قبل** حفظه — بلا لمس القاعدة ولا التخزين المؤقّت.
+    ///
+    /// <para>شاشة التفعيل تحتاجها: حفظُ مفتاح فاسد ثم اكتشافُ ذلك عند أوّل
+    /// كتابة يترك العميل بنظامٍ للقراءة فقط ورسالةٍ يظنّها عطباً في الحفظ.
+    /// وهي نفس [Evaluate] لا نسخةٌ ثانية منها — فحصٌ يُكتب مرّتين يفترق
+    /// أوّل مرّة يُشدَّد أحدهما.</para>
+    /// </summary>
+    public static LicenseCheck Inspect(Guid organizationId, string licenseKey, IConfiguration config) =>
+        Evaluate(organizationId, licenseKey, config);
+
     private static LicenseCheck Evaluate(Guid organizationId, string? licenseKey, IConfiguration config)
     {
         var publicKey = config["License:PublicKey"];

@@ -89,13 +89,13 @@ BEGIN
     BEGIN
         BLOCK "040904e4"
         BEGIN
-            VALUE "CompanyName", "com.example" "\0"
-            VALUE "FileDescription", "kinetic_enterprise" "\0"
+            VALUE "CompanyName", "Itqan Software" "\0"
+            VALUE "FileDescription", "Itqan Enterprise ERP" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
             VALUE "InternalName", "kinetic_enterprise" "\0"
-            VALUE "LegalCopyright", "Copyright (C) 2026 com.example. All rights reserved." "\0"
+            VALUE "LegalCopyright", "Copyright (C) 2026 Itqan Software. All rights reserved." "\0"
             VALUE "OriginalFilename", "kinetic_enterprise.exe" "\0"
-            VALUE "ProductName", "kinetic_enterprise" "\0"
+            VALUE "ProductName", "Itqan Enterprise ERP" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END

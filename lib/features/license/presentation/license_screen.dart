@@ -8,6 +8,7 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_text_styles.dart';
 import '../../../shared/widgets/stat_card.dart';
 import '../data/license_providers.dart';
+import 'activation_card.dart';
 import '../../../core/auth/permissions.dart';
 
 const _planLabels = {
@@ -81,7 +82,17 @@ class LicenseScreen extends ConsumerWidget {
             ),
           );
         },
-        data: (license) => _LicenseContent(license: license),
+        // البطاقة **مع** المحتوى لا بدلاً منه: التفعيل يُراجَع أحياناً وكل
+        // شيء سليم (تجديدٌ قبل الانتهاء)، فإخفاؤها خلف حالة العطب يجعلها
+        // لا تُوجَد إلا حين لا يستطيع أحد الوصول إليها.
+        data: (license) => ListView(
+          padding: EdgeInsets.zero,
+          shrinkWrap: true,
+          children: [
+            _LicenseContent(license: license),
+            const ActivationCard(),
+          ],
+        ),
       ),
     );
   }

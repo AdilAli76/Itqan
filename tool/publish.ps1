@@ -40,6 +40,14 @@ param(
     [string]$ApiUrl,
     [string]$Output,
     [switch]$SkipWeb,
+    <#
+      تخطّي بناء تطبيق سطح المكتب.
+
+      يُبنى افتراضياً لأن التركيب المحلّي (install_local.ps1) يعمل من مجلد
+      هذه الحزمة نفسه ويحتاجه. ونسخُه إلى خادمٍ لا يستعمله كلفتُه ميغابايتات
+      في ملفٍّ يُنزَّل مرّة، مقابل حزمتين تفترقان لو فُصل.
+    #>
+    [switch]$SkipDesktop,
     # للتجربة الأولى على عنوان IP قبل توفّر النطاق والشهادة. لا يُستعمل
     # لتسليم حقيقي: التوكنات وكلمات المرور تمرّ نصاً واضحاً على الشبكة.
     [switch]$AllowInsecure
@@ -168,8 +176,41 @@ if (-not $SkipWeb) {
     }
 }
 
-# ── 5. ملفات SQL ────────────────────────────────────────────────────────
-Step 5 'ملفات قاعدة البيانات'
+# ── تطبيق سطح المكتب ────────────────────────────────────────────────────
+#
+# نسخةٌ واحدة تخدم الحالتين، والفرق في **التغليف** لا في الشيفرة:
+#
+#   - المتّصلة بخادمك: تُفتح فتسأل عن عنوان الخادم مرّة ويُحفظ على الجهاز
+#     (راجع ServerSetupScreen وApiClient.loadSavedServer).
+#   - المحلّية بلا إنترنت: install_local.ps1 يكتب العنوان على localhost
+#     فلا يرى الزبون شاشة الخادم أصلاً.
+#
+# ولذلك **لا يُخبَز العنوان هنا**: خبزُه يعني حزمةً لكل عميل — وهو العطب
+# الذي أُصلح في الأندرويد من قبل (راجع ApiClient._definedBaseUrl).
+if (-not $SkipDesktop) {
+    Step 5 'بناء تطبيق سطح المكتب (ويندوز)'
+    Push-Location $root
+    try {
+        & flutter build windows --release
+        if ($LASTEXITCODE -ne 0) { throw 'flutter build windows فشل' }
+    } finally { Pop-Location }
+
+    $desktopSrc = Join-Path $root 'build\windows\x64\runner\Release'
+    if (-not (Test-Path $desktopSrc)) {
+        throw "لم يُعثر على مخرجات ويندوز في $desktopSrc — تغيّر مسار البناء في فلاتر؟"
+    }
+
+    # المجلد كامل لا الـexe وحده: التطبيق يحتاج flutter_windows.dll ومجلد
+    # data بجواره، ونسخُ الملف التنفيذي وحده يُنتج نافذةً تفتح ثم تُغلق
+    # بلا رسالة — وهو أسوأ أشكال العطب على جهاز زبون.
+    $desktopOut = Join-Path $Output 'desktop'
+    Copy-Item -Path $desktopSrc -Destination $desktopOut -Recurse
+    $mb = [math]::Round(((Get-ChildItem $desktopOut -Recurse -File | Measure-Object Length -Sum).Sum / 1MB), 1)
+    Ok "سطح المكتب جاهز في desktop\ ($mb ميغابايت)"
+}
+
+# ── 6. ملفات SQL ────────────────────────────────────────────────────────
+Step 6 'ملفات قاعدة البيانات'
 $sqlOut = Join-Path $Output 'sql'
 New-Item -ItemType Directory -Path $sqlOut | Out-Null
 foreach ($f in @('docs\DATABASE_SCHEMA_SQLSERVER.sql', 'docs\MIGRATIONS.sql', 'docs\INDEXES.sql')) {
@@ -195,7 +236,7 @@ Ok 'expected_schema.json'
 #  ولا تدخل الحزمة أدوات التطوير (publish، run_local، capture_fixtures،
 #  generate_app_icons): لا معنى لها على سيرفر بلا مستودع ولا Flutter، ووجودها
 #  يوحي بأنها جزء من التشغيل.
-Step 5.5 'سكربتات السيرفر'
+Step 6.5 'سكربتات السيرفر'
 $toolOut = Join-Path $Output 'tool'
 New-Item -ItemType Directory -Path $toolOut | Out-Null
 foreach ($f in @('server_setup.ps1', 'setup_staging.ps1', 'backup.ps1',
@@ -207,7 +248,7 @@ foreach ($f in @('server_setup.ps1', 'setup_staging.ps1', 'backup.ps1',
 }
 
 # ── 6. قالب الإعدادات ───────────────────────────────────────────────────
-Step 6 'قالب الإعدادات'
+Step 7 'قالب الإعدادات'
 @'
 {
   "// تحذير": "املأ هذا الملف على السيرفر وحده. لا يُرفع على Git أبداً.",
@@ -227,7 +268,7 @@ Step 6 'قالب الإعدادات'
 Ok 'appsettings.Production.template.json'
 
 # ── 7. تعليمات مرافقة ───────────────────────────────────────────────────
-Step 7 'تعليمات مرافقة'
+Step 8 'تعليمات مرافقة'
 @"
 تثبيت Kinetic Enterprise على السيرفر
 =====================================
@@ -315,7 +356,7 @@ Step 7 'تعليمات مرافقة'
 Ok 'README-النشر.txt'
 
 # ── 8. ضغط ──────────────────────────────────────────────────────────────
-Step 8 'ضغط الحزمة'
+Step 9 'ضغط الحزمة'
 
 # اسمٌ مؤرَّخ لا اسمٌ ثابت: kinetic_pkg_2026-08-29_1226.zip
 #
