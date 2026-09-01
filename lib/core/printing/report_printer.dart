@@ -62,11 +62,23 @@ Future<void> printReport({
               style: const pw.TextStyle(fontSize: 15, fontWeight: pw.FontWeight.bold)),
           if (from != null || to != null) ...[
             pw.SizedBox(height: 2),
-            pdfLtr(pw.Text(
-              'من ${from == null ? '—' : _dateFormat.format(from)}'
-              ' إلى ${to == null ? '—' : _dateFormat.format(to)}',
-              style: const pw.TextStyle(fontSize: 9),
-            )),
+            // سطرٌ مختلط: كلمتان عربيّتان وتاريخان لاتينيّان.
+            //
+            // كان مغلّفاً كلّه بـ[pdfLtr] فخرج «ىل إ — نم» — الكلمات
+            // العربية معكوسةً ومقطّعة الحروف. وتغليفه كلّه بـRTL يقلب
+            // التاريخ. فيُبنى صفّاً: كلٌّ باتجاهه، والصفّ نفسه يتبع اتجاه
+            // الصفحة فيبدأ من اليمين.
+            pw.Row(
+              mainAxisSize: pw.MainAxisSize.min,
+              children: [
+                pdfAutoDir('من ', style: const pw.TextStyle(fontSize: 9)),
+                pdfLtr(pw.Text(from == null ? '—' : _dateFormat.format(from),
+                    style: const pw.TextStyle(fontSize: 9))),
+                pdfAutoDir('  إلى ', style: const pw.TextStyle(fontSize: 9)),
+                pdfLtr(pw.Text(to == null ? '—' : _dateFormat.format(to),
+                    style: const pw.TextStyle(fontSize: 9))),
+              ],
+            ),
           ],
           pw.Divider(),
         ],
@@ -102,9 +114,23 @@ Future<void> printReport({
           pw.SizedBox(height: 14),
         ],
         if (columns.isNotEmpty)
+          // ── الأعمدة معكوسة عمداً ───────────────────────────────────────
+          //
+          // `textDirection: rtl` على الصفحة يضبط اتجاه **النصّ** لا ترتيب
+          // أعمدة الجدول: حزمة pdf ترصّ الأعمدة من اليسار دائماً. فكان
+          // العمود الأول («الرمز» في دليل الحسابات) يقع أقصى اليسار
+          // والأخير أقصى اليمين — جدولٌ إنجليزي بنصّ عربي، يُقرأ بالمقلوب.
+          //
+          // والقلب **هنا** لا في كل مُستدعٍ: خمسة دفاتر وشاشة التقارير
+          // تمرّ كلّها من هذه الدالّة، وقلبٌ يُنفَّذ في أربعةٍ ويُنسى في
+          // الخامس هو ما ينتهي على ورقٍ بيد محاسب. راجع نفس المصيدة
+          // محلولةً يدوياً في [purchase_order_printer].
+          //
+          // والمُستدعون يكتبون أعمدتهم بالترتيب الطبيعي (الأول يميناً)،
+          // فلا يعرف أحدهم بهذا القلب ولا يحتاج أن يعرف.
           pw.TableHelper.fromTextArray(
-            headers: columns,
-            data: rows,
+            headers: columns.reversed.toList(),
+            data: [for (final row in rows) row.reversed.toList()],
             headerStyle: const pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold),
             cellStyle: const pw.TextStyle(fontSize: 8),
             headerDecoration: const pw.BoxDecoration(color: PdfColors.grey200),

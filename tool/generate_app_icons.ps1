@@ -143,6 +143,41 @@ foreach ($entry in $launcherSizes.GetEnumerator() | Sort-Object Value) {
 }
 Ok "ic_launcher — $($launcherSizes.Count) كثافات"
 
+# ── طبقات الأيقونة التكيّفية ──────────────────────────────────────────────
+#
+#   ⚠ **هذه هي الأيقونة التي يراها كل هاتف حديث، لا ic_launcher.png.**
+#
+#   mipmap-anydpi-v26/ic_launcher.xml يعلن adaptive-icon، وأندرويد ٨ فما
+#   فوق يفضّله على الصورة الجاهزة دائماً. وكان هذا المولّد يكتب
+#   ic_launcher.png وحدها ويترك ic_launcher_foreground.png كما وُلدت أوّل
+#   مرّة — أيقونةً تركيبية رُسمت بالكود قبل أن يوجد شعار.
+#
+#   فكانت النتيجة: شعار إتقان في المستودع، وعقدةٌ ذهبية عامّة على شاشة كل
+#   جهاز. والملف الصحيح موجودٌ بجواره ولا أحد يقرؤه — وهو أسوأ من غيابه،
+#   لأن فحصه بالعين يقول إن الأيقونة سليمة.
+#
+#   والهامش ٢٥٪ ليس تجميلاً: النظام يقصّ الطبقة الأمامية بقناعه الخاص
+#   (دائرة، حصاة، مربّع دائري) ويحتفظ بالثلثين الأوسطين فقط. شعارٌ يملأ
+#   المربّع كاملاً يُقصّ طرفاه على أجهزة سامسونج وحدها — عطبٌ لا يظهر على
+#   جهاز المطوّر.
+#
+#   والطبقة شفّافة: الخلفية يحدّدها ic_launcher_background.xml، ورسمُها
+#   هنا يُنتج مربّعاً ظاهراً داخل القناع.
+foreach ($entry in $launcherSizes.GetEnumerator() | Sort-Object Value) {
+    Save-Icon (Join-Path $res "$($entry.Key)\ic_launcher_foreground.png") $entry.Value -Inset 0.25 -Transparent
+    # الطبقة الأحادية (أيقونات أندرويد ١٣ المموّهة): النظام يقرأ شكلها
+    # ويلوّنها بلون النظام، فتُشتقّ من نفس الشعار بنفس الهامش لا تُترك
+    # متخلّفة عنه.
+    Save-Icon (Join-Path $res "$($entry.Key)\ic_launcher_monochrome.png") $entry.Value -Inset 0.25 -Transparent
+}
+Ok "ic_launcher_foreground · ic_launcher_monochrome — بهامش ٢٥٪ للقناع"
+
+# والأيقونة المستديرة: أجهزة تطلبها صراحةً عبر android:roundIcon.
+foreach ($entry in $launcherSizes.GetEnumerator() | Sort-Object Value) {
+    Save-Icon (Join-Path $res "$($entry.Key)\ic_launcher_round.png") $entry.Value
+}
+Ok "ic_launcher_round — $($launcherSizes.Count) كثافات"
+
 # شعار شاشة البدء بخلفية شفّافة: الخلفية يحدّدها launch_background.xml،
 # ورسمُها هنا يُنتج مربّعاً ظاهراً فوقها.
 $splashSizes = @{

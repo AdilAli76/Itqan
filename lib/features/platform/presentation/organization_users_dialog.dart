@@ -373,10 +373,22 @@ class _EditUserDialogState extends ConsumerState<_EditUserDialog> {
   }
 }
 
+/// نصّ الخطأ كما يقوله الخادم — ومعه حالته حين لا يقول شيئاً.
+///
+/// **العطب الذي يصلحه:** كانت تُرجع النصّ العامّ لكل ما ليس رسالةً من
+/// الخادم، فيرى مالك المنصّة «تعذّر تحميل الحسابات» وحدها في ثلاث حالات
+/// مختلفة تماماً: 403 بجسمٍ فارغ، و500 بلا رسالة، وصفحةُ التطبيق نفسها
+/// تصل بحالة 200 لأن العنوان لا يقابل نقطة (سقوط SPA على index.html —
+/// وهو ما أصاب لوحة المنصّة فعلاً). ثلاثة أعطاب برسالةٍ واحدة لا يُميَّز
+/// بينها إلا بفتح شاشة الشبكة.
 String _errorText(Object error, String fallback) {
   if (error is DioException) {
     final data = error.response?.data;
     if (data is Map && data['message'] is String) return data['message'] as String;
+    if (error.response == null) return 'لا اتصال بالخادم — تحقّق من الشبكة.';
+    return '$fallback — ردّ الخادم بالحالة ${error.response?.statusCode}.';
   }
-  return fallback;
+  // ليس خطأ شبكة أصلاً: غالباً ردٌّ بحالة 200 ونوعٍ غير متوقَّع، فيفشل
+  // تحويله. قولُ ذلك صراحةً يوفّر نصف ساعة بحثٍ في المكان الخطأ.
+  return '$fallback — ردٌّ غير متوقَّع من الخادم ($error).';
 }

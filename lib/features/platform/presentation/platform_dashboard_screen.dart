@@ -18,7 +18,15 @@ final _date = DateFormat('yyyy-MM-dd');
 
 final platformDashboardProvider =
     FutureProvider.autoDispose<Map<String, dynamic>>((ref) async {
-  final response = await ApiClient.instance.dio.get('/platform/dashboard');
+  // المسار **تحت** organizations لا بجوارها: وحدة التحكّم كلّها على
+  // [Route("api/platform/organizations")] والنقطة [HttpGet("dashboard")]،
+  // فعنوانها api/platform/organizations/dashboard.
+  //
+  // وكان `/platform/dashboard` — عنوانٌ لا وجود له، فيردّ IIS بصفحة
+  // التطبيق نفسها بحالة **200** ونوع text/html (سقوط SPA على index.html).
+  // فلا Dio يرى خطأً ولا الشاشة تعرض رسالة الخادم: يفشل تحويل النصّ إلى
+  // خريطة فتظهر «تعذّر التحميل» بلا سبب. 404 كان سيكون أرحم.
+  final response = await ApiClient.instance.dio.get('/platform/organizations/dashboard');
   return Map<String, dynamic>.from(response.data as Map);
 });
 

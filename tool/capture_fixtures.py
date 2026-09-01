@@ -67,6 +67,11 @@ PATHS = [
     '/organizations/me/barcode-template',
     '/platform-settings',
     '/platform/organizations',
+    # لوحة المنصّة **تحت** organizations: كانت العيّنة تُصنَع باليد على
+    # مسار '/platform/dashboard' — وهو المسار الخاطئ الذي كانت الواجهة
+    # تناديه. فوافق المُوفِّق العطبَ ومرّت ٣٥٣ اختباراً فوقه، والشاشة
+    # مكسورة عند العميل. عيّنةٌ تُلتقط من الخادم الحقيقي لا تكذب هكذا.
+    '/platform/organizations/dashboard',
 ]
 
 

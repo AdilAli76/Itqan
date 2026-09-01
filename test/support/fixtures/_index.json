@@ -27,7 +27,7 @@
   "/permissions/matrix": "permissions_matrix.json",
   "/permissions/me": "permissions_me.json",
   "/platform-settings": "platform-settings.json",
-  "/platform/dashboard": "platform_dashboard.json",
+  "/platform/organizations/dashboard": "platform_dashboard.json",
   "/platform/organizations": "platform_organizations.json",
   "/prescriptions": "prescriptions.json",
   "/products/expiry-alerts": "products_expiry-alerts.json",
