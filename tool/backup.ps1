@@ -49,6 +49,17 @@ param(
     [string]$SqlInstance = '.\SQLEXPRESS',
     [string]$Database = 'KineticEnterprise',
     [string]$Path,
+    <#
+      يأخذ النسخة بلا RESTORE VERIFYONLY.
+
+      **لا يُمرَّر إلا عن قصد.** نسخةٌ غير متحقَّق منها وعدٌ لا ضمان: أعطال
+      القرص تُكتشف عند الاسترجاع لا عند الأخذ — أي في أسوأ لحظة ممكنة.
+
+      وسببه الوحيد المشروع: حسابٌ يملك النسخ ولا يملك CREATE DATABASE التي
+      يطلبها VERIFYONLY، ولا تريد منحها. والأصوب منحُها — راجع الرسالة التي
+      يطبعها السكربت عند فشل التحقّق.
+    #>
+    [switch]$SkipVerify,
     # مجلد المرفقات المرفوعة (Storage:Path في appsettings.Production.json).
     # يُشتقّ من ملف الأسرار إن تُرك فارغاً.
     [string]$UploadsPath,
@@ -179,12 +190,51 @@ WITH FORMAT, INIT, CHECKSUM, STATS = 25, NAME = N'$Database كامل';
         } else { throw }
     }
 
-    # التحقّق: CHECKSUM أعلاه يكتب مجاميع تحقّق، وهذا يقرأها كلها.
-    Write-Log 'التحقّق من سلامة النسخة…'
-    Invoke-Sql -Query "RESTORE VERIFYONLY FROM DISK = N'$file' WITH CHECKSUM;"
-
+    # ── التحقّق: في try خاصّ به ─────────────────────────────────────────
+    #
+    # **العطب الذي يصلحه هذا الفصل:** كان التحقّق داخل try النسخ نفسه،
+    # وcatch يحذف الملف. فحين عجز التحقّق عن **العمل** — لا حين وجد
+    # فساداً — حُذفت نسخةٌ سليمة أُخذت للتوّ، وتوقّف النشر. أي أن العميل
+    # بقي بلا نسخة **وبلا ترقية** معاً، والسبب صلاحيةٌ ناقصة لا قرصٌ تالف.
+    #
+    # وهو نفس مصيدة هذا المشروع مقلوبةً: خطأٌ يصف **تعذّر الفحص** عومل
+    # معاملة **فشل الفحص**.
     $sizeMb = [math]::Round((Get-Item $file).Length / 1MB, 1)
-    Write-Log "النسخة سليمة ($sizeMb ميغابايت)"
+
+    if ($SkipVerify) {
+        Write-Log "تُخطّي التحقّق بطلبٍ صريح — النسخة غير متحقَّق منها ($sizeMb ميغابايت)" 'WARN'
+    } else {
+        # CHECKSUM أعلاه يكتب مجاميع تحقّق، وهذا يقرأها كلها.
+        Write-Log 'التحقّق من سلامة النسخة…'
+        try {
+            Invoke-Sql -Query "RESTORE VERIFYONLY FROM DISK = N'$file' WITH CHECKSUM;"
+            Write-Log "النسخة سليمة ($sizeMb ميغابايت)"
+        } catch {
+            $vmsg = $_.Exception.Message
+
+            # RESTORE VERIFYONLY يتطلّب صلاحية CREATE DATABASE — وهذا غير
+            # بديهي: الأمر لا يُنشئ قاعدة ولا يكتب شيئاً، لكنه يُصنَّف مع
+            # عائلة RESTORE كلّها. فحسابٌ يملك النسخ ولا يملكها يأخذ النسخة
+            # بنجاح ثم يعجز عن قراءتها.
+            if ($vmsg -match 'CREATE DATABASE permission denied') {
+                $who = try { [Security.Principal.WindowsIdentity]::GetCurrent().Name } catch { '(تعذّرت قراءته)' }
+                Write-Log 'تعذّر التحقّق — لا فسادَ في النسخة بل صلاحية ناقصة.' 'ERROR'
+                Write-Log "النسخة أُخذت وهي محفوظة: $file ($sizeMb ميغابايت)" 'WARN'
+                Write-Log "الحساب المتصل: $who" 'ERROR'
+                Write-Log 'RESTORE VERIFYONLY يتطلّب CREATE DATABASE وإن لم يُنشئ شيئاً.' 'ERROR'
+                Write-Log 'الحل — نفّذه مرّة واحدة على الخادم بحساب مسؤول:' 'ERROR'
+                Write-Log "  sqlcmd -S $SqlInstance -E -Q `"GRANT CREATE ANY DATABASE TO [$who];`"" 'ERROR'
+                Write-Log 'أو مرّر -SkipVerify لتأخذ نسخةً بلا تحقّق عن قصد.' 'ERROR'
+            } else {
+                Write-Log "فشل التحقّق: $vmsg" 'ERROR'
+                # هنا وحده يُحذف الملف: التحقّق **عمل** ووجد فساداً. وملف
+                # .bak تالف أخطر من غيابه لأنه يُحتسب نسخةً حتى تُجرَّب
+                # ساعةَ الحاجة.
+                if (Test-Path $file) { Remove-Item $file -Force -ErrorAction SilentlyContinue }
+            }
+            exit 1
+        }
+    }
 
 } catch {
     $msg = $_.Exception.Message
@@ -198,6 +248,9 @@ WITH FORMAT, INIT, CHECKSUM, STATS = 25, NAME = N'$Database كامل';
     }
     # النسخة الفاشلة تُحذف: ملف .bak تالف في مجلد النسخ أخطر من غيابه،
     # لأنه يُحتسب نسخةً موجودة حتى تُجرَّب ساعةَ الحاجة.
+    #
+    # وهذا الحذف يخصّ فشل **النسخ** وحده الآن — تعذّرُ التحقّق يُعالَج
+    # أعلاه ويُبقي الملف.
     if (Test-Path $file) { Remove-Item $file -Force -ErrorAction SilentlyContinue }
     exit 1
 }
