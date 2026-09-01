@@ -1,12 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../../core/auth/permissions.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/network/api_client.dart';
 import '../../../core/network/offline_queue.dart';
 import '../../../core/responsive/breakpoints.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_text_styles.dart';
-import '../../../core/theme/branding_provider.dart';
 import '../../../shared/widgets/icon_action.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
@@ -42,7 +43,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       // تومض بالمحايد ثم تتبدّل أمام المستخدم. راجع BranchPalettes.
       AppColors.applyBranchPalette(response.data['branchPalette'] as String?);
 
-      ref.invalidate(brandingProvider);
+      // كلُّ ما يخصّ المستخدم يُبطَل هنا لا العلامة وحدها: الصلاحيات
+      // ودعوى مالك المنصّة تُخزَّن لعمر التطبيق، فمن دخل بحسابٍ آخر يبقى
+      // على صلاحيات سابقه.
+      invalidateUserScopedProviders(ref);
 
       // طابور البيع المؤجَّل يخصّ منظمةً بعينها: بلا إعادة تحميله هنا يبقى
       // طابور من دخل قبله معروضاً لمن دخل الآن — وهو ما كان يُظهر عدّاد

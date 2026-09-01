@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../theme/branding_provider.dart';
+
 import 'current_user.dart';
 import '../network/api_client.dart';
 import '../theme/app_colors.dart';
@@ -231,6 +233,25 @@ final isPlatformAdminProvider = FutureProvider<bool>((ref) async {
   final claims = await readJwtClaims();
   return claims?['is_platform_admin'] == 'True';
 });
+
+/// يُبطل كل ما يخصّ المستخدم — يُستدعى عند الدخول وعند الخروج.
+///
+/// **العطب الذي يصلحه:** هذه المُوفِّرات تُخزَّن لعمر التطبيق، ولا شيء
+/// يخبرها أن المستخدم تبدّل. فمن خرج ودخل بحسابٍ آخر في نفس الجلسة يبقى
+/// على صلاحيات الأوّل: مدير منظمةٍ عادية يرى بنود المنصّة، ومالك المنصّة
+/// لا يراها — وكلاهما وقع فعلاً.
+///
+/// وأخطر من اختفاء زرّ: صلاحياتٌ مخزَّنة من حسابٍ أوسع تُظهر أزراراً لمن
+/// لا يملكها. والخادم يرفض الطلب — فالعزل قائم — لكنّ الواجهة تَعِد بما
+/// لا يُنفَّذ، وذاك عطبٌ يُبلَّغ عنه كأنه خلل في النظام.
+///
+/// وتُستدعى في **الموضعين**: الدخول وحده لا يكفي إن أُغلق التطبيق على
+/// شاشة الدخول، والخروج وحده لا يكفي لمن دخل بعد انتهاء توكن.
+void invalidateUserScopedProviders(WidgetRef ref) {
+  ref.invalidate(myPermissionsProvider);
+  ref.invalidate(isPlatformAdminProvider);
+  ref.invalidate(brandingProvider);
+}
 
 /// نظير [Can] لبوابة مالك المنصّة.
 class CanPlatform extends ConsumerWidget {

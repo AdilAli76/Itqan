@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../auth/permissions.dart';
 import '../network/api_client.dart';
 import '../network/offline_queue.dart';
 
@@ -64,6 +66,8 @@ final openTabsProvider = StateNotifierProvider<OpenTabsNotifier, TabsState>((ref
 Future<void> performLogout(WidgetRef ref) async {
   await ApiClient.instance.clearToken();
   ref.read(openTabsProvider.notifier).closeAll();
+  // وإلا بقيت صلاحيات الخارج معروضةً لمن يدخل بعده على نفس الجهاز.
+  invalidateUserScopedProviders(ref);
 
   // الطابور يُخفى عن الشاشة ولا يُمحى من التخزين: قد يحمل مبيعات حقيقية لم
   // تصل الخادم بعد، ومحوُها عند الخروج يُضيّع مالاً قُبض فعلاً. ويعود
