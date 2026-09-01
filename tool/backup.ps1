@@ -334,3 +334,14 @@ $count = (Get-ChildItem -Path $Path -Filter "$Database`_*.bak").Count
 $uploadCount = (Get-ChildItem -Path $Path -Filter 'uploads_*.zip' -ErrorAction SilentlyContinue).Count
 Write-Log "اكتمل. نسخ القاعدة: $count — أرشيفات المرفقات: $uploadCount"
 Write-Host ''
+
+# رمز خروجٍ صريح عند النجاح.
+#
+# بدونه يبقى $LASTEXITCODE عند مُستدعي هذا السكربت على قيمته السابقة —
+# PowerShell لا يضبطه إلا لأمرٍ أصليّ أو لـ`exit` صريح. فمن يقيس نتيجتنا
+# به يقرأ رقماً لا علاقة له بنا، وقد وقع: نسخةٌ ناجحة تماماً أوقفت نشرةَ
+# إنتاج بدعوى الفشل.
+#
+# والمُستدعي يُصفّره أيضاً قبل النداء (راجع ci_deploy.ps1) — حزامان لأن
+# النسخة المثبَّتة على خادم العميل قد تكون أقدم من هذا السطر.
+exit 0
