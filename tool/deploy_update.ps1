@@ -210,7 +210,31 @@ try {
     # «already started» — أي أن رسالة الفشل تصف آخر ما جرى لا سببه.
     Start-IfStopped 'pool' $PoolName
     Start-IfStopped 'site' $SiteName
-    Ok 'الموقع يعمل'
+
+    # ── والحالة تُقرأ بعد الأمر لا يُفترَض نجاحه ──────────────────────────
+    #
+    # **العطب الذي يصلحه:** التشغيل يقع في finally ولا يرمي عند الفشل
+    # (وإلا حجب الاستثناء الأصلي)، فنشرة تُعلن النجاح وموقعُها متوقّف —
+    # ولا يكتشفه أحد إلا حين يتّصل عميل. وقع فعلاً على الإنتاج: الملفّات
+    # كلّها في مكانها والسجلّ أخضر والموقع لا يردّ.
+    #
+    # وهو ثالث أفراد عائلة HANDOVER §٣ في هذا الملف: «نُفِّذ الأمر» ليس
+    # «صار المطلوب». فتُقرأ الحالة الفعلية ويُصرَّح بها في السجلّ.
+    $poolState = try { (Get-WebAppPoolState -Name $PoolName -ErrorAction Stop).Value } catch { 'Unknown' }
+    $siteState = try { (Get-WebsiteState  -Name $SiteName -ErrorAction Stop).Value } catch { 'Unknown' }
+
+    if ($poolState -eq 'Started' -and $siteState -eq 'Started') {
+        Ok "الموقع يعمل ($SiteName / $PoolName)"
+    } else {
+        # لا throw من finally — لكن لا صمتَ أيضاً: سطرٌ صارخ ورمز خروج
+        # غير صفري يجعل النشرة حمراء، وهو الفرق بين أن تعرف الآن وأن يخبرك
+        # عميلٌ غداً.
+        Write-Host ''
+        Write-Host "  ⚠ الموقع لم يعمل بعد الترقية — المجمّع: $poolState  الموقع: $siteState" -ForegroundColor Red
+        Write-Host "     شغّله يدوياً:  Start-WebAppPool -Name $PoolName; Start-Website -Name $SiteName" -ForegroundColor Yellow
+        Write-Host ''
+        $script:siteDown = $true
+    }
 }
 
 # ── 7. الترحيلات ────────────────────────────────────────────────────────
@@ -298,3 +322,13 @@ Write-Host "    $backup" -ForegroundColor Gray
 if (Get-Process -Name 'cloudflared' -ErrorAction SilentlyContinue) {
     Write-Host "  ونفق cloudflared لا يتأثّر بهذه العملية — الرابط كما هو." -ForegroundColor Gray
 }
+
+# ── رمز الخروج ─────────────────────────────────────────────────────────
+#
+# الترقية تمّت والملفّات في مكانها، لكنّ الموقع لا يردّ. ونجاحٌ يُعلَن على
+# موقعٍ متوقّف أسوأ من فشلٍ صريح: يمضي صاحبه إلى غيره، ويكتشفه عميل.
+if ($script:siteDown) { exit 2 }
+
+# ونجاحٌ صريح: $LASTEXITCODE عند المُستدعي لا يُضبط إلا بـexit صريح — راجع
+# نفس الدرس في backup.ps1.
+exit 0

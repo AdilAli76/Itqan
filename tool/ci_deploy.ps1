@@ -193,7 +193,13 @@ Step 4 "ترقية $site"
 $update = Join-Path $root 'tool\deploy_update.ps1'
 if (-not (Test-Path $update)) { throw "deploy_update.ps1 غير موجود في $root\tool." }
 
+# نفس حزام backup.ps1: $LASTEXITCODE يصف آخر أمرٍ أصليّ لا نتيجة هذا
+# السكربت، فيُصفَّر قبل النداء ليصير غياب `exit` نجاحاً.
+$global:LASTEXITCODE = 0
 & $update -Package $pkg -Target $root -SiteName $site -PoolName $pool -SkipDb:$SkipDb
+if ($LASTEXITCODE -ne 0) {
+    throw "الترقية انتهت برمز $LASTEXITCODE — راجع السطور أعلاه. الموقع قد يكون متوقّفاً: Start-WebAppPool -Name $pool; Start-Website -Name $site"
+}
 
 # ── لا فحص واجهةٍ هنا، عمداً ──────────────────────────────────────────
 #
