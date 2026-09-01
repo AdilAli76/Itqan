@@ -51,8 +51,23 @@ $bin  = @{ Authorization = "Bearer $Token"; 'User-Agent' = 'kinetic-deploy'; Acc
 Step 1 "تنزيل حزمة $Tag"
 
 $rel = Invoke-RestMethod -Headers $auth -Uri "https://api.github.com/repos/$Repo/releases/tags/$Tag"
-$asset = $rel.assets | Where-Object { $_.name -like 'kinetic_pkg_*.zip' } | Select-Object -First 1
-if (-not $asset) { throw "لا حزمة مرفقة بالإصدار $Tag — راجع سير «بناء حزمة النشر»." }
+$packages = @($rel.assets | Where-Object { $_.name -like 'kinetic_pkg_*.zip' })
+if ($packages.Count -eq 0) { throw "لا حزمة مرفقة بالإصدار $Tag — راجع سير «بناء حزمة النشر»." }
+
+# حزمتان على إصدارٍ واحد = خطأ يُوقف، لا اختيارٌ عشوائي.
+#
+# يقع فعلاً: خطوة الإرفاق تفشل بعطبٍ عابر في واجهة GitHub بعد نجاح البناء
+# (HttpError: other side closed)، فيُعاد تشغيل الوظيفة — والاسم مؤرَّخ
+# بالدقيقة فتُرفَق حزمةٌ ثانية بجوار الأولى.
+#
+# وأخذُ الأولى صامتاً كان ينشر **بناءً غير الذي جُرِّب**، ولا شيء في
+# السجلّ يدلّ عليه: رقم الوسم واحد، والبصمة تُطبع ولا يقارنها أحد بذاكرته.
+# وهو نفس ما تمنعه بوّابة الإنتاج أدناه — فيُمنع هنا أيضاً لا يُترك لها.
+if ($packages.Count -gt 1) {
+    $names = ($packages | ForEach-Object { $_.name }) -join '، '
+    throw "الإصدار $Tag يحمل $($packages.Count) حزمة: $names. احذف القديمة من صفحة الإصدار وأبقِ واحدة."
+}
+$asset = $packages[0]
 
 $dir = Join-Path $env:RUNNER_TEMP 'kinetic-pkg'
 if (Test-Path $dir) { Remove-Item $dir -Recurse -Force }
