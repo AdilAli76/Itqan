@@ -19,8 +19,25 @@ const _editionLabels = {
   'standard': 'قياسي',
   'wallet': 'المحفظة',
   'wallet_plus': 'المحفظة بالمحاسبة',
+  'pharmacy': 'الصيدليات',
   'trial': 'تجريبي',
   'enterprise': 'مؤسسات',
+};
+
+/// أسماء الوحدات كما تُعرض لمالك المنصّة — تقابل `Editions.AllModules`.
+///
+/// وحدةٌ تُضاف في الخادم ولا تُضاف هنا تظهر باسمها البرمجي لا تختفي (راجع
+/// [_ModulesField])، فيبقى بيعها ممكناً وإن قبُح اسمها.
+const _moduleLabels = {
+  'pos': 'نقطة البيع',
+  'customers': 'العملاء والبطاقات',
+  'reports': 'التقارير',
+  'inventory': 'المخزون والمشتريات',
+  'warehouses': 'المستودعات',
+  'valuation': 'تقييم المخزون',
+  'procurement': 'أوامر الشراء وفواتير الموردين',
+  'accounting': 'المحاسبة والدفاتر',
+  'pharmacy': 'نشرة الدواء',
 };
 
 const _tierLabels = {
@@ -192,6 +209,20 @@ class _OrgCard extends ConsumerWidget {
                     icon: const Icon(Icons.manage_accounts_outlined, size: 18),
                     label: const Text('الحسابات'),
                   ),
+                  // الحذف كان في الخادم بلا زرّ يبلغه: نقطة
+                  // DELETE /platform/organizations/{id} قائمة منذ بنائها،
+                  // فكان محو عميلٍ انتهى عقده يستلزم فتح قاعدة البيانات —
+                  // وهو أخطر ما يُدفَع إليه مالك المنصّة، لأن الحذف اليدوي
+                  // ينسى المرفقات ويترك صفّاً في الفهرس العالمي.
+                  OutlinedButton.icon(
+                    onPressed: () => showDialog(
+                      context: context,
+                      builder: (_) => _DeleteOrgDialog(org: org),
+                    ),
+                    style: OutlinedButton.styleFrom(foregroundColor: AppColors.danger),
+                    icon: const Icon(Icons.delete_forever_outlined, size: 18),
+                    label: const Text('حذف'),
+                  ),
                 ],
               ),
             ],
@@ -241,6 +272,17 @@ class _EditOrgDialogState extends ConsumerState<_EditOrgDialog> {
   late final _displayController = TextEditingController(text: widget.org['displayName'] as String? ?? '');
   late bool _isActive = widget.org['isActive'] as bool? ?? true;
   late String _planTier = widget.org['planTier'] as String? ?? 'standard';
+  late String _edition = widget.org['edition'] as String? ?? 'standard';
+
+  /// الوحدات المطلوب أن تعمل بعد الحفظ — **الحاصل لا الفارق**.
+  ///
+  /// تُرسَل كما هي ويشتقّ الخادم منها المنح والسحب. اشتقاقها هنا كان
+  /// يستلزم نسخة Dart من خريطة الإصدارات، ونسخةٌ ثانية تفترق عن الأولى عند
+  /// أوّل إصدارٍ يُضاف — راجع `UpdatePlatformOrganizationRequest.Modules`.
+  late Set<String> _modules = ((widget.org['effectiveModules'] as List?) ?? const [])
+      .whereType<String>()
+      .toSet();
+
   int _extendMonths = 0;
   bool _saving = false;
   String? _error;
@@ -264,6 +306,8 @@ class _EditOrgDialogState extends ConsumerState<_EditOrgDialog> {
         'isActive': _isActive,
         'planTier': _tierLabels.containsKey(_planTier) ? _planTier : null,
         'extendMonths': _extendMonths > 0 ? _extendMonths : null,
+        'edition': _edition,
+        'modules': _modules.toList(),
       });
       ref.invalidate(platformOrganizationsProvider);
       if (mounted) Navigator.pop(context);
@@ -338,14 +382,27 @@ class _EditOrgDialogState extends ConsumerState<_EditOrgDialog> {
                 value: _isActive,
                 onChanged: (v) => setState(() => _isActive = v),
               ),
-              // الإصدار لا يُعدَّل هنا بقصد: تغييره على شركة عاملة يُخفي
-              // وحدات فيها بيانات قائمة — مخزون وأوامر شراء لا تعود مرئية
-              // لأحد. وهو قرار يُتَّخذ عند الإنشاء.
-              const SizedBox(height: 4),
-              Text(
-                'الإصدار: ${_editionLabels[widget.org['edition']] ?? widget.org['edition']} — '
-                'لا يُغيَّر بعد الإنشاء.',
-                style: AppTextStyles.bodyMd(color: AppColors.textSecondary),
+              const SizedBox(height: 12),
+              // الإصدار صار يُعدَّل — وكان ممنوعاً بحجّة أن تغييره يُخفي
+              // وحدات فيها بيانات قائمة. والحجّة صحيحة والمنع خطأ: البيانات
+              // لا تُحذف بإخفاء وحدة، وحاجة العميل إلى الترقية حقيقية
+              // ويومية. والوحدات أسفله تُبقي المخفيّ ظاهراً متى شئت.
+              DropdownButtonFormField<String>(
+                initialValue: _editionLabels.containsKey(_edition) ? _edition : null,
+                decoration: const InputDecoration(labelText: 'الإصدار'),
+                items: _editionLabels.entries
+                    .map((e) => DropdownMenuItem(value: e.key, child: Text(e.value)))
+                    .toList(),
+                // الوحدات لا تُعاد ضبطها هنا: مالك المنصّة يرقّي إصداراً
+                // وقد اشترى العميل وحدةً فوقه، ومسحُها بتغيير الإصدار يُلغي
+                // صفقةً بضغطة لا يقصدها. الخادم يقيس الفارق على الإصدار
+                // الجديد عند الحفظ.
+                onChanged: (v) => setState(() => _edition = v ?? _edition),
+              ),
+              const SizedBox(height: 12),
+              _ModulesField(
+                selected: _modules,
+                onChanged: (m) => setState(() => _modules = m),
               ),
               if (_error != null) ...[
                 const SizedBox(height: 10),
@@ -357,6 +414,163 @@ class _EditOrgDialogState extends ConsumerState<_EditOrgDialog> {
   }
 }
 
+
+/// حذف منظمة عميل — بلا رجعة.
+///
+/// **التأكيد بكتابة الاسم القانوني حرفياً**، وهو ما يفرضه الخادم أصلاً.
+/// وتكراره هنا ليس ازدواجاً بل هو الغرض: زرُّ «متأكد؟» يُضغط بلا قراءة،
+/// وكتابةُ الاسم تُجبر على النظر إلى أي صفٍّ من القائمة يُحذف — والقائمة
+/// تحمل عملاء بأسماء متشابهة.
+class _DeleteOrgDialog extends ConsumerStatefulWidget {
+  const _DeleteOrgDialog({required this.org});
+  final Map<String, dynamic> org;
+
+  @override
+  ConsumerState<_DeleteOrgDialog> createState() => _DeleteOrgDialogState();
+}
+
+class _DeleteOrgDialogState extends ConsumerState<_DeleteOrgDialog> {
+  final _confirmController = TextEditingController();
+  bool _deleting = false;
+  String? _error;
+
+  String get _legalName => widget.org['legalName'] as String? ?? '';
+
+  @override
+  void initState() {
+    super.initState();
+    // ليُعاد بناء الزرّ مع كل حرف: بلا هذا يبقى معطَّلاً حتى بعد كتابة
+    // الاسم كاملاً، فيبدو للمستخدم أن الشاشة معطوبة.
+    _confirmController.addListener(() => setState(() {}));
+  }
+
+  @override
+  void dispose() {
+    _confirmController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _delete() async {
+    setState(() {
+      _deleting = true;
+      _error = null;
+    });
+    try {
+      await ApiClient.instance.dio.delete(
+        '/platform/organizations/${widget.org['id']}',
+        // الاسم في مَعلمة استعلام لا في الجسم: DELETE بجسمٍ يُسقطه بعض
+        // الوسطاء بصمت، فيصل الطلب بلا تأكيد ويردّه الخادم بـ400 مُبهم.
+        queryParameters: {'confirm': _confirmController.text.trim()},
+      );
+      ref.invalidate(platformOrganizationsProvider);
+      if (mounted) Navigator.pop(context);
+    } on DioException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _deleting = false;
+        _error = _errorDetail(e);
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final matches = _confirmController.text.trim() == _legalName;
+
+    return AdaptiveDialog(
+      title: 'حذف الشركة نهائياً',
+      maxWidth: 460,
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('إلغاء')),
+        FilledButton(
+          style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
+          onPressed: (!matches || _deleting) ? null : _delete,
+          child: _deleting
+              ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+              : const Text('احذف'),
+        ),
+      ],
+      body: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            'يُحذف كل ما يخصّ «${widget.org['displayName'] ?? ''}»: فواتيرها '
+            'وعملاؤها ومخزونها وقيودها ومرفقاتها وحسابات مستخدميها. '
+            'ولا يُسترجَع شيء من ذلك إلا من نسخة احتياطية.',
+            style: AppTextStyles.bodyMd(color: AppColors.danger),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'الإيقاف بديلٌ أهدأ: يمنع الدخول ويُبقي البيانات — من شاشة التعديل.',
+            style: AppTextStyles.bodyMd(color: AppColors.textSecondary),
+          ),
+          const SizedBox(height: 14),
+          Text('للتأكيد اكتب الاسم القانوني حرفياً:', style: AppTextStyles.bodyMd()),
+          Text(_legalName, style: AppTextStyles.labelMd()),
+          const SizedBox(height: 6),
+          TextField(
+            controller: _confirmController,
+            autofocus: true,
+            decoration: const InputDecoration(labelText: 'الاسم القانوني'),
+          ),
+          if (_error != null) ...[
+            const SizedBox(height: 10),
+            Text(_error!, style: AppTextStyles.bodyMd(color: AppColors.danger)),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// اختيار الوحدات التي تعمل عند العميل.
+///
+/// **مربّعات على الحاصل لا على الفارق.** عرضُ «مُنح: pharmacy / سُحب:
+/// accounting» يجعل مالك المنصّة يحسب الاتّحاد والطرح في رأسه ليعرف ما الذي
+/// يراه عميله فعلاً — وهو الحساب الذي يُخطئ فيه ثم يبيع وحدة لا تظهر. فما
+/// يُؤشَّر هنا هو ما يعمل، لا أكثر.
+///
+/// ولا يُمنَع سحب وحدةٍ أساسية كنقطة البيع: العميل قد يشتري النظام لدفتره
+/// المحاسبي وحده. ومنعُ حالةٍ لأنها تبدو غريبة يجعل بيعاً حقيقياً مستحيلاً.
+class _ModulesField extends StatelessWidget {
+  const _ModulesField({required this.selected, required this.onChanged});
+
+  final Set<String> selected;
+  final ValueChanged<Set<String>> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    // اسمٌ يعرفه الخادم ولا تعرفه هذه الشاشة يُعرض باسمه البرمجي لا يختفي:
+    // اختفاؤه كان يعني وحدةً تعمل عند العميل ولا يراها مالك المنصّة، فيسحبها
+    // بلا قصد أوّل مرّة يحفظ.
+    final keys = <String>{..._moduleLabels.keys, ...selected}.toList();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('الوحدات المفعَّلة', style: AppTextStyles.labelMd()),
+        Text(
+          'ما يُؤشَّر هنا هو ما يعمل عند العميل. الإصدار أعلاه يضبطها ابتداءً، '
+          'وما تُغيّره بعده يُحفظ فوقه فلا يضيع عند ترقيته.',
+          style: AppTextStyles.bodyMd(color: AppColors.textSecondary),
+        ),
+        const SizedBox(height: 4),
+        for (final key in keys)
+          CheckboxListTile(
+            contentPadding: EdgeInsets.zero,
+            dense: true,
+            controlAffinity: ListTileControlAffinity.leading,
+            title: Text(_moduleLabels[key] ?? key, style: AppTextStyles.bodyMd()),
+            value: selected.contains(key),
+            onChanged: (on) => onChanged(
+              on == true ? {...selected, key} : ({...selected}..remove(key)),
+            ),
+          ),
+      ],
+    );
+  }
+}
 
 const _tierLimits = {
   'trial': (1, 3),
@@ -384,6 +598,7 @@ Future<void> _printContract(BuildContext context, Map<String, dynamic> org) asyn
     orgLegalName: org['legalName'] as String? ?? '',
     orgDisplayName: org['displayName'] as String? ?? '',
     edition: org['edition'] as String? ?? 'standard',
+    modules: ((org['effectiveModules'] as List?) ?? const []).whereType<String>().toSet(),
     planTier: _tierLabels[tier] ?? tier,
     issuedAt: issued,
     expiresAt: expires,

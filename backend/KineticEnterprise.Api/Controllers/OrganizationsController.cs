@@ -7,7 +7,17 @@ using KineticEnterprise.Api.Models;
 
 namespace KineticEnterprise.Api.Controllers;
 
-public record BrandingResponse(string DisplayName, string? LogoUrl, string PrimaryColor, string SecondaryColor, string CurrencySymbol, string NavLayout, string Edition);
+/// <summary>
+/// ما تحتاجه الواجهة عند الإقلاع لترسم نفسها.
+///
+/// <para><b>ولماذا <c>Modules</c> إلى جانب <c>Edition</c>:</b> الإصدار يقول
+/// **شكل** النظام (محفظة بلا كتالوج، بيع بالقيمة الحرّة)، والوحدات تقول ما
+/// اشتراه العميل. كانت قائمة التنقّل تُبنى من الإصدار وحده فتكرّر منطق
+/// [Editions.ModulesOf] في Dart — وبعد أن صارت الوحدات تُباع فوق الإصدار،
+/// كان ذلك يعني عميلاً يدفع ثمن وحدة يفتحها له الخادم ولا يرى لها
+/// شاشة.</para>
+/// </summary>
+public record BrandingResponse(string DisplayName, string? LogoUrl, string PrimaryColor, string SecondaryColor, string CurrencySymbol, string NavLayout, string Edition, List<string> Modules);
 public record UpdateBrandingRequest(string DisplayName, string PrimaryColor, string SecondaryColor, string NavLayout);
 public record SetLogoRequest(Guid? AttachmentId);
 
@@ -56,7 +66,13 @@ public class OrganizationsController : ControllerBase
         var org = await _db.Organizations.FirstOrDefaultAsync();
         if (org is null) return NotFound();
 
-        return new BrandingResponse(org.DisplayName, org.LogoUrl, org.PrimaryColor, org.SecondaryColor, org.CurrencySymbol, org.NavLayout, org.Edition);
+        // نفس المخنق الذي يفرضه [RequireModuleAttribute] لا حسابٌ ثانٍ:
+        // قائمةٌ تُرسم بمنطقٍ وتُحرَس بمنطقٍ آخر تفترق أوّل مرّة يتغيّر
+        // أحدهما، فيرى المستخدم شاشة تُفتح لتُقابله بـ«وحدة غير مفعَّلة».
+        var license = await _db.Licenses.FirstOrDefaultAsync(l => l.OrganizationId == org.Id);
+        var modules = LicenseLimits.EffectiveModules(org.Edition, license).ToList();
+
+        return new BrandingResponse(org.DisplayName, org.LogoUrl, org.PrimaryColor, org.SecondaryColor, org.CurrencySymbol, org.NavLayout, org.Edition, modules);
     }
 
     /// <summary>

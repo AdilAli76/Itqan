@@ -10,6 +10,7 @@ class OrganizationBranding {
     required this.currencySymbol,
     required this.navLayout,
     required this.edition,
+    required this.modules,
   });
 
   final String displayName;
@@ -24,6 +25,16 @@ class OrganizationBranding {
   /// يُقرَّر عند إنشاء المنظمة ولا يُغيَّر من الواجهة — تغييره بعد التشغيل
   /// يعني إخفاء وحدات فيها بيانات قائمة.
   final String edition;
+
+  /// الوحدات المفعَّلة فعلياً لهذه المنظمة — يحسبها الخادم ولا تُشتقّ هنا.
+  ///
+  /// الإصدار صار قالباً ابتدائياً لا سقفاً: تُشترى وحدات فوقه وتُسحب منه
+  /// بعد البيع (راجع `LicenseLimits.EffectiveModules` في الخادم). فاشتقاق
+  /// القائمة من الإصدار في Dart — وهو ما كان — يعني عميلاً يدفع ثمن وحدة
+  /// يفتحها له الخادم ولا يجد لها بنداً في قائمته.
+  final Set<String> modules;
+
+  bool has(String module) => modules.contains(module);
 
   /// إصدار المحفظة: بطاقات وأرصدة بلا بضاعة. نقطة البيع تُدخِل مبلغاً،
   /// ولا كتالوج ولا مخزون ولا مشتريات.
@@ -49,8 +60,34 @@ class OrganizationBranding {
     currencySymbol: 'د.ل',
     navLayout: 'sidebar',
     edition: 'standard',
+    // مكتوبةً لا مستدعاةً: الثابت const لا يستدعي دوالّ. وهي عين ما
+    // يُرجعه [modulesOfEdition] للإصدار القياسي.
+    modules: {'inventory', 'pos', 'customers', 'reports'},
   );
 }
+
+/// وحدات الإصدار — **احتياطٌ لا مصدر**.
+///
+/// عامّة لا خاصّة لأن الاختبارات تبني منها قائمة التنقّل: اختبارٌ يكتب
+/// مجموعته بيده يوافق نفسه أبداً ولا يوافق التطبيق.
+///
+/// تُستعمل في حالتين فقط: خادمٌ أقدم من هذه النسخة لا يُرسل `modules`،
+/// وتعذّرُ الاتصال قبل تسجيل الدخول. وتقابل `Editions.ModulesOf` في
+/// الخادم — واختلافها عنه يُخفي بنداً يسمح به الخادم لا أكثر، لأن الحارس
+/// الفعلي هناك.
+///
+/// ولا تعرف شيئاً عن الوحدات المُباعة منفردة: تلك لا تُعرَف إلا من الخادم،
+/// وهذا سبب كون هذه القائمة احتياطاً لا حساباً يُعتمد عليه.
+Set<String> modulesOfEdition(String edition) => switch (edition) {
+      'wallet' => const {'pos', 'customers', 'reports'},
+      'wallet_plus' => const {'pos', 'customers', 'reports', 'accounting'},
+      'pharmacy' => const {'inventory', 'pos', 'customers', 'reports', 'pharmacy'},
+      'enterprise' => const {
+          'inventory', 'pos', 'customers', 'reports',
+          'warehouses', 'valuation', 'procurement', 'accounting',
+        },
+      _ => const {'inventory', 'pos', 'customers', 'reports'},
+    };
 
 /// يستدعي GET /api/organizations/me على الـ .NET Backend — الاستدعاء
 /// الوحيد الذي كان يذهب مباشرة لجدول Supabase أصبح الآن طلب HTTP عادي
@@ -60,6 +97,8 @@ final brandingProvider = FutureProvider<OrganizationBranding>((ref) async {
   try {
     final response = await ApiClient.instance.dio.get('/organizations/me');
     final data = response.data as Map<String, dynamic>;
+    final edition = data['edition'] as String? ?? 'standard';
+    final modules = (data['modules'] as List?)?.whereType<String>().toSet() ?? <String>{};
 
     return OrganizationBranding(
       displayName: data['displayName'] as String? ?? OrganizationBranding.fallback.displayName,
@@ -70,7 +109,10 @@ final brandingProvider = FutureProvider<OrganizationBranding>((ref) async {
       ),
       currencySymbol: data['currencySymbol'] as String? ?? 'د.ل',
       navLayout: data['navLayout'] as String? ?? 'sidebar',
-      edition: data['edition'] as String? ?? 'standard',
+      edition: edition,
+      // قائمة فارغة من خادمٍ أقدم لا تعني «لا وحدات» بل «لا يعرفها»: تفسيرها
+      // حرفياً كان يُفرغ القائمة الجانبية تماماً بعد نشرِ واجهةٍ قبل خادمها.
+      modules: modules.isEmpty ? modulesOfEdition(edition) : modules,
     );
   } catch (_) {
     // قبل تسجيل الدخول (لا توكن بعد) أو تعذّر الاتصال بالسيرفر -> اللوحة

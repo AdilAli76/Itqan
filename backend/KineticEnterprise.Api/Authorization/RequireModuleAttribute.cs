@@ -18,7 +18,8 @@ namespace KineticEnterprise.Api.Authorization;
 /// الفرق عن [RequirePermissionAttribute]: تلك تسأل «هل يملك هذا الدور
 /// الصلاحية؟»، وهذه تسأل «هل هذه الوحدة جزء من النظام الذي اشتراه العميل
 /// أصلاً؟». فلا يتجاوزها super_admin — صاحب المنظمة لا يملك تفعيل وحدة لم
-/// يشترها، وذلك قرار مالك المنصة عند الإنشاء.
+/// يشترها، وذلك قرار مالك المنصة: عند الإنشاء بالإصدار، وبعده بالبيع
+/// المنفرد (راجع [LicenseLimits.EffectiveModules]).
 /// </summary>
 // AllowMultiple: وحدةٌ واحدة لا تكفي دائماً — فواتير الموردين تحتاج
 // accounting **و** procurement معاً. والمرشّحات تتراكم فيمرّ من استوفى
@@ -61,16 +62,17 @@ public class RequireModuleAttribute : Attribute, IAsyncActionFilter
             return;
         }
 
-        // الإصدار **والترخيص** معاً: الأول يقول ما شكل النظام، والثاني ما
-        // دُفع ثمنه. الاكتفاء بالأول — وهو ما كان — يجعل قائمة وحدات
-        // الترخيص زينةً، فيحصل من اشترى الأدنى على ما لم يشترِه.
+        // الإصدار **وفوارق الترخيص** معاً: الأول يقول ما شكل النظام، والثاني
+        // ما زِيد عليه أو سُحب منه بالبيع بعد التسليم. الاكتفاء بالأول — وهو
+        // ما كان — يجعل بيع وحدةٍ منفردة مستحيلاً.
         // راجع [LicenseLimits.EffectiveModules].
-        var licenseModules = await db.Licenses
+        var deltas = await db.Licenses
             .Where(l => l.OrganizationId == org.Id)
-            .Select(l => l.EnabledModulesJson)
+            .Select(l => new { l.GrantedModulesJson, l.RevokedModulesJson })
             .FirstOrDefaultAsync();
 
-        if (!LicenseLimits.EffectiveModules(org.Edition, licenseModules).Contains(_module))
+        if (!LicenseLimits.EffectiveModules(org.Edition, deltas?.GrantedModulesJson, deltas?.RevokedModulesJson)
+                .Contains(_module))
         {
             context.Result = new ObjectResult(new
             {

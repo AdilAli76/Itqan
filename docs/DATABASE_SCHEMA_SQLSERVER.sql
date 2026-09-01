@@ -86,6 +86,11 @@ CREATE TABLE licenses (
   max_branches INT NOT NULL DEFAULT 1,
   max_users INT NOT NULL DEFAULT 5,
   enabled_modules NVARCHAR(MAX) NOT NULL DEFAULT N'["inventory","pos","customers","reports"]', -- JSON
+  -- الوحدات تُباع فوق الإصدار: فارقان لا قائمة كاملة — راجع
+  -- LicenseLimits.EffectiveModules، وenabled_modules أعلاه مشتقّة منهما
+  -- للعرض والعقد لا للفرض.
+  granted_modules NVARCHAR(MAX) NOT NULL DEFAULT N'[]', -- JSON
+  revoked_modules NVARCHAR(MAX) NOT NULL DEFAULT N'[]', -- JSON
   hardware_fingerprint NVARCHAR(200) NULL,
   issued_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
   expires_at DATETIME2 NOT NULL,
@@ -104,7 +109,9 @@ CREATE TABLE licenses (
   monthly_fee DECIMAL(18,3) NOT NULL CONSTRAINT df_licenses_monthly_fee DEFAULT 0,
   storage_fee DECIMAL(18,3) NOT NULL CONSTRAINT df_licenses_storage_fee DEFAULT 0,
   maintenance_rate DECIMAL(9,3) NOT NULL CONSTRAINT df_licenses_maintenance_rate DEFAULT 0,
-  CONSTRAINT CK_licenses_modules_json CHECK (ISJSON(enabled_modules) = 1)
+  CONSTRAINT CK_licenses_modules_json CHECK (ISJSON(enabled_modules) = 1),
+  CONSTRAINT CK_licenses_granted_modules_json CHECK (ISJSON(granted_modules) = 1),
+  CONSTRAINT CK_licenses_revoked_modules_json CHECK (ISJSON(revoked_modules) = 1)
 );
 GO
 

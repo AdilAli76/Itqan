@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:kinetic_enterprise/core/theme/branding_provider.dart';
 import 'package:kinetic_enterprise/shared/widgets/nav_items.dart';
 
 /// حدود الإصدارات في القائمة الجانبية.
@@ -11,15 +12,20 @@ import 'package:kinetic_enterprise/shared/widgets/nav_items.dart';
 /// <para>وثلاثة مواضع تعرض هذه القائمة (الشريط الجانبي والعلوي ولوحة
 /// الأوامر)، وكلها تُبنى من [navGroupsFor] — ففحصها هنا يفحصها جميعاً.</para>
 void main() {
-  List<String> labelsFor(String edition) => navGroupsFor(
+  // الوحدات تُمرَّر كما يمرّرها التطبيق: من [modulesOfEdition] لا مكتوبةً
+  // هنا. مجموعةٌ تُكتب في الاختبار توافق نفسها أبداً ولا توافق ما يُرسله
+  // الخادم — وهو ما يُفترض أن يُمسَك هنا.
+  List<NavGroup> groupsFor(String edition, {Set<String>? modules}) => navGroupsFor(
         isPlatformAdmin: false,
         edition: edition,
-      ).map((g) => g.label).toList();
+        modules: modules ?? modulesOfEdition(edition),
+      );
 
-  List<String> routesFor(String edition) => navGroupsFor(
-        isPlatformAdmin: false,
-        edition: edition,
-      ).expand((g) => g.items).map((i) => i.route).toList();
+  List<String> labelsFor(String edition, {Set<String>? modules}) =>
+      groupsFor(edition, modules: modules).map((g) => g.label).toList();
+
+  List<String> routesFor(String edition, {Set<String>? modules}) =>
+      groupsFor(edition, modules: modules).expand((g) => g.items).map((i) => i.route).toList();
 
   group('إصدار المحفظة البسيط', () {
     test('بلا مخزون — لا بضاعة يديرها', () {
@@ -86,6 +92,56 @@ void main() {
       expect(routesFor('standard'), contains('/expenses'));
       expect(routesFor('standard'), isNot(contains('/accounting')));
     });
+  });
+
+  // ── الوحدات تُباع فوق الإصدار ────────────────────────────────────────
+  //
+  // كانت القائمة تُشتقّ من الإصدار في Dart، فوحدةٌ يبيعها مالك المنصّة
+  // منفردة يفتحها الخادم ولا تظهر لها شاشة — والعميل يدفع ولا يرى.
+  group('وحدة بيعت فوق الإصدار', () {
+    test('المحاسبة لعميل قياسي تُظهر مجموعتها', () {
+      final modules = {...modulesOfEdition('standard'), 'accounting'};
+      expect(labelsFor('standard', modules: modules), contains('المحاسبة'));
+      expect(routesFor('standard', modules: modules), contains('/accounting'));
+    });
+
+    test('نشرة الدواء لعميل قياسي تُظهر مجموعة الصيدلية', () {
+      final modules = {...modulesOfEdition('standard'), 'pharmacy'};
+      expect(labelsFor('standard', modules: modules), contains('الصيدلية'));
+    });
+
+    test('المحاسبة وحدها لا تكفي لفواتير الموردين — تلزم المشتريات معها', () {
+      // النقطة على الخادم تشترط accounting **و** procurement. وبندٌ يظهر
+      // بشرطٍ أوسع يُفتح ليردّه الخادم بـ«وحدة غير مفعَّلة».
+      final modules = {...modulesOfEdition('standard'), 'accounting'};
+      expect(routesFor('standard', modules: modules), isNot(contains('/supplier-invoices')));
+      expect(
+        routesFor('standard', modules: {...modules, 'procurement'}),
+        contains('/supplier-invoices'),
+      );
+    });
+  });
+
+  group('وحدة سُحبت من الإصدار', () {
+    test('مؤسساتٌ بلا محاسبة تُخفي دفترها', () {
+      final modules = {...modulesOfEdition('enterprise')}..remove('accounting');
+      expect(labelsFor('enterprise', modules: modules), isNot(contains('المحاسبة')));
+    });
+
+    test('مؤسساتٌ بلا مخزون تُخفي مجموعته كاملة', () {
+      final modules = {...modulesOfEdition('enterprise')}..remove('inventory');
+      expect(labelsFor('enterprise', modules: modules), isNot(contains('المخزون')));
+    });
+  });
+
+  test('المرتَّبات تتبع شكل الإصدار لا الوحدات — لا تُباع منفردة', () {
+    // حارسٌ على الفرق: ما هو **شكل** لا يُشترى. متجرٌ يبيع بضاعة لا يصير
+    // جهةً تصرف على منتسبيها بإضافة وحدة.
+    expect(
+      routesFor('standard', modules: {...modulesOfEdition('standard'), 'accounting'}),
+      isNot(contains('/payroll')),
+    );
+    expect(routesFor('wallet'), contains('/payroll'));
   });
 
   test('كل شاشة في القائمة مسجَّلة في جولة اللقطات لإصدارٍ ما', () {

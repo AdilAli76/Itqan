@@ -46,7 +46,7 @@ public static class Ledger
     /// لها قيود إطلاقاً — لا قيود فارغة ولا جداول تنتفخ بلا قارئ.</para>
     /// </summary>
     public static bool IsEnabled(Organization org, License? license) =>
-        LicenseLimits.EffectiveModules(org.Edition, license?.EnabledModulesJson).Contains("accounting");
+        LicenseLimits.EffectiveModules(org.Edition, license).Contains("accounting");
 
     /// <summary>
     /// يكتب قيداً متوازناً من أدوار محاسبية.

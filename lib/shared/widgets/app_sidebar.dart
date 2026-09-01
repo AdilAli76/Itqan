@@ -49,6 +49,8 @@ class _AppSidebarState extends ConsumerState<AppSidebar> {
       navGroupsFor(
         isPlatformAdmin: ref.watch(isPlatformAdminProvider).valueOrNull ?? false,
         edition: ref.watch(brandingProvider).valueOrNull?.edition ?? 'standard',
+        modules: ref.watch(brandingProvider).valueOrNull?.modules ??
+            OrganizationBranding.fallback.modules,
       ),
       (route) {
         final required = kRoutePermissions[route];

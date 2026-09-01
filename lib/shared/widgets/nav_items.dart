@@ -97,28 +97,39 @@ const _systemGroup = NavGroup(
   ],
 );
 
-/// المجموعات بالترتيب المعروض. مالك المنصة وحده يرى "إنشاء منظمة جديدة"،
-/// وتُضاف داخل مجموعة النظام بدل أن تكون عنصراً سائباً في آخر القائمة.
 /// إصدارٌ على شكل المحفظة — بطاقات وأرصدة بلا بضاعة.
 ///
 /// <para>يقابل `Editions.IsWalletShaped` في الخادم. والقائمتان تُقرآن معاً:
 /// إصدارٌ يُضاف هنا ولا يُضاف هناك يُخفي شاشةً يسمح بها الخادم.</para>
 bool _isWalletShaped(String edition) => edition == 'wallet' || edition == 'wallet_plus';
 
-/// أفي هذا الإصدار دفترٌ محاسبي؟ — يقابل وحدة `accounting` في الخادم.
-bool _hasAccounting(String edition) => edition == 'enterprise' || edition == 'wallet_plus';
-
-List<NavGroup> navGroupsFor({required bool isPlatformAdmin, String edition = 'standard'}) => [
+/// المجموعات بالترتيب المعروض.
+///
+/// **الوحدات تُمرَّر ولا تُشتقّ من الإصدار.** كان هنا `_hasAccounting` و
+/// `edition == 'pharmacy'` يحسبان في Dart ما يحسبه الخادم في
+/// `LicenseLimits.EffectiveModules`. وبعد أن صارت الوحدات تُباع فوق
+/// الإصدار لا داخله، صار ذلك الحساب يُخفي عن العميل وحدةً اشتراها ويفتحها
+/// له الخادم — ولا شيء في الشاشة يدلّه على السبب.
+///
+/// ويبقى `edition` لما هو **شكلٌ** لا وحدة: المحفظة تبيع بالقيمة الحرّة
+/// وتصرف مرتَّبات، وذلك سلوكٌ لا يُشترى منفرداً.
+///
+/// وقائمة فارغة تعني «لم تُعرَف بعد» لا «لا شيء» — راجع [brandingProvider].
+List<NavGroup> navGroupsFor({
+  required bool isPlatformAdmin,
+  String edition = 'standard',
+  Set<String> modules = const {'inventory', 'pos', 'customers', 'reports'},
+}) => [
       NavGroup(icon: _dashboard.icon, label: _dashboard.label, items: const [_dashboard]),
       _salesGroup,
       // إصدار المحفظة بلا بضاعة أصلاً: لا كتالوج ولا مخزون ولا مشتريات ولا
       // جرد ولا ملصقات باركود. إخفاء المجموعة هنا لا في كل واجهة على حدة —
       // ثلاثة مواضع تعرض هذه القائمة (الشريط الجانبي والعلوي ولوحة
       // الأوامر)، وإخفاء يُنفَّذ في اثنين يترك الشاشة قابلة للفتح من الثالث.
-      if (!_isWalletShaped(edition)) _inventoryGroup,
+      if (modules.contains('inventory')) _inventoryGroup,
       // مجموعة تظهر لإصدار الصيدليات وحده — النظام يُباع لبقالة ومحل قطع
       // غيار، ودفتر الوصفات في قائمتهم بند لا معنى له.
-      if (edition == 'pharmacy')
+      if (modules.contains('pharmacy'))
         const NavGroup(
           icon: Icons.local_pharmacy_outlined,
           label: 'الصيدلية',
@@ -137,7 +148,7 @@ List<NavGroup> navGroupsFor({required bool isPlatformAdmin, String edition = 'st
       // المحاسبة لمن اشتراها — بقّالة بفرع واحد لا تحتاج ميزان مراجعة،
       // وشجرة حسابات في قائمتها بند يُربك ولا يُفيد. والترشيح هنا لا في كل
       // واجهة: ثلاثة مواضع تعرض هذه القائمة.
-      if (_hasAccounting(edition))
+      if (modules.contains('accounting'))
         NavGroup(
           icon: Icons.account_balance_outlined,
           label: 'المحاسبة',
@@ -149,7 +160,10 @@ List<NavGroup> navGroupsFor({required bool isPlatformAdmin, String edition = 'st
             // لكنها تحتاج **الاثنتين**: منظمةٌ بلا مشتريات لا استلامَ عندها
             // تُفوتره، فالشاشة تفتح فارغةً أبداً. وشاشةٌ لا تمتلئ يوماً
             // أسوأ من شاشةٍ غائبة — يظنّها المستخدم معطوبة.
-            if (!_isWalletShaped(edition))
+            // المشتريات لا «ليست محفظة»: النقطة على الخادم تشترط
+            // accounting **و** procurement معاً، فترشيحٌ بشرطٍ أوسع يعرض
+            // بنداً يردّه الخادم بـ«وحدة غير مفعَّلة».
+            if (modules.contains('procurement'))
               const NavItem(Icons.receipt_long_outlined, 'فواتير الموردين', '/supplier-invoices'),
           ],
         ),

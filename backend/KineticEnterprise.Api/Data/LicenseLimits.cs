@@ -60,40 +60,92 @@ public static class LicenseLimits
     }
 
     /// <summary>
-    /// الوحدات المفعَّلة فعلياً = ما يسمح به شكل الإصدار **و** ما اشتراه
-    /// الترخيص.
+    /// الوحدات المفعَّلة فعلياً = وحدات الإصدار **زائد ما اشتُري فوقه ناقص
+    /// ما سُحب منه**.
     ///
-    /// <para><b>لماذا الاثنان معاً:</b> الإصدار يقول ما **شكل** النظام
-    /// (محفظة بلا مخزون، صيدلية بنشرات)، والترخيص يقول ما **دُفع ثمنه**.
-    /// الاكتفاء بالإصدار — وهو ما كان — يجعل قائمة وحدات الترخيص زينةً،
-    /// فيحصل من اشترى الأدنى على ما لم يشترِه.</para>
+    /// <para><b>الإصدار قالبٌ ابتدائي لا سقف.</b> كانت هذه الدالّة تُرجع
+    /// <em>تقاطع</em> وحدات الإصدار مع قائمة الترخيص، فيمكن سحب وحدة ولا
+    /// يمكن إضافة واحدة أبداً — وبيعُ وحدةٍ منفردة بعد التسليم (نشرة الدواء
+    /// لبقّالة كبرت، المحاسبة لمن بدأ قياسياً) كان يستلزم نقل العميل إلى
+    /// إصدارٍ آخر بكامله، فتُغرَق قائمته بمستودعات وتقييمٍ ومشترياتٍ لا
+    /// معنى لها عنده — وهو عين ما تتجنّبه [Editions].</para>
     ///
-    /// <para><b>وقائمة فارغة تعني «كل وحدات الإصدار» لا «لا شيء»:</b>
-    /// تراخيص أُنشئت قبل هذا الفرض قد تحمل قائمة قديمة، وتفسيرها حرفياً
-    /// كان يقطع وحدةً يستعملها العميل اليوم — عقوبةٌ على ترقيةٍ لا ذنب له
-    /// فيها. راجع تعبئة MIGRATIONS التي تُزامن القوائم مع الإصدارات.</para>
+    /// <para><b>والسحب يغلب المنح:</b> اسمٌ ورد في القائمتين معاً صفٌّ
+    /// متناقض، وإغلاقه أسلم من فتحه — أسوأ ما يحدث عندها شكوى عميل من وحدة
+    /// ناقصة، مقابل عميلٍ يعمل بوحدة لم تُبَع.</para>
+    ///
+    /// <para><b>ولماذا لا تُقرأ [License.EnabledModulesJson] هنا:</b> هي
+    /// مشتقّةٌ تُكتب من هذه الدالّة نفسها لتُعرض في شاشة العميل وعقده.
+    /// قراءتها للفرض تجعلها مصدر حقيقةٍ ثانياً يفترق عن الأوّل أوّل مرّة
+    /// يُعدَّل صفٌّ من خارج المسار — وقائمةٌ تُفرض ولا يعرف أحد من كتبها
+    /// أسوأ من قائمة زينة.</para>
     /// </summary>
-    public static string[] EffectiveModules(string edition, string? enabledModulesJson)
+    public static string[] EffectiveModules(string edition, string? grantedJson, string? revokedJson)
     {
-        var fromEdition = Editions.ModulesOf(edition);
-        if (string.IsNullOrWhiteSpace(enabledModulesJson)) return fromEdition;
+        var granted = ParseModules(grantedJson);
+        var revoked = ParseModules(revokedJson);
 
-        List<string>? licensed;
+        return Editions.ModulesOf(edition)
+            .Concat(granted)
+            .Distinct(StringComparer.Ordinal)
+            .Where(m => !revoked.Contains(m))
+            .ToArray();
+    }
+
+    /// <summary>
+    /// الوحدات الفعّالة لترخيصٍ قد لا يكون موجوداً بعد.
+    ///
+    /// <para>بلا ترخيص = وحدات الإصدار كما هي: تركيبٌ لم يُرخَّص بعد يجب
+    /// ألّا يُحرَم من شكل النظام الذي اختاره — نفس منطق
+    /// [EnsureCanAddBranchAsync].</para>
+    /// </summary>
+    public static string[] EffectiveModules(string edition, License? license) =>
+        EffectiveModules(edition, license?.GrantedModulesJson, license?.RevokedModulesJson);
+
+    /// <summary>
+    /// قائمة أسماء وحدات من نصّ JSON — التالف والفارغ سواء: لا شيء.
+    ///
+    /// <para>الفشل المفتوح هنا مقصود وآمن، بخلاف ما كان: الفوارق تبدأ
+    /// فارغة، فحقلٌ معطوب يُرجع العميل إلى وحدات إصداره لا إلى نظامٍ
+    /// معطَّل.</para>
+    /// </summary>
+    private static HashSet<string> ParseModules(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return new HashSet<string>(StringComparer.Ordinal);
         try
         {
-            licensed = JsonSerializer.Deserialize<List<string>>(enabledModulesJson);
+            var list = JsonSerializer.Deserialize<List<string>>(json);
+            return new HashSet<string>(list ?? new List<string>(), StringComparer.Ordinal);
         }
         catch (JsonException)
         {
-            // قائمة تالفة لا تُسقط النظام: يُرجَع إلى الإصدار ويُترك
-            // التصحيح لمالك المنصّة. الفشل المغلق هنا يمنع عميلاً من العمل
-            // بسبب حقل نصّي معطوب.
-            return fromEdition;
+            return new HashSet<string>(StringComparer.Ordinal);
         }
-
-        if (licensed is null || licensed.Count == 0) return fromEdition;
-        return fromEdition.Where(licensed.Contains).ToArray();
     }
+
+    /// <summary>
+    /// يُزامن [License.EnabledModulesJson] المشتقّة مع الإصدار والفوارق.
+    ///
+    /// <para>تُستدعى من **كل** مسار يُنشئ ترخيصاً أو يُعدّل إصداره أو
+    /// فوارقه. تركُها لموضعٍ واحد يعني شاشةَ ترخيصٍ عند العميل تعرض غير ما
+    /// يفرضه الخادم فعلاً — وهو أسوأ من ألّا تعرض شيئاً.</para>
+    /// </summary>
+    public static void MaterializeModules(License license, string edition) =>
+        license.EnabledModulesJson = JsonSerializer.Serialize(EffectiveModules(edition, license));
+
+    /// <summary>
+    /// يُنقّي قائمة وحدات واردة من الواجهة: المعروف وحده، بلا تكرار.
+    ///
+    /// <para>اسمٌ مكتوب بخطأ يُقبل صامتاً ثم لا يُطابق أي
+    /// [RequireModuleAttribute] — فيدفع العميل ثمن وحدة ولا يراها، ولا شيء
+    /// في النظام يقول لماذا.</para>
+    /// </summary>
+    public static string[] SanitizeModules(IEnumerable<string>? modules) =>
+        (modules ?? Enumerable.Empty<string>())
+            .Select(m => m?.Trim() ?? "")
+            .Where(Editions.AllModules.Contains)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
 }
 
 /// <summary>

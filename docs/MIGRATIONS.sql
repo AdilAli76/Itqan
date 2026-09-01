@@ -2491,6 +2491,52 @@ END
 GO
 
 -- ----------------------------------------------------------------------------
+--  الوحدات تُباع فوق الإصدار — لا داخله وحده
+--
+--  كانت الوحدات الفعّالة تقاطعاً بين وحدات الإصدار وقائمة enabled_modules،
+--  فيمكن سحب وحدة ولا يمكن إضافة واحدة أبداً: بيعُ نشرة الدواء لعميل قياسي
+--  كان يستلزم نقله إلى إصدار الصيدليات بكامله.
+--
+--  والفارق يُخزَّن لا القائمة الكاملة: عميلٌ اشترى pharmacy ثم رُقّي إصداره
+--  يحتفظ بها، بينما القائمة الكاملة تُعاد حسابتها من الإصدار الجديد فتضيع
+--  كل صفقةٍ بيعت منفردة بلا أثرٍ يدلّ عليها.
+--
+--  وenabled_modules تبقى مشتقّةً للعرض والعقد — لا يقرأها فارضٌ بعد اليوم.
+-- ----------------------------------------------------------------------------
+IF NOT EXISTS (SELECT 1 FROM sys.columns
+               WHERE object_id = OBJECT_ID('dbo.licenses') AND name = 'granted_modules')
+BEGIN
+    ALTER TABLE dbo.licenses ADD granted_modules NVARCHAR(MAX) NOT NULL
+        CONSTRAINT DF_licenses_granted_modules DEFAULT N'[]';
+    PRINT N'أُضيف عمود licenses.granted_modules';
+END
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.columns
+               WHERE object_id = OBJECT_ID('dbo.licenses') AND name = 'revoked_modules')
+BEGIN
+    ALTER TABLE dbo.licenses ADD revoked_modules NVARCHAR(MAX) NOT NULL
+        CONSTRAINT DF_licenses_revoked_modules DEFAULT N'[]';
+    PRINT N'أُضيف عمود licenses.revoked_modules';
+END
+GO
+
+-- نصٌّ تالف في هذين العمودين يُقرأ فارغاً في الكود (راجع ParseModules)، فلا
+-- يُسقط شيئاً — لكن قيداً على القاعدة يمنع كتابته أصلاً، وهو أرخص من تعقّب
+-- من كتبه بعد شهر.
+IF NOT EXISTS (SELECT 1 FROM sys.check_constraints WHERE name = 'CK_licenses_granted_modules_json')
+   AND EXISTS (SELECT 1 FROM sys.columns
+               WHERE object_id = OBJECT_ID('dbo.licenses') AND name = 'granted_modules')
+BEGIN
+    ALTER TABLE dbo.licenses ADD CONSTRAINT CK_licenses_granted_modules_json
+        CHECK (ISJSON(granted_modules) = 1);
+    ALTER TABLE dbo.licenses ADD CONSTRAINT CK_licenses_revoked_modules_json
+        CHECK (ISJSON(revoked_modules) = 1);
+    PRINT N'أُضيف قيدا JSON على فوارق الوحدات';
+END
+GO
+
+-- ----------------------------------------------------------------------------
 --  فهارس الأداء — ملف منفصل لأنه يُنفَّذ ويُعاد بلا خطر
 -- ----------------------------------------------------------------------------
 PRINT N'لا تنسَ تنفيذ docs\INDEXES.sql على هذه القاعدة أيضاً.';

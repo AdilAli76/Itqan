@@ -61,6 +61,8 @@ $known = @{
     'BarcodeTemplateJson' = 'barcode_template'
     'ReceiptTemplateJson' = 'receipt_template'
     'EnabledModulesJson'  = 'enabled_modules'
+    'GrantedModulesJson'  = 'granted_modules'
+    'RevokedModulesJson'  = 'revoked_modules'
 }
 
 function ConvertTo-SnakeCase([string]$name) {

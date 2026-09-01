@@ -30,7 +30,15 @@ public record PlatformOrganizationDto(
     int BranchCount, int UserCount,
     decimal MonthlyFee, decimal StorageFee, decimal MaintenanceRate, DateTime? LicenseIssuedAt,
     /// حجم مرفقات هذا العميل على القرص — الرقم الذي يُسنِد StorageFee.
-    long StorageBytes);
+    long StorageBytes,
+    /// وحدات بيعت فوق الإصدار، ووحدات سُحبت منه، والحاصل الفعلي بعدهما.
+    ///
+    /// <para>الثلاثة معاً لا الفوارق وحدها: شاشةٌ تعرض «مُنح: pharmacy» ولا
+    /// تقول ما الذي يعمل عند العميل فعلاً تترك مالك المنصّة يحسب الاتّحاد
+    /// والطرح في رأسه — وهو ما يُخطئ فيه.</para>
+    List<string> GrantedModules,
+    List<string> RevokedModules,
+    List<string> EffectiveModules);
 
 /// <summary>مستخدم في منظمة عميل — كما يراه مالك المنصّة.</summary>
 public record OrganizationUserDto(
@@ -78,7 +86,22 @@ public record UpdatePlatformOrganizationRequest(
     string LegalName, string DisplayName, bool IsActive,
     /// اختياري — تمديد الترخيص بعدد أشهر من تاريخ انتهائه الحالي.
     int? ExtendMonths = null,
-    string? PlanTier = null);
+    string? PlanTier = null,
+    /// اختياري — نقل العميل إلى إصدار آخر. فوارق الوحدات تبقى فوقه.
+    string? Edition = null,
+    /// <summary>
+    /// الوحدات المطلوب أن تعمل عند العميل بعد الحفظ — **الحاصل لا الفارق**.
+    ///
+    /// <para>الخادم يشتقّ منها المنح والسحب مقيساً على وحدات الإصدار. وهذا
+    /// عمداً: اشتقاقها في الواجهة كان يستلزم نسخة Dart من
+    /// [Editions.ModulesOf]، ونسخةٌ ثانية للخريطة تفترق عن الأولى عند أوّل
+    /// إصدارٍ يُضاف — فيُخزَّن منحٌ لوحدةٍ يملكها الإصدار أصلاً، أو أسوأ:
+    /// سحبٌ لوحدةٍ ظنّت الواجهة أنها ليست فيه.</para>
+    ///
+    /// <para><c>null</c> = لا تمسّ الفوارق القائمة. وهو التمييز الذي يمنع
+    /// شاشةً تُصحّح اسماً من أن تمحو كل وحدة بيعت منفردة.</para>
+    /// </summary>
+    List<string>? Modules = null);
 
 /// <summary>
 /// تزويد عملاء (منظمات) جدد على نفس السيرفر — مقصورة على "مالك المنصة"
@@ -134,7 +157,12 @@ public class PlatformController : ControllerBase
                 d?.Edition ?? "standard", d?.PlanTier ?? "-",
                 d?.ExpiresAt, d?.LicenseStatus, d?.Branches ?? 0, d?.Users ?? 0,
                 d?.MonthlyFee ?? 0, d?.StorageFee ?? 0, d?.MaintenanceRate ?? 0, d?.IssuedAt,
-                StorageBytesOf(o.Id));
+                StorageBytesOf(o.Id),
+                ModuleList(d?.GrantedModulesJson),
+                ModuleList(d?.RevokedModulesJson),
+                LicenseLimits.EffectiveModules(
+                    d?.Edition ?? Editions.Standard,
+                    d?.GrantedModulesJson, d?.RevokedModulesJson).ToList());
         }).ToList();
     }
 
@@ -474,7 +502,8 @@ WHERE id = @userId;";
     }
 
     private record OrgDetail(string Edition, string PlanTier, DateTime? ExpiresAt, string? LicenseStatus,
-        int Branches, int Users, decimal MonthlyFee, decimal StorageFee, decimal MaintenanceRate, DateTime? IssuedAt);
+        int Branches, int Users, decimal MonthlyFee, decimal StorageFee, decimal MaintenanceRate, DateTime? IssuedAt,
+        string? GrantedModulesJson, string? RevokedModulesJson);
 
     /// <summary>
     /// تفاصيل كل منظمة — إصدارها وترخيصها وعدد فروعها ومستخدميها.
@@ -525,7 +554,8 @@ SELECT o.edition,
        l.expires_at, l.status,
        ISNULL(l.monthly_fee, 0), ISNULL(l.storage_fee, 0), ISNULL(l.maintenance_rate, 0), l.issued_at,
        (SELECT COUNT(*) FROM dbo.branches  b WHERE b.organization_id = o.id) AS branches,
-       (SELECT COUNT(*) FROM dbo.app_users u WHERE u.organization_id = o.id AND u.is_active = 1) AS users
+       (SELECT COUNT(*) FROM dbo.app_users u WHERE u.organization_id = o.id AND u.is_active = 1) AS users,
+       l.granted_modules, l.revoked_modules
 FROM dbo.organizations o
 LEFT JOIN dbo.licenses l ON l.organization_id = o.id;";
 
@@ -549,7 +579,9 @@ LEFT JOIN dbo.licenses l ON l.organization_id = o.id;";
                         reader.IsDBNull(4) ? 0 : reader.GetDecimal(4),
                         reader.IsDBNull(5) ? 0 : reader.GetDecimal(5),
                         reader.IsDBNull(6) ? 0 : reader.GetDecimal(6),
-                        reader.IsDBNull(7) ? null : reader.GetDateTime(7));
+                        reader.IsDBNull(7) ? null : reader.GetDateTime(7),
+                        reader.IsDBNull(10) ? null : reader.GetString(10),
+                        reader.IsDBNull(11) ? null : reader.GetString(11));
                 }
             }
             catch (Exception ex)
@@ -592,6 +624,21 @@ LEFT JOIN dbo.licenses l ON l.organization_id = o.id;";
         {
             return BadRequest(new { message = "باقة ترخيص غير معروفة" });
         }
+        if (request.Edition is not null && !Editions.All.Contains(request.Edition))
+        {
+            return BadRequest(new { message = "إصدار غير معروف" });
+        }
+        // اسمٌ مجهول يُرفض ولا يُنقّى صامتاً هنا: مالك المنصّة يختار من قائمة
+        // معروضة، فاسمٌ خارجها يعني خللاً في الواجهة لا خطأ إملائياً — وقبوله
+        // بصمتٍ يترك زرّاً يُضغط ولا يفعل شيئاً.
+        var unknown = (request.Modules ?? new List<string>())
+            .Where(m => !Editions.AllModules.Contains(m))
+            .Distinct()
+            .ToList();
+        if (unknown.Count > 0)
+        {
+            return BadRequest(new { message = $"وحدات غير معروفة: {string.Join("، ", unknown)}" });
+        }
 
         var index = await _db.PlatformOrganizations.FirstOrDefaultAsync(o => o.Id == id);
         if (index is null) return NotFound();
@@ -615,6 +662,14 @@ LEFT JOIN dbo.licenses l ON l.organization_id = o.id;";
 
         org.LegalName = request.LegalName;
         org.DisplayName = request.DisplayName;
+        if (request.Edition is not null)
+        {
+            org.Edition = request.Edition;
+            // البيع بالقيمة الحرّة يتبع **شكل** الإصدار لا وحداته: نقل عميل
+            // إلى إصدار المحفظة بلا ضبطها يترك نقطة بيع تطلب صنفاً من كتالوج
+            // لا وجود له. نفس ما يفعله [Create] عند الإنشاء.
+            org.PosAllowOpenProduct = Editions.AllowsOpenProduct(request.Edition);
+        }
 
         var license = await db.Licenses.FirstOrDefaultAsync(l => l.OrganizationId == id);
         if (license is not null)
@@ -627,13 +682,25 @@ LEFT JOIN dbo.licenses l ON l.organization_id = o.id;";
                 license.MaxUsers = maxUsers;
             }
 
-            // قائمة الوحدات تتبع الإصدار عند تغييره.
-            //
-            // صارت تُفرَض فعلياً بعد أن كانت زينة (راجع
-            // [LicenseLimits.EffectiveModules])، فتركُها متخلّفة عن الإصدار
-            // يعني ترقية عميل إلى إصدار المؤسسات ثم حجب وحداته عنه — عطبٌ
-            // يظهر عند العميل لا عندنا.
-            license.EnabledModulesJson = JsonSerializer.Serialize(Editions.ModulesOf(org.Edition));
+            // الفوارق تُشتقّ من الحاصل المطلوب مقيساً على **الإصدار بعد
+            // تعديله** لا قبله: من رفع عميلاً إلى إصدار المؤسسات وأبقى
+            // المحاسبة مؤشَّرة لا يُقصد أنه اشتراها منفردة — هي في إصداره
+            // الجديد أصلاً، وتخزينها منحاً يترك أثراً كاذباً في العقد.
+            if (request.Modules is not null)
+            {
+                var wanted = LicenseLimits.SanitizeModules(request.Modules);
+                var ofEdition = Editions.ModulesOf(org.Edition);
+
+                license.GrantedModulesJson = JsonSerializer.Serialize(
+                    wanted.Where(m => !ofEdition.Contains(m)).ToArray());
+                license.RevokedModulesJson = JsonSerializer.Serialize(
+                    ofEdition.Where(m => !wanted.Contains(m)).ToArray());
+            }
+
+            // والقائمة المعروضة تُشتقّ بعدها لا قبلها — راجع
+            // [LicenseLimits.MaterializeModules]. وتُستدعى حتى حين لا تُرسَل
+            // وحدات: تغيير الإصدار وحده يغيّر الحاصل.
+            LicenseLimits.MaterializeModules(license, org.Edition);
             if (request.ExtendMonths is > 0)
             {
                 // التمديد من الأبعد بين اليوم وتاريخ الانتهاء: تمديد ترخيص
@@ -654,6 +721,19 @@ LEFT JOIN dbo.licenses l ON l.organization_id = o.id;";
         await _db.SaveChangesAsync();
 
         return NoContent();
+    }
+
+    /// <summary>
+    /// قائمة وحدات من نصّ JSON للعرض — التالف يُقرأ فارغاً.
+    ///
+    /// <para>لا تُستعمل للفرض: الفرض كلّه في
+    /// [LicenseLimits.EffectiveModules] وحده.</para>
+    /// </summary>
+    private static List<string> ModuleList(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return new List<string>();
+        try { return JsonSerializer.Deserialize<List<string>>(json) ?? new List<string>(); }
+        catch (JsonException) { return new List<string>(); }
     }
 
     private static readonly string[] ValidTiers = { "trial", "standard", "professional", "enterprise" };
@@ -956,6 +1036,9 @@ LEFT JOIN dbo.licenses l ON l.organization_id = o.id;";
                 OrganizationId = orgId,
                 LicenseKey = licenseKey,
                 PlanTier = request.PlanTier,
+                // من [Editions] لا بيد: الفوارق تبدأ فارغة عند الإنشاء،
+                // فالقائمة هنا هي وحدات الإصدار عينها — وتُعاد اشتقاقها من
+                // [LicenseLimits.MaterializeModules] عند أول تعديل.
                 EnabledModulesJson = JsonSerializer.Serialize(Editions.ModulesOf(edition)),
                 MonthlyFee = request.MonthlyFee,
                 StorageFee = request.StorageFee,

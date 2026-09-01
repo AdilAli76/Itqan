@@ -180,6 +180,12 @@ public class AppDbContext : DbContext
         // ونفسها لقالب الإيصال: ReceiptTemplateJson ← receipt_template.
         modelBuilder.Entity<Organization>().Property(o => o.ReceiptTemplateJson).HasColumnName("receipt_template");
         modelBuilder.Entity<License>().Property(l => l.EnabledModulesJson).HasColumnName("enabled_modules");
+        // ونفس اللاحقة في فارقَي الوحدات: granted_modules لا
+        // granted_modules_json — أُلحقت بـ Json في C# لتقول إن محتواها نصّ
+        // JSON لا قائمة، ولو تُرك الاسم للتحويل التلقائي لسقط كل استعلام
+        // على جدول التراخيص لا هذان العمودان وحدهما.
+        modelBuilder.Entity<License>().Property(l => l.GrantedModulesJson).HasColumnName("granted_modules");
+        modelBuilder.Entity<License>().Property(l => l.RevokedModulesJson).HasColumnName("revoked_modules");
 
         // خطأ حقيقي ثانٍ كان يُسقِط GetMyOrganization/GetSettings بـ 500 دائماً
         // (كل طلب فعلي بتوكن صالح، لا 401 فقط): العمود SQL receipt_width_mm
