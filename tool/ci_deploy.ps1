@@ -115,6 +115,39 @@ if ($Target -eq 'production') {
         if (-not (Test-Path $backup)) {
             throw "backup.ps1 غير موجود في $root\tool — انشر حزمة حديثة يدوياً مرّة، أو خذ نسخة بنفسك قبل المتابعة."
         }
+        # ── مجلد المرفقات يُمرَّر صراحةً ────────────────────────────────
+        #
+        # نسخة القاعدة وحدها **لا تكفي**: صفوف attachments تشير إلى ملفات
+        # على القرص، فاسترجاعها بلا الملفات يُنتج نظاماً يعرض مرفقاتٍ لا
+        # تُفتح — وهو أسوأ من فقدانها لأن المستخدم يظنّها موجودة.
+        #
+        # وكان لا يُمرَّر، فيسقط backup.ps1 على استكشافٍ ذاتي يبحث في
+        # مسارين ثابتين ويستسلم إن لم يجد Storage.Path — وهو ما وقع فعلاً:
+        # «لم يُحدَّد مجلد المرفقات — نسخة القاعدة وحدها». تحذيرٌ يمرّ في
+        # سطرٍ وسط سجلّ ناجح فلا يقرؤه أحد حتى يوم الاسترجاع.
+        #
+        # وهذا ليس تخميناً للبيئة (راجع HANDOVER §٣ «أدواتٌ تخمّن بيئتها»):
+        # $root معلومٌ صراحةً من الوجهة المُمرَّرة، والقيمة تُقرأ من ملف
+        # إعدادات تلك البيئة بعينها.
+        $uploads = $null
+        $appsettings = Join-Path $root 'backend\appsettings.Production.json'
+        if (Test-Path $appsettings) {
+            try {
+                $cfg = Get-Content -LiteralPath $appsettings -Raw | ConvertFrom-Json
+                if ($cfg.Storage -and $cfg.Storage.Path) { $uploads = $cfg.Storage.Path }
+            } catch {
+                Warn "تعذّرت قراءة $appsettings — يُجرَّب المسار الافتراضي."
+            }
+        }
+        if (-not $uploads) {
+            # نفس ما يفعله الخادم حين تغيب Storage:Path — مجلد uploads
+            # داخل جذر المحتوى. ومحاكاتُه هنا لا الاستسلام: المجلد موجودٌ
+            # فعلاً وفيه مرفقات العملاء، وغيابُ الإعداد لا يعني غياب الملفات.
+            $uploads = Join-Path $root 'backend\uploads'
+            Warn "لا Storage:Path في الإعدادات — يُنسخ المسار الافتراضي: $uploads"
+            Warn 'وهو داخل مجلد النشر: انقله إلى C:\kinetic-data\uploads واضبط Storage:Path.'
+        }
+
         # ⚠ $LASTEXITCODE يُصفَّر **قبل** النداء لا يُقرأ بعده وحسب.
         #
         # العطب الذي يصلحه — أوقف نشرةَ إنتاجٍ ناجحة تماماً: PowerShell لا
@@ -132,7 +165,7 @@ if ($Target -eq 'production') {
         # والتصفير قبل النداء يجعل غياب `exit` يعني نجاحاً — وهو المعنى
         # الصحيح — ويُبقي `exit 1` مقروءاً كما هو.
         $global:LASTEXITCODE = 0
-        & $backup -Database 'KineticEnterprise'
+        & $backup -Database 'KineticEnterprise' -UploadsPath $uploads
         if ($LASTEXITCODE -ne 0) { throw 'فشلت النسخة الاحتياطية — أُوقف النشر قبل أي ترحيل.' }
     }
 }

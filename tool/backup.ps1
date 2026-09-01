@@ -266,17 +266,44 @@ WITH FORMAT, INIT, CHECKSUM, STATS = 25, NAME = N'$Database كامل';
 
 if (-not $UploadsPath) {
     # من ملف أسرار النشر: هو المصدر الوحيد الذي لا يكذب عن المجلد المستعمل.
+    #
+    # ⚠ والاستكشاف هنا **احتياطٌ لمن يشغّل السكربت بيده**. النشر الآلي
+    # يمرّر -UploadsPath صراحةً من جذر البيئة التي ينشر عليها (راجع
+    # ci_deploy.ps1)، لأن هذه القائمة تعرف الإنتاج وحده: من يشغّلها على
+    # بيئة التجربة كان يأخذ مرفقات **الإنتاج** أو لا شيء.
     $secretsCandidates = @(
         'C:\kinetic\backend\appsettings.Production.json',
+        'C:\kinetic-staging\backend\appsettings.Production.json',
         'C:\inetpub\kinetic-api\appsettings.Production.json'
     ) | Where-Object { Test-Path $_ }
 
     if ($secretsCandidates) {
+        $found = $secretsCandidates[0]
         try {
-            $cfg = Get-Content $secretsCandidates[0] -Raw | ConvertFrom-Json
-            if ($cfg.Storage -and $cfg.Storage.Path) { $UploadsPath = $cfg.Storage.Path }
-        } catch { }
+            $cfg = Get-Content $found -Raw | ConvertFrom-Json
+            if ($cfg.Storage -and $cfg.Storage.Path) {
+                $UploadsPath = $cfg.Storage.Path
+                Write-Log "مجلد المرفقات من $found : $UploadsPath"
+            } else {
+                # **الغياب ليس عدماً.** كان السكربت يستسلم هنا فيكتب «لم
+                # يُحدَّد مجلد المرفقات» ويمضي — بينما الخادم نفسه يسقط على
+                # مجلد uploads داخل جذر المحتوى ويكتب فيه مرفقات العملاء
+                # فعلاً. أي أن الملفات موجودة، والنسخة تتركها.
+                $UploadsPath = Join-Path (Split-Path -Parent $found) 'uploads'
+                Write-Log "لا Storage:Path في $found — يُجرَّب الافتراضي: $UploadsPath" 'WARN'
+            }
+        } catch {
+            Write-Log "تعذّرت قراءة $found — مرّر -UploadsPath صراحةً." 'WARN'
+        }
     }
+}
+
+# مرفقاتٌ داخل مجلد النشر تُقال صراحةً لا تمرّ صامتة: الترقية تنسخ
+# backend فوق القديم (لا تمحوه) فتنجو اليوم، لكن أي إعادة تركيب نظيفة
+# تمحوها — والاكتشاف يقع ساعتها لا الآن. راجع appsettings.Production.example.
+if ($UploadsPath -and ($UploadsPath -match '(?i)\backend\uploads$')) {
+    Write-Log "المرفقات داخل مجلد النشر: $UploadsPath" 'WARN'
+    Write-Log 'انقلها إلى C:\kinetic-data\uploads واضبط Storage:Path عليها.' 'WARN'
 }
 
 if ($UploadsPath -and (Test-Path $UploadsPath)) {
