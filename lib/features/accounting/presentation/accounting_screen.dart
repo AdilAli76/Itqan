@@ -136,18 +136,20 @@ class _ChartTab extends ConsumerWidget {
           children.putIfAbsent(a['parentId'] as String?, () => []).add(a);
         }
 
-        return ListView(
-          padding: const EdgeInsets.all(16),
-          children: [
-            _PrintBar(onPrint: () => printChartOfAccounts(ref)),
-            for (final root in children[null] ?? const <Map<String, dynamic>>[])
-              _AccountNode(
-                account: root,
-                children: children,
-                depth: 0,
-                onOpenJournal: onOpenJournal,
-              ),
-          ],
+        return _Readable(
+          child: ListView(
+            padding: const EdgeInsets.all(16),
+            children: [
+              _PrintBar(onPrint: () => printChartOfAccounts(ref)),
+              for (final root in children[null] ?? const <Map<String, dynamic>>[])
+                _AccountNode(
+                  account: root,
+                  children: children,
+                  depth: 0,
+                  onOpenJournal: onOpenJournal,
+                ),
+            ],
+          ),
         );
       },
     );
@@ -772,6 +774,28 @@ class _EntryCard extends ConsumerWidget {
 //  ميزان المراجعة
 // ═══════════════════════════════════════════════════════════════════════════
 
+/// يحصر عرض الدفتر بما يُقرأ.
+///
+/// **الفجوة التي يسدّها:** الدفاتر كانت تمتدّ على عرض الشاشة كلّه — وعلى
+/// سطح مكتب بعرض 1440 يقع اسم الحساب في طرف والرصيد في الطرف المقابل،
+/// وبينهما ذراعٌ من الفراغ. فتقطع العين المسافة في كل سطر، ويُقرأ رقمٌ
+/// في سطرٍ ويُنسَب إلى غيره.
+///
+/// وألفٌ ومئة حدٌّ عمليّ لا ذوق: أربعة أعمدة نصّية ورقمية تسع فيه بلا
+/// ازدحام، وما زاد فراغٌ يُبعِد المرتبطَين.
+class _Readable extends StatelessWidget {
+  const _Readable({required this.child});
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 1100),
+          child: child,
+        ),
+      );
+}
+
 /// شريطٌ رفيع يحمل زرّ الطباعة أعلى الدفتر.
 ///
 /// أعلاه لا أسفله: دفترٌ بمئتَي سطر يدفع زرّاً في ذيله خارج الشاشة، ومن
@@ -809,101 +833,103 @@ class _TrialBalanceTab extends ConsumerWidget {
         final totalCredit = (data['totalCredit'] as num?)?.toDouble() ?? 0;
         final balanced = (totalDebit - totalCredit).abs() < 0.01;
 
-        return ListView(
-          padding: const EdgeInsets.all(16),
-          children: [
-            _PrintBar(onPrint: () => printTrialBalance(ref)),
-            // الحكم أولاً لا آخراً: من يفتح ميزان المراجعة يسأل سؤالاً
-            // واحداً — «هل يوازن؟». وضعُه في الأسفل يعني تمريراً لمعرفته.
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: balanced ? AppColors.successBg : AppColors.dangerBg,
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Row(
-                children: [
-                  Icon(balanced ? Icons.check_circle_outline : Icons.error_outline,
-                      color: balanced ? AppColors.success : AppColors.danger),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      balanced
-                          ? 'الميزان متوازن'
-                          : 'الميزان مختلّ — فرق ${_money.format(totalDebit - totalCredit)}',
-                      style: AppTextStyles.headlineMd(
-                          color: balanced ? AppColors.success : AppColors.danger),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            if (!balanced) ...[
-              const SizedBox(height: 8),
-              Text(
-                'النظام يمنع كتابة قيد غير متوازن، فاختلال الميزان يعني أن '
-                'شيئاً دخل الدفتر من خارج النظام. راجع سجل التدقيق.',
-                style: AppTextStyles.labelMd(),
-              ),
-            ],
-            const SizedBox(height: 16),
-            Row(
-              children: [
-                const SizedBox(width: 60),
-                Expanded(child: Text('الحساب', style: AppTextStyles.labelMd())),
-                SizedBox(width: 110,
-                    child: Text('مدين', textAlign: TextAlign.end, style: AppTextStyles.labelMd())),
-                SizedBox(width: 110,
-                    child: Text('دائن', textAlign: TextAlign.end, style: AppTextStyles.labelMd())),
-              ],
-            ),
-            const Divider(),
-            for (final row in rows)
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 5),
+        return _Readable(
+          child: ListView(
+            padding: const EdgeInsets.all(16),
+            children: [
+              _PrintBar(onPrint: () => printTrialBalance(ref)),
+              // الحكم أولاً لا آخراً: من يفتح ميزان المراجعة يسأل سؤالاً
+              // واحداً — «هل يوازن؟». وضعُه في الأسفل يعني تمريراً لمعرفته.
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: balanced ? AppColors.successBg : AppColors.dangerBg,
+                  borderRadius: BorderRadius.circular(10),
+                ),
                 child: Row(
                   children: [
-                    SizedBox(width: 60,
-                        child: Text(row['code'] as String? ?? '',
-                            style: AppTextStyles.currency(color: AppColors.textSecondary))),
+                    Icon(balanced ? Icons.check_circle_outline : Icons.error_outline,
+                        color: balanced ? AppColors.success : AppColors.danger),
+                    const SizedBox(width: 10),
                     Expanded(
-                      child: Row(
-                        children: [
-                          Flexible(child: Text(row['name'] as String? ?? '',
-                              style: AppTextStyles.bodyMd())),
-                          const SizedBox(width: 8),
-                          // النوع يُعرض هنا لا في الشجرة: الشجرة تقوله بموقع
-                          // الحساب تحت جذره، والميزان قائمة مسطّحة لا موقع فيها.
-                          Text(_typeLabels[row['type']] ?? '',
-                              style: AppTextStyles.labelMd(color: AppColors.textMuted)),
-                        ],
+                      child: Text(
+                        balanced
+                            ? 'الميزان متوازن'
+                            : 'الميزان مختلّ — فرق ${_money.format(totalDebit - totalCredit)}',
+                        style: AppTextStyles.headlineMd(
+                            color: balanced ? AppColors.success : AppColors.danger),
                       ),
                     ),
-                    SizedBox(width: 110,
-                        child: Text((row['debit'] as num?) != 0 ? _money.format(row['debit']) : '',
-                            textAlign: TextAlign.end, style: AppTextStyles.currency())),
-                    SizedBox(width: 110,
-                        child: Text((row['credit'] as num?) != 0 ? _money.format(row['credit']) : '',
-                            textAlign: TextAlign.end, style: AppTextStyles.currency())),
                   ],
                 ),
               ),
-            const Divider(thickness: 2),
-            Row(
-              children: [
-                const SizedBox(width: 60),
-                Expanded(child: Text('الإجمالي', style: AppTextStyles.headlineMd())),
-                SizedBox(width: 110,
-                    child: Text(_money.format(totalDebit),
-                        textAlign: TextAlign.end,
-                        style: AppTextStyles.currency(color: AppColors.textPrimary))),
-                SizedBox(width: 110,
-                    child: Text(_money.format(totalCredit),
-                        textAlign: TextAlign.end,
-                        style: AppTextStyles.currency(color: AppColors.textPrimary))),
+              if (!balanced) ...[
+                const SizedBox(height: 8),
+                Text(
+                  'النظام يمنع كتابة قيد غير متوازن، فاختلال الميزان يعني أن '
+                  'شيئاً دخل الدفتر من خارج النظام. راجع سجل التدقيق.',
+                  style: AppTextStyles.labelMd(),
+                ),
               ],
-            ),
-          ],
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  const SizedBox(width: 60),
+                  Expanded(child: Text('الحساب', style: AppTextStyles.labelMd())),
+                  SizedBox(width: 110,
+                      child: Text('مدين', textAlign: TextAlign.end, style: AppTextStyles.labelMd())),
+                  SizedBox(width: 110,
+                      child: Text('دائن', textAlign: TextAlign.end, style: AppTextStyles.labelMd())),
+                ],
+              ),
+              const Divider(),
+              for (final row in rows)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 5),
+                  child: Row(
+                    children: [
+                      SizedBox(width: 60,
+                          child: Text(row['code'] as String? ?? '',
+                              style: AppTextStyles.currency(color: AppColors.textSecondary))),
+                      Expanded(
+                        child: Row(
+                          children: [
+                            Flexible(child: Text(row['name'] as String? ?? '',
+                                style: AppTextStyles.bodyMd())),
+                            const SizedBox(width: 8),
+                            // النوع يُعرض هنا لا في الشجرة: الشجرة تقوله بموقع
+                            // الحساب تحت جذره، والميزان قائمة مسطّحة لا موقع فيها.
+                            Text(_typeLabels[row['type']] ?? '',
+                                style: AppTextStyles.labelMd(color: AppColors.textMuted)),
+                          ],
+                        ),
+                      ),
+                      SizedBox(width: 110,
+                          child: Text((row['debit'] as num?) != 0 ? _money.format(row['debit']) : '',
+                              textAlign: TextAlign.end, style: AppTextStyles.currency())),
+                      SizedBox(width: 110,
+                          child: Text((row['credit'] as num?) != 0 ? _money.format(row['credit']) : '',
+                              textAlign: TextAlign.end, style: AppTextStyles.currency())),
+                    ],
+                  ),
+                ),
+              const Divider(thickness: 2),
+              Row(
+                children: [
+                  const SizedBox(width: 60),
+                  Expanded(child: Text('الإجمالي', style: AppTextStyles.headlineMd())),
+                  SizedBox(width: 110,
+                      child: Text(_money.format(totalDebit),
+                          textAlign: TextAlign.end,
+                          style: AppTextStyles.currency(color: AppColors.textPrimary))),
+                  SizedBox(width: 110,
+                      child: Text(_money.format(totalCredit),
+                          textAlign: TextAlign.end,
+                          style: AppTextStyles.currency(color: AppColors.textPrimary))),
+                ],
+              ),
+            ],
+          ),
         );
       },
     );
@@ -936,54 +962,56 @@ class _IncomeStatementTab extends ConsumerWidget {
         final net = (data['netIncome'] as num?)?.toDouble() ?? 0;
         final profit = net >= 0;
 
-        return ListView(
-          padding: const EdgeInsets.all(16),
-          children: [
-            _PrintBar(onPrint: () => printIncomeStatement(ref)),
-            // النتيجة أولاً: من يفتح قائمة الدخل يسأل سؤالاً واحداً، ووضعُها
-            // في الأسفل يعني تمريراً لمعرفته.
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: profit ? AppColors.successBg : AppColors.dangerBg,
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Row(
-                children: [
-                  Icon(profit ? Icons.trending_up : Icons.trending_down,
-                      color: profit ? AppColors.success : AppColors.danger),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(profit ? 'صافي الربح' : 'صافي الخسارة',
-                        style: AppTextStyles.headlineMd(
+        return _Readable(
+          child: ListView(
+            padding: const EdgeInsets.all(16),
+            children: [
+              _PrintBar(onPrint: () => printIncomeStatement(ref)),
+              // النتيجة أولاً: من يفتح قائمة الدخل يسأل سؤالاً واحداً، ووضعُها
+              // في الأسفل يعني تمريراً لمعرفته.
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: profit ? AppColors.successBg : AppColors.dangerBg,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Row(
+                  children: [
+                    Icon(profit ? Icons.trending_up : Icons.trending_down,
+                        color: profit ? AppColors.success : AppColors.danger),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(profit ? 'صافي الربح' : 'صافي الخسارة',
+                          style: AppTextStyles.headlineMd(
+                              color: profit ? AppColors.success : AppColors.danger)),
+                    ),
+                    Text(_money.format(net.abs()),
+                        style: AppTextStyles.displayLg(
                             color: profit ? AppColors.success : AppColors.danger)),
-                  ),
-                  Text(_money.format(net.abs()),
-                      style: AppTextStyles.displayLg(
-                          color: profit ? AppColors.success : AppColors.danger)),
-                ],
+                  ],
+                ),
               ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'من ${_date.format(DateTime.tryParse('${data['from']}') ?? DateTime.now())} '
-              'إلى ${_date.format(DateTime.tryParse('${data['to']}') ?? DateTime.now())}',
-              style: AppTextStyles.labelMd(),
-            ),
-            const SizedBox(height: 20),
-            _section('الإيرادات', revenues, totalRevenue),
-            const SizedBox(height: 20),
-            // «الاستخدامات» لا «المصروفات»: هي تسمية القسم الثالث في الدليل
-            // الموحّد، وتشمل تكلفة البضاعة المباعة لا المصروفات وحدها.
-            _section('الاستخدامات', expenses, totalExpense),
-            if (revenues.isEmpty && expenses.isEmpty) ...[
-              const SizedBox(height: 24),
-              Center(
-                child: Text('لا حركة في هذه المدّة.',
-                    style: AppTextStyles.bodyMd(color: AppColors.textSecondary)),
+              const SizedBox(height: 8),
+              Text(
+                'من ${_date.format(DateTime.tryParse('${data['from']}') ?? DateTime.now())} '
+                'إلى ${_date.format(DateTime.tryParse('${data['to']}') ?? DateTime.now())}',
+                style: AppTextStyles.labelMd(),
               ),
+              const SizedBox(height: 20),
+              _section('الإيرادات', revenues, totalRevenue),
+              const SizedBox(height: 20),
+              // «الاستخدامات» لا «المصروفات»: هي تسمية القسم الثالث في الدليل
+              // الموحّد، وتشمل تكلفة البضاعة المباعة لا المصروفات وحدها.
+              _section('الاستخدامات', expenses, totalExpense),
+              if (revenues.isEmpty && expenses.isEmpty) ...[
+                const SizedBox(height: 24),
+                Center(
+                  child: Text('لا حركة في هذه المدّة.',
+                      style: AppTextStyles.bodyMd(color: AppColors.textSecondary)),
+                ),
+              ],
             ],
-          ],
+          ),
         );
       },
     );
@@ -1018,96 +1046,98 @@ class _BalanceSheetTab extends ConsumerWidget {
         final diff = (data['difference'] as num?)?.toDouble() ?? 0;
         final balanced = diff.abs() < 0.01;
 
-        return ListView(
-          padding: const EdgeInsets.all(16),
-          children: [
-            _PrintBar(onPrint: () => printBalanceSheet(ref)),
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: balanced ? AppColors.successBg : AppColors.dangerBg,
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Row(
-                children: [
-                  Icon(balanced ? Icons.check_circle_outline : Icons.error_outline,
-                      color: balanced ? AppColors.success : AppColors.danger),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      balanced
-                          ? 'الميزانية متوازنة'
-                          : 'الميزانية مختلّة — فرق ${_money.format(diff)}',
-                      style: AppTextStyles.headlineMd(
-                          color: balanced ? AppColors.success : AppColors.danger),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text('حتى ${_date.format(DateTime.tryParse('${data['asOf']}') ?? DateTime.now())}',
-                style: AppTextStyles.labelMd()),
-            const SizedBox(height: 20),
-            _section('الأصول', assets, totalAssets),
-            const SizedBox(height: 20),
-            _section('الالتزامات', liabilities, totalLiabilities),
-            const SizedBox(height: 20),
-            _section('حقوق الملكية', equity, totalEquity),
-            const SizedBox(height: 12),
-            // النتيجة الجارية تُعرَض صراحةً لا تُخفى في الفرق.
-            //
-            // الإقفال السنوي غير مبنيّ، فأرباح المدّة تبقى في حسابات الإيراد
-            // والاستخدام ولا تُرحَّل إلى «الأرباح المحتجزة». ولولا إضافتها هنا
-            // لما توازنت الميزانية أبداً — والفرق هو الربح بالضبط.
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: AppColors.infoBg,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text('نتيجة الفترة (غير مُقفَلة)',
-                            style: AppTextStyles.bodyMd(color: AppColors.info)),
-                      ),
-                      Text(_money.format(retained),
-                          style: AppTextStyles.currency(color: AppColors.info)),
-                    ],
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    'الإقفال السنوي غير مبنيّ بعد، فأرباح المدّة تبقى في حسابات '
-                    'الإيراد والاستخدام. تُضاف هنا إلى حقوق الملكية لتتوازن الميزانية.',
-                    style: AppTextStyles.caption(),
-                  ),
-                ],
-              ),
-            ),
-            const Divider(thickness: 2, height: 28),
-            Row(
-              children: [
-                Expanded(child: Text('إجمالي الأصول', style: AppTextStyles.headlineMd())),
-                Text(_money.format(totalAssets),
-                    style: AppTextStyles.currency(color: AppColors.textPrimary)),
-              ],
-            ),
-            const SizedBox(height: 6),
-            Row(
-              children: [
-                Expanded(
-                  child: Text('الالتزامات + حقوق الملكية + النتيجة',
-                      style: AppTextStyles.headlineMd()),
+        return _Readable(
+          child: ListView(
+            padding: const EdgeInsets.all(16),
+            children: [
+              _PrintBar(onPrint: () => printBalanceSheet(ref)),
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: balanced ? AppColors.successBg : AppColors.dangerBg,
+                  borderRadius: BorderRadius.circular(10),
                 ),
-                Text(_money.format(totalLiabilities + totalEquity + retained),
-                    style: AppTextStyles.currency(color: AppColors.textPrimary)),
-              ],
-            ),
-          ],
+                child: Row(
+                  children: [
+                    Icon(balanced ? Icons.check_circle_outline : Icons.error_outline,
+                        color: balanced ? AppColors.success : AppColors.danger),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        balanced
+                            ? 'الميزانية متوازنة'
+                            : 'الميزانية مختلّة — فرق ${_money.format(diff)}',
+                        style: AppTextStyles.headlineMd(
+                            color: balanced ? AppColors.success : AppColors.danger),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text('حتى ${_date.format(DateTime.tryParse('${data['asOf']}') ?? DateTime.now())}',
+                  style: AppTextStyles.labelMd()),
+              const SizedBox(height: 20),
+              _section('الأصول', assets, totalAssets),
+              const SizedBox(height: 20),
+              _section('الالتزامات', liabilities, totalLiabilities),
+              const SizedBox(height: 20),
+              _section('حقوق الملكية', equity, totalEquity),
+              const SizedBox(height: 12),
+              // النتيجة الجارية تُعرَض صراحةً لا تُخفى في الفرق.
+              //
+              // الإقفال السنوي غير مبنيّ، فأرباح المدّة تبقى في حسابات الإيراد
+              // والاستخدام ولا تُرحَّل إلى «الأرباح المحتجزة». ولولا إضافتها هنا
+              // لما توازنت الميزانية أبداً — والفرق هو الربح بالضبط.
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: AppColors.infoBg,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text('نتيجة الفترة (غير مُقفَلة)',
+                              style: AppTextStyles.bodyMd(color: AppColors.info)),
+                        ),
+                        Text(_money.format(retained),
+                            style: AppTextStyles.currency(color: AppColors.info)),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      'الإقفال السنوي غير مبنيّ بعد، فأرباح المدّة تبقى في حسابات '
+                      'الإيراد والاستخدام. تُضاف هنا إلى حقوق الملكية لتتوازن الميزانية.',
+                      style: AppTextStyles.caption(),
+                    ),
+                  ],
+                ),
+              ),
+              const Divider(thickness: 2, height: 28),
+              Row(
+                children: [
+                  Expanded(child: Text('إجمالي الأصول', style: AppTextStyles.headlineMd())),
+                  Text(_money.format(totalAssets),
+                      style: AppTextStyles.currency(color: AppColors.textPrimary)),
+                ],
+              ),
+              const SizedBox(height: 6),
+              Row(
+                children: [
+                  Expanded(
+                    child: Text('الالتزامات + حقوق الملكية + النتيجة',
+                        style: AppTextStyles.headlineMd()),
+                  ),
+                  Text(_money.format(totalLiabilities + totalEquity + retained),
+                      style: AppTextStyles.currency(color: AppColors.textPrimary)),
+                ],
+              ),
+            ],
+          ),
         );
       },
     );

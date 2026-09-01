@@ -619,11 +619,7 @@ class _BranchFormDialogState extends State<_BranchFormDialog> {
         key: _formKey,
         child: SizedBox(
           width: 380,
-          child: SingleChildScrollView(
-            // بلا تمرير يفيض الحوار على أي شاشة أقصر من محتواه،
-            // فيخرج زرّا الحفظ والإلغاء عن المتناول ويصبح الحوار
-            // مصيدة لا مخرج منها. أربعة حقول تكفي لذلك على الهاتف.
-            child: Column(
+          child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
@@ -696,7 +692,6 @@ class _BranchFormDialogState extends State<_BranchFormDialog> {
                 ],
               ],
             ),
-          ),
         ),
       ),
     );

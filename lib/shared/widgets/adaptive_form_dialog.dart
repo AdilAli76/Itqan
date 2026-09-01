@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import '../../core/responsive/breakpoints.dart';
@@ -40,10 +42,22 @@ class AdaptiveFormDialog extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (!Breakpoints.isMobile(context)) {
+      // ── حدٌّ أدنى للعرض على الشاشة الواسعة ──────────────────────────
+      //
+      // النماذج كانت بين 360 و480 بكسل — عرضٌ اختير وشاشةُ الهاتف في
+      // البال. وعلى سطح مكتب بعرض 1440 يصير النموذج شريطاً ضيّقاً في
+      // وسط فراغ: أسماء الحقول تُقصّ، والقوائم المنسدلة تُظهر ثلاث كلمات
+      // من سبع، وحقلان كان يسعهما سطرٌ واحد يقعان في سطرين.
+      //
+      // ولا يُضاعَف بلا حدّ: نموذجٌ بثلاثة حقول على ثمانمئة بكسل يجعل
+      // العين تقطع مسافةً بين التسمية وقيمتها. فالحدّ الأدنى 560 يكفي
+      // حقلين متجاورين، والأوسع يُطلَب صراحةً بـmaxWidth.
+      final width = math.max(maxWidth, 560.0);
+
       return AlertDialog(
         title: Text(title),
         content: SizedBox(
-          width: maxWidth,
+          width: width,
           child: SingleChildScrollView(child: body),
         ),
         actions: actions,

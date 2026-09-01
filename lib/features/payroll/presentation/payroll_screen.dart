@@ -777,8 +777,7 @@ class _AdvanceDialogState extends ConsumerState<_AdvanceDialog> {
       body: EnterAdvancesFocus(
         child: SizedBox(
           width: 440,
-          child: SingleChildScrollView(
-            child: Column(
+          child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
                 DropdownButtonFormField<String>(
@@ -824,7 +823,6 @@ class _AdvanceDialogState extends ConsumerState<_AdvanceDialog> {
                 ],
               ],
             ),
-          ),
         ),
       ),
     );

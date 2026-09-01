@@ -475,7 +475,8 @@ class _ProductFormDialogState extends ConsumerState<_ProductFormDialog> {
 
     return AdaptiveFormDialog(
       title: _isEdit ? 'تعديل صنف' : 'إضافة صنف جديد',
-      maxWidth: 420,
+      // ثلاثة عشر حقلاً — أوسع من الحدّ الأدنى عمداً.
+      maxWidth: 720,
       actions: [
         TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('إلغاء')),
         FilledButton(
@@ -487,8 +488,7 @@ class _ProductFormDialogState extends ConsumerState<_ProductFormDialog> {
       ],
       body: Form(
           key: _formKey,
-          child: SingleChildScrollView(
-            child: Column(
+          child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -705,7 +705,6 @@ class _ProductFormDialogState extends ConsumerState<_ProductFormDialog> {
                 ],
               ],
             ),
-          ),
         ),
     );
   }
@@ -850,11 +849,7 @@ class _StockAdjustmentDialogState extends State<_StockAdjustmentDialog> {
         key: _formKey,
         child: SizedBox(
           width: 360,
-          child: SingleChildScrollView(
-            // بلا تمرير يفيض الحوار على أي شاشة أقصر من محتواه،
-            // فيخرج زرّا الحفظ والإلغاء عن المتناول ويصبح الحوار
-            // مصيدة لا مخرج منها. أربعة حقول تكفي لذلك على الهاتف.
-            child: Column(
+          child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
@@ -913,7 +908,6 @@ class _StockAdjustmentDialogState extends State<_StockAdjustmentDialog> {
                 ],
               ],
             ),
-          ),
         ),
       ),
     );
@@ -1367,11 +1361,7 @@ class _SupplierFormDialogState extends State<_SupplierFormDialog> {
         key: _formKey,
         child: SizedBox(
           width: 360,
-          child: SingleChildScrollView(
-            // بلا تمرير يفيض الحوار على أي شاشة أقصر من محتواه،
-            // فيخرج زرّا الحفظ والإلغاء عن المتناول ويصبح الحوار
-            // مصيدة لا مخرج منها. أربعة حقول تكفي لذلك على الهاتف.
-            child: Column(
+          child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
@@ -1403,7 +1393,6 @@ class _SupplierFormDialogState extends State<_SupplierFormDialog> {
                 ],
               ],
             ),
-          ),
         ),
       ),
     );

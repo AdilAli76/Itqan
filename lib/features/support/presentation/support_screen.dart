@@ -191,8 +191,7 @@ class _EditSupportInfoDialogState extends State<_EditSupportInfoDialog> {
           // يظهر أثناء الكتابة لا بعد الضغط على «حفظ»، فيصحّحه المستخدم في
           // سياقه بدل أن يُفاجأ به في نهاية النموذج.
           autovalidateMode: AutovalidateMode.onUserInteraction,
-          child: SingleChildScrollView(
-            child: Column(
+          child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
@@ -251,7 +250,6 @@ class _EditSupportInfoDialogState extends State<_EditSupportInfoDialog> {
                 ],
               ],
             ),
-          ),
         ),
     );
   }

@@ -715,11 +715,7 @@ class _WalletAdjustmentDialogState extends State<_WalletAdjustmentDialog> {
         key: _formKey,
         child: SizedBox(
           width: 340,
-          child: SingleChildScrollView(
-            // بلا تمرير يفيض الحوار على أي شاشة أقصر من محتواه،
-            // فيخرج زرّا الحفظ والإلغاء عن المتناول ويصبح الحوار
-            // مصيدة لا مخرج منها. أربعة حقول تكفي لذلك على الهاتف.
-            child: Column(
+          child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
@@ -746,7 +742,6 @@ class _WalletAdjustmentDialogState extends State<_WalletAdjustmentDialog> {
                 ],
               ],
             ),
-          ),
         ),
       ),
     );
