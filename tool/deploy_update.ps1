@@ -115,8 +115,54 @@ if (-not (Test-Path "IIS:\AppPools\$PoolName")) {
     throw "لا مجمّع تطبيقات باسم «$PoolName» في IIS. راجع اسم المجمّع، أو أنشئه بـ server_setup.ps1 -Stage iis."
 }
 
-Stop-Website -Name $SiteName -ErrorAction SilentlyContinue
-Stop-WebAppPool -Name $PoolName -ErrorAction SilentlyContinue
+# ── الإيقاف: «موقوف سلفاً» نجاحٌ لا فشل ─────────────────────────────────
+#
+# **العطب الذي يصلحه — أوقف نشرة التجربة فعلاً:**
+# `-ErrorAction SilentlyContinue` يكتم أخطاء الـcmdlet **غير المُنهية**
+# وحدها. ومزوّد IIS يرمي «Object on target path is already stopped» خطأً
+# **مُنهياً**، فلا يكتمه المعامل ويُسقطه $ErrorActionPreference='Stop'
+# على الفور — فيفشل النشر لأن ما نطلبه واقعٌ سلفاً.
+#
+# ويقع حتماً بعد أي نشرة تعثّرت في منتصفها: تلك أوقفت المجمّع ولم تُشغّله،
+# فالنشرة التالية تجده موقوفاً وتفشل — أي أن **فشلاً واحداً يُقفل البيئة
+# على نفسه** ولا يُفتح إلا بيد.
+#
+# وهو أخو المصيدة المعروفة هنا (HANDOVER §٣): حالةٌ تصف حدوثاً لا نتيجة.
+# فالمطلوب «تأكّد أنه متوقّف» لا «نفّذ أمر الإيقاف».
+function Stop-IfRunning([string]$Kind, [string]$Name) {
+    try {
+        if ($Kind -eq 'site') { Stop-Website  -Name $Name -ErrorAction Stop }
+        else                  { Stop-WebAppPool -Name $Name -ErrorAction Stop }
+    } catch {
+        # «موقوف سلفاً» هو الحال المطلوب — يُقال ويُمضى.
+        if ($_.Exception.Message -match 'already stopped') {
+            Write-Host "    ($Name موقوف سلفاً)" -ForegroundColor DarkGray
+            return
+        }
+        # وأي سببٍ آخر يُوقف: الاستبدال فوق ملفات مقفولة يُنتج نشرةً نصفها
+        # قديم ونصفها جديد — وهي أسوأ من نشرةٍ لم تبدأ.
+        throw "تعذّر إيقاف $Name : $($_.Exception.Message)"
+    }
+}
+
+# ونظيرتها للتشغيل — راجع الخطوة 6.
+function Start-IfStopped([string]$Kind, [string]$Name) {
+    try {
+        if ($Kind -eq 'site') { Start-Website  -Name $Name -ErrorAction Stop }
+        else                  { Start-WebAppPool -Name $Name -ErrorAction Stop }
+    } catch {
+        if ($_.Exception.Message -match 'already started') {
+            Write-Host "    ($Name يعمل سلفاً)" -ForegroundColor DarkGray
+            return
+        }
+        # ولا يُرمى من finally: يُقال بوضوح ويُترك الاستثناء الأصلي يظهر.
+        Warn "تعذّر تشغيل $Name : $($_.Exception.Message)"
+        Warn "شغّله يدوياً:  Start-WebAppPool -Name $Name"
+    }
+}
+
+Stop-IfRunning 'site' $SiteName
+Stop-IfRunning 'pool' $PoolName
 # تحرير المقابض يستغرق لحظة بعد إيقاف المجمّع.
 Start-Sleep -Seconds 3
 Ok 'الموقع ومجمّع التطبيقات متوقّفان'
@@ -159,8 +205,11 @@ try {
     # في finally: فشل النسخ في المنتصف يجب ألّا يترك النظام متوقّفاً بلا
     # أن ينتبه أحد — يعود للعمل ثم يُقرأ الخطأ.
     Step 6 'تشغيل الموقع'
-    Start-WebAppPool -Name $PoolName -ErrorAction SilentlyContinue
-    Start-Website -Name $SiteName -ErrorAction SilentlyContinue
+    # ونفس علاج الإيقاف، وهو **هنا أخطر**: استثناءٌ يُرمى من finally يحلّ
+    # محلّ الاستثناء الأصلي. فعطبٌ حقيقي في الاستبدال كان سيظهر برسالة
+    # «already started» — أي أن رسالة الفشل تصف آخر ما جرى لا سببه.
+    Start-IfStopped 'pool' $PoolName
+    Start-IfStopped 'site' $SiteName
     Ok 'الموقع يعمل'
 }
 
