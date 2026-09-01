@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:dio/dio.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import '../../../shared/widgets/adaptive_dialog.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/network/api_client.dart';
@@ -39,9 +40,21 @@ class _ImportCustomersDialogState extends ConsumerState<ImportCustomersDialog> {
     final errors = (preview?['withErrors'] as num?)?.toInt() ?? 0;
     final canCommit = preview != null && !_done && errors == 0;
 
-    return AlertDialog(
-      title: Text(_done ? 'تمّ الاستيراد' : 'استيراد المنتسبين'),
-      content: SizedBox(
+    return AdaptiveDialog(
+      title: _done ? 'تمّ الاستيراد' : 'استيراد المنتسبين',
+      maxWidth: 620,
+      actions: [
+        TextButton(
+          onPressed: _busy ? null : () => Navigator.pop(context, _done),
+          child: Text(_done ? 'إغلاق' : 'تراجع'),
+        ),
+        if (!_done)
+          FilledButton(
+            onPressed: (_busy || !canCommit) ? null : () => _upload(dryRun: false),
+            child: const Text('تنفيذ الاستيراد'),
+          ),
+      ],
+      body: SizedBox(
         width: 620,
         height: 440,
         child: Column(
@@ -90,17 +103,6 @@ class _ImportCustomersDialogState extends ConsumerState<ImportCustomersDialog> {
           ],
         ),
       ),
-      actions: [
-        TextButton(
-          onPressed: _busy ? null : () => Navigator.pop(context, _done),
-          child: Text(_done ? 'إغلاق' : 'تراجع'),
-        ),
-        if (!_done)
-          FilledButton(
-            onPressed: (_busy || !canCommit) ? null : () => _upload(dryRun: false),
-            child: const Text('تنفيذ الاستيراد'),
-          ),
-      ],
     );
   }
 

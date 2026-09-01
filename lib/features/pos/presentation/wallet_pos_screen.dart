@@ -1,6 +1,6 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
-import '../../../shared/widgets/adaptive_form_dialog.dart';
+import '../../../shared/widgets/adaptive_dialog.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/auth/current_user.dart';
 import '../../../core/feedback/pos_sounds.dart';
@@ -739,7 +739,7 @@ class _WalletCustomerSearchDialogState extends ConsumerState<_WalletCustomerSear
     final symbol = ref.watch(brandingProvider).valueOrNull?.currencySymbol ?? 'د.ل';
     final resultsAsync = ref.watch(posCustomerResultsProvider);
 
-    return AdaptiveFormDialog(
+    return AdaptiveDialog(
       title: 'بحث عن صاحب رصيد',
       maxWidth: 420,
       actions: [
@@ -885,7 +885,7 @@ class _CashTenderedDialogState extends State<_CashTenderedDialog> {
   Widget build(BuildContext context) {
     final short = _text.isNotEmpty && _change < 0;
 
-    return AdaptiveFormDialog(
+    return AdaptiveDialog(
       title: 'المستلَم من الزبون',
       maxWidth: 340,
       actions: [

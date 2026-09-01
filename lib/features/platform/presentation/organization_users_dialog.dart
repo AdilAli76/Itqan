@@ -1,6 +1,6 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
-import '../../../shared/widgets/adaptive_form_dialog.dart';
+import '../../../shared/widgets/adaptive_dialog.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 // intl يصدّر TextDirection خاصّاً به بثوابت أخرى (LTR/RTL) فيحجب نوع
@@ -295,7 +295,7 @@ class _EditUserDialogState extends ConsumerState<_EditUserDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return AdaptiveFormDialog(
+    return AdaptiveDialog(
       title: 'تصحيح بيانات الحساب',
       actions: [
         TextButton(

@@ -2,7 +2,7 @@ import 'dart:async';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
-import '../../../shared/widgets/adaptive_form_dialog.dart';
+import '../../../shared/widgets/adaptive_dialog.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../../../core/network/api_client.dart';
@@ -383,7 +383,7 @@ class _CreateTransferDialogState extends ConsumerState<_CreateTransferDialog> {
     final branchesAsync = ref.watch(branchesProvider);
     final resultsAsync = ref.watch(transferProductResultsProvider);
 
-    return AdaptiveFormDialog(
+    return AdaptiveDialog(
       title: 'إنشاء تحويل مخزون',
       maxWidth: 460,
       actions: [

@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:kinetic_enterprise/shared/widgets/adaptive_form_dialog.dart';
+import 'package:kinetic_enterprise/shared/widgets/adaptive_dialog.dart';
 
 /// يحرس ما لا يظهر خرقُه في أي لقطة: نموذجٌ طويل على شاشة هاتف.
 ///
@@ -18,7 +18,7 @@ void main() {
         ),
       );
 
-  Widget longForm() => AdaptiveFormDialog(
+  Widget longForm() => AdaptiveDialog(
         title: 'نموذج طويل',
         maxWidth: 420,
         actions: [

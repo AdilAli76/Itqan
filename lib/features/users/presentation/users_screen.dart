@@ -2,7 +2,7 @@ import 'dart:async';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
-import '../../../shared/widgets/adaptive_form_dialog.dart';
+import '../../../shared/widgets/adaptive_dialog.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../../../core/network/api_client.dart';
@@ -297,7 +297,7 @@ class _UserFormDialogState extends ConsumerState<_UserFormDialog> {
   Widget build(BuildContext context) {
     final branchesAsync = ref.watch(branchesProvider);
 
-    return AdaptiveFormDialog(
+    return AdaptiveDialog(
       title: _isEdit ? 'تعديل مستخدم' : 'إضافة مستخدم جديد',
       maxWidth: 400,
       body: Form(
@@ -482,7 +482,7 @@ class _ResetPasswordDialogState extends State<_ResetPasswordDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return AdaptiveFormDialog(
+    return AdaptiveDialog(
       title: 'كلمة مرور جديدة: ${widget.user['fullName']}',
       actions: [
         TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('إلغاء')),

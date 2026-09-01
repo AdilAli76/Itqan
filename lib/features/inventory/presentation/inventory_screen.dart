@@ -2,7 +2,7 @@ import 'dart:async';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
-import '../../../shared/widgets/adaptive_form_dialog.dart';
+import '../../../shared/widgets/adaptive_dialog.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../../../core/network/api_client.dart';
@@ -473,7 +473,7 @@ class _ProductFormDialogState extends ConsumerState<_ProductFormDialog> {
     final categoriesAsync = ref.watch(categoriesProvider);
     final suppliersAsync = ref.watch(suppliersProvider);
 
-    return AdaptiveFormDialog(
+    return AdaptiveDialog(
       title: _isEdit ? 'تعديل صنف' : 'إضافة صنف جديد',
       // ثلاثة عشر حقلاً — أوسع من الحدّ الأدنى عمداً.
       maxWidth: 720,
@@ -834,7 +834,7 @@ class _StockAdjustmentDialogState extends State<_StockAdjustmentDialog> {
   Widget build(BuildContext context) {
     final trackExpiry = widget.product['trackExpiry'] as bool? ?? false;
 
-    return AdaptiveFormDialog(
+    return AdaptiveDialog(
       title: 'تعديل كمية: ${widget.product['name']}',
       actions: [
         TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('إلغاء')),
@@ -1097,7 +1097,7 @@ class _LockReasonDialogState extends State<_LockReasonDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return AdaptiveFormDialog(
+    return AdaptiveDialog(
       title: 'سبب الإيقاف',
       maxWidth: 360,
       actions: [
@@ -1346,7 +1346,7 @@ class _SupplierFormDialogState extends State<_SupplierFormDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return AdaptiveFormDialog(
+    return AdaptiveDialog(
       title: _isEdit ? 'تعديل مورد' : 'إضافة مورد جديد',
       actions: [
         TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('إلغاء')),

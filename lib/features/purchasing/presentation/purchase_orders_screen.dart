@@ -3,7 +3,7 @@ import 'dart:async';
 import 'package:file_picker/file_picker.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
-import '../../../shared/widgets/adaptive_form_dialog.dart';
+import '../../../shared/widgets/adaptive_dialog.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../../../core/auth/current_user.dart';
@@ -201,16 +201,9 @@ class _PurchaseOrderDetailDialogState extends ConsumerState<_PurchaseOrderDetail
   Widget build(BuildContext context) {
     final detailAsync = ref.watch(purchaseOrderDetailProvider(widget.orderId));
 
-    return AlertDialog(
-      title: const Text('تفاصيل أمر الشراء'),
-      content: SizedBox(
-        width: 460,
-        child: detailAsync.when(
-          loading: () => const SizedBox(height: 160, child: Center(child: CircularProgressIndicator())),
-          error: (err, _) => const SizedBox(height: 80, child: Center(child: Text('تعذّر تحميل التفاصيل'))),
-          data: (order) => _buildContent(context, order),
-        ),
-      ),
+    return AdaptiveDialog(
+      title: 'تفاصيل أمر الشراء',
+      maxWidth: 460,
       actions: [
         TextButton(
           onPressed: _printing ? null : () => _print(detailAsync.valueOrNull),
@@ -220,6 +213,11 @@ class _PurchaseOrderDetailDialogState extends ConsumerState<_PurchaseOrderDetail
         ),
         TextButton(onPressed: () => Navigator.pop(context), child: const Text('إغلاق')),
       ],
+      body: detailAsync.when(
+          loading: () => const SizedBox(height: 160, child: Center(child: CircularProgressIndicator())),
+          error: (err, _) => const SizedBox(height: 80, child: Center(child: Text('تعذّر تحميل التفاصيل'))),
+          data: (order) => _buildContent(context, order),
+        ),
     );
   }
 
@@ -508,7 +506,7 @@ class _ReceiveExpiryDialogState extends State<_ReceiveExpiryDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return AdaptiveFormDialog(
+    return AdaptiveDialog(
       title: 'الكمية الواصلة',
       maxWidth: 400,
       actions: [
@@ -734,7 +732,7 @@ class _CreatePurchaseOrderDialogState extends ConsumerState<_CreatePurchaseOrder
     final suppliersAsync = ref.watch(suppliersProvider);
     final resultsAsync = ref.watch(purchaseOrderProductResultsProvider);
 
-    return AdaptiveFormDialog(
+    return AdaptiveDialog(
       title: 'أمر شراء جديد',
       maxWidth: 480,
       body: Form(
@@ -1045,7 +1043,7 @@ class _QuickProductDialogState extends State<_QuickProductDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return AdaptiveFormDialog(
+    return AdaptiveDialog(
       title: 'صنف جديد',
       maxWidth: 420,
       actions: [
@@ -1191,6 +1189,41 @@ class _PurchaseAttachmentsState extends State<_PurchaseAttachments> {
     if (mounted) setState(() => _busy = false);
   }
 
+  /// يفتح المرفق — بتنزيله إلى حيث يختار المستخدم.
+  ///
+  /// <para><b>ولماذا لا يُفتح برابط مباشر:</b> نقطة <c>/api/files/{id}</c>
+  /// محميّة بتوكن، و<c>launchUrl</c> يفتح المتصفّح بلا ترويسة تفويض —
+  /// فيردّ الخادم 401 ويرى المستخدم صفحة خطأ. فالبايتات تُجلَب بالعميل
+  /// نفسه الذي يحمل التوكن، ثم تُسلَّم للنظام.</para>
+  Future<void> _open(Map<String, dynamic> file) async {
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      final response = await ApiClient.instance.dio.get<List<int>>(
+        '/files/${file['id']}',
+        options: Options(responseType: ResponseType.bytes),
+      );
+      final bytes = response.data;
+      if (bytes == null || bytes.isEmpty) throw Exception('empty');
+
+      final saved = await FilePicker.saveFile(
+        fileName: file['fileName'] as String? ?? 'مرفق',
+        bytes: Uint8List.fromList(bytes),
+      );
+      if (mounted && saved != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('حُفظ المرفق')),
+        );
+      }
+    } catch (e) {
+      if (mounted) setState(() => _error = 'تعذّر فتح المرفق');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Column(
@@ -1221,6 +1254,10 @@ class _PurchaseAttachmentsState extends State<_PurchaseAttachments> {
                 ),
                 title: Text(f['fileName'] as String? ?? '', overflow: TextOverflow.ellipsis),
                 subtitle: Text('${(((f['sizeBytes'] as num?) ?? 0) / 1024).round()} ك.ب'),
+                // ⚠ الفتح كان غائباً تماماً: المرفق يُرفَع ويُحذَف ولا
+                // يُقرأ. فصورة فاتورة المورّد تُخزَّن ولا يراها أحد بعد
+                // رفعها — وهي كل غرضها.
+                onTap: _busy ? null : () => _open(f),
                 trailing: IconAction(
                   icon: Icons.delete_outline,
                   iconSize: 18,
@@ -1364,7 +1401,7 @@ class _ReturnToSupplierDialogState extends State<_ReturnToSupplierDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return AdaptiveFormDialog(
+    return AdaptiveDialog(
       title: 'إرجاع إلى المورّد',
       maxWidth: 460,
       actions: [

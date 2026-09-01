@@ -1,6 +1,6 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
-import '../../../shared/widgets/adaptive_form_dialog.dart';
+import '../../../shared/widgets/adaptive_dialog.dart';
 import 'package:intl/intl.dart';
 
 import '../../../core/network/api_client.dart';
@@ -107,7 +107,7 @@ class _ReturnInvoiceSheetState extends State<ReturnInvoiceSheet> {
   Widget build(BuildContext context) {
     final invoice = _invoice;
 
-    return AdaptiveFormDialog(
+    return AdaptiveDialog(
       title: 'إرجاع فاتورة',
       maxWidth: 420,
       actions: [

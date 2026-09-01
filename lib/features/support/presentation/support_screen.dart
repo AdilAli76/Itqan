@@ -1,6 +1,6 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
-import '../../../shared/widgets/adaptive_form_dialog.dart';
+import '../../../shared/widgets/adaptive_dialog.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/auth/current_user.dart';
 import '../../../core/network/api_client.dart';
@@ -173,7 +173,7 @@ class _EditSupportInfoDialogState extends State<_EditSupportInfoDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return AdaptiveFormDialog(
+    return AdaptiveDialog(
       title: 'تعديل بيانات الدعم الفني',
       maxWidth: 380,
       actions: [

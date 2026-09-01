@@ -1,6 +1,6 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
-import '../../../shared/widgets/adaptive_form_dialog.dart';
+import '../../../shared/widgets/adaptive_dialog.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
@@ -459,7 +459,7 @@ class _ManualEntryDialogState extends ConsumerState<_ManualEntryDialog> {
     final diff = totalDebit - totalCredit;
     final balanced = diff.abs() < 0.01 && totalDebit > 0;
 
-    return AdaptiveFormDialog(
+    return AdaptiveDialog(
       title: 'قيد يدوي',
       maxWidth: 620,
       actions: [

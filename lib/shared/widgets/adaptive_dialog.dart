@@ -5,7 +5,10 @@ import 'package:flutter/material.dart';
 import '../../core/responsive/breakpoints.dart';
 import '../../core/theme/app_text_styles.dart';
 
-/// نموذجٌ يُعرَض حواراً على الشاشات الواسعة، وصفحةً كاملة على الهاتف.
+/// حوارٌ على الشاشات الواسعة، وصفحةٌ كاملة على الهاتف.
+///
+/// يخدم النماذج وشاشات التفاصيل معاً — وكلاهما محتوىً يُقرأ ويُتنقّل
+/// فيه، لا سؤالٌ بنعم أو لا. وحوارات التأكيد تبقى حوارات.
 ///
 /// **العطب الذي يصلحه:** حوار `AlertDialog` على شاشة هاتف يأخذ نحو نصفها،
 /// ثم تفتح لوحة المفاتيح فتأخذ نصف ما بقي — فيبقى للنموذج شريطٌ ضيّق
@@ -19,8 +22,8 @@ import '../../core/theme/app_text_styles.dart';
 /// **ولماذا لا تُغيَّر الشاشات الواسعة:** الحوار هناك في محلّه — يبقي ما
 /// خلفه مرئياً، والسياق جزءٌ من العمل: من يُنشئ أمر شراء يرى قائمة الأوامر
 /// خلفه. أمّا على الهاتف فلا شيء مرئي خلفه أصلاً.
-class AdaptiveFormDialog extends StatelessWidget {
-  const AdaptiveFormDialog({
+class AdaptiveDialog extends StatelessWidget {
+  const AdaptiveDialog({
     super.key,
     required this.title,
     required this.body,
@@ -30,7 +33,7 @@ class AdaptiveFormDialog extends StatelessWidget {
 
   final String title;
 
-  /// محتوى النموذج. يُمرَّر عمودياً، ويُلَفّ بمُمرِّر هنا — فلا يلفّه
+  /// المحتوى. يُمرَّر عمودياً، ويُلَفّ بمُمرِّر هنا — فلا يلفّه
   /// المستدعي مرّة ثانية.
   final Widget body;
 

@@ -1,6 +1,6 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
-import '../../../shared/widgets/adaptive_form_dialog.dart';
+import '../../../shared/widgets/adaptive_dialog.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
@@ -208,7 +208,7 @@ class _AddExpenseDialogState extends ConsumerState<_AddExpenseDialog> {
             .toList() ??
         const <Map<String, dynamic>>[];
 
-    return AdaptiveFormDialog(
+    return AdaptiveDialog(
       title: 'مصروف جديد',
       maxWidth: 420,
       body: Column(

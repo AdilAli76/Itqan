@@ -1,6 +1,6 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
-import '../../../shared/widgets/adaptive_form_dialog.dart';
+import '../../../shared/widgets/adaptive_dialog.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
@@ -376,7 +376,7 @@ class _CategoryDialogState extends ConsumerState<_CategoryDialog> {
   Widget build(BuildContext context) {
     final isNew = widget.category == null;
 
-    return AdaptiveFormDialog(
+    return AdaptiveDialog(
       title: isNew ? 'فئة جديدة' : 'تعديل الفئة',
       actions: [
         TextButton(
@@ -762,7 +762,7 @@ class _AdvanceDialogState extends ConsumerState<_AdvanceDialog> {
     // الطريق الصحيح حين يكبر العدد.
     final customers = ref.watch(customersProvider).valueOrNull?.items ?? const [];
 
-    return AdaptiveFormDialog(
+    return AdaptiveDialog(
       title: 'سلفة جديدة',
       actions: [
         TextButton(

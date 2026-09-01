@@ -1,6 +1,6 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
-import '../../../shared/widgets/adaptive_form_dialog.dart';
+import '../../../shared/widgets/adaptive_dialog.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../../../core/network/api_client.dart';
@@ -213,11 +213,13 @@ class _PickBranchDialog extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final branchesAsync = ref.watch(branchesProvider);
 
-    return AlertDialog(
-      title: const Text('بدء جرد جديد'),
-      content: SizedBox(
-        width: 320,
-        child: branchesAsync.when(
+    return AdaptiveDialog(
+      title: 'بدء جرد جديد',
+      maxWidth: 320,
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('إلغاء')),
+      ],
+      body: branchesAsync.when(
           loading: () => const SizedBox(height: 60, child: Center(child: CircularProgressIndicator())),
           error: (_, __) => const Text('تعذّر تحميل الفروع'),
           data: (branches) => Column(
@@ -234,10 +236,6 @@ class _PickBranchDialog extends ConsumerWidget {
             ],
           ),
         ),
-      ),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: const Text('إلغاء')),
-      ],
     );
   }
 }
@@ -284,9 +282,13 @@ class _StockCountDetailDialogState extends ConsumerState<_StockCountDetailDialog
   Widget build(BuildContext context) {
     final detailAsync = ref.watch(stockCountDetailProvider(widget.countId));
 
-    return AlertDialog(
-      title: const Text('تفاصيل الجرد'),
-      content: SizedBox(
+    return AdaptiveDialog(
+      title: 'تفاصيل الجرد',
+      maxWidth: 560,
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context, _dirty), child: const Text('إغلاق')),
+      ],
+      body: SizedBox(
         width: 560,
         height: 520,
         child: detailAsync.when(
@@ -295,9 +297,6 @@ class _StockCountDetailDialogState extends ConsumerState<_StockCountDetailDialog
           data: (count) => _buildContent(context, count),
         ),
       ),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(context, _dirty), child: const Text('إغلاق')),
-      ],
     );
   }
 
@@ -646,7 +645,7 @@ class _RecountReasonDialogState extends State<_RecountReasonDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return AdaptiveFormDialog(
+    return AdaptiveDialog(
       title: 'سبب إعادة العدّ',
       maxWidth: 360,
       actions: [
@@ -701,12 +700,23 @@ class _CountOptionsDialogState extends State<_CountOptionsDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('نطاق الجرد'),
-      content: SizedBox(
-        width: 400,
-        child: SingleChildScrollView(
-          child: Column(
+    return AdaptiveDialog(
+      title: 'نطاق الجرد',
+      maxWidth: 400,
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('إلغاء')),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, {
+            if (_initial) 'kind': 'initial',
+            if (_notCountedDays != null)
+              'notCountedSince': DateTime.now()
+                  .subtract(Duration(days: _notCountedDays!))
+                  .toIso8601String(),
+          }),
+          child: const Text('بدء الجرد'),
+        ),
+      ],
+      body: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -750,21 +760,6 @@ class _CountOptionsDialogState extends State<_CountOptionsDialog> {
               ),
             ],
           ),
-        ),
-      ),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: const Text('إلغاء')),
-        FilledButton(
-          onPressed: () => Navigator.pop(context, {
-            if (_initial) 'kind': 'initial',
-            if (_notCountedDays != null)
-              'notCountedSince': DateTime.now()
-                  .subtract(Duration(days: _notCountedDays!))
-                  .toIso8601String(),
-          }),
-          child: const Text('بدء الجرد'),
-        ),
-      ],
     );
   }
 }

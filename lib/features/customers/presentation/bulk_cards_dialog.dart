@@ -1,6 +1,6 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
-import '../../../shared/widgets/adaptive_form_dialog.dart';
+import '../../../shared/widgets/adaptive_dialog.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -39,7 +39,7 @@ class _BulkCardsDialogState extends ConsumerState<BulkCardsDialog> {
 
     if (_issued != null) return _resultView();
 
-    return AdaptiveFormDialog(
+    return AdaptiveDialog(
       title: 'إصدار بطاقات جماعي',
       maxWidth: 460,
       actions: [

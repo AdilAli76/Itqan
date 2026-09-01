@@ -1,6 +1,6 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
-import '../../../shared/widgets/adaptive_form_dialog.dart';
+import '../../../shared/widgets/adaptive_dialog.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
@@ -199,7 +199,7 @@ class _PayDialogState extends ConsumerState<_PayDialog> {
   Widget build(BuildContext context) {
     final branchesAsync = ref.watch(branchesProvider);
 
-    return AdaptiveFormDialog(
+    return AdaptiveDialog(
       title: 'تسجيل سداد',
       maxWidth: 400,
       actions: [

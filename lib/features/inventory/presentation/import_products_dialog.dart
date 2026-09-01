@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:dio/dio.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import '../../../shared/widgets/adaptive_dialog.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/network/api_client.dart';
@@ -118,12 +119,23 @@ class _ImportProductsDialogState extends ConsumerState<ImportProductsDialog> {
         ((preview?['createdSuppliers'] as List?) ?? const []).map((e) => 'مورّد «$e»');
     final newLookups = [...newCategories, ...newSuppliers];
 
-    return AlertDialog(
-      title: const Text('استيراد أصناف من ملف'),
-      content: SizedBox(
-        width: 560,
-        child: SingleChildScrollView(
-          child: Column(
+    return AdaptiveDialog(
+      title: 'استيراد أصناف من ملف',
+      maxWidth: 560,
+      actions: [
+        TextButton(
+          onPressed: _busy ? null : () => Navigator.pop(context, _done),
+          child: Text(_done ? 'إغلاق' : 'إلغاء'),
+        ),
+        if (preview != null && !_done)
+          FilledButton(
+            onPressed: (_busy || errors > 0 || (create + update) == 0)
+                ? null
+                : () => _upload(dryRun: false),
+            child: Text('استيراد ${create + update} صنفاً'),
+          ),
+      ],
+      body: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -226,21 +238,6 @@ class _ImportProductsDialogState extends ConsumerState<ImportProductsDialog> {
               ],
             ],
           ),
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: _busy ? null : () => Navigator.pop(context, _done),
-          child: Text(_done ? 'إغلاق' : 'إلغاء'),
-        ),
-        if (preview != null && !_done)
-          FilledButton(
-            onPressed: (_busy || errors > 0 || (create + update) == 0)
-                ? null
-                : () => _upload(dryRun: false),
-            child: Text('استيراد ${create + update} صنفاً'),
-          ),
-      ],
     );
   }
 }

@@ -3,7 +3,7 @@ import 'dart:async';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
-import '../../../shared/widgets/adaptive_form_dialog.dart';
+import '../../../shared/widgets/adaptive_dialog.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../../../core/network/api_client.dart';
@@ -582,7 +582,7 @@ class _ReasonDialogState extends State<_ReasonDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return AdaptiveFormDialog(
+    return AdaptiveDialog(
       title: 'سبب الحظر',
       maxWidth: 320,
       actions: [
@@ -675,7 +675,7 @@ class _IssueCardDialogState extends ConsumerState<_IssueCardDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return AdaptiveFormDialog(
+    return AdaptiveDialog(
       title: _issuedCode == null ? 'إصدار بطاقة محفظة' : 'تم إصدار البطاقة',
       maxWidth: 400,
       body: _issuedCode == null ? _buildForm() : _buildResult(),
@@ -961,7 +961,7 @@ class _CardModeDialogState extends State<_CardModeDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return AdaptiveFormDialog(
+    return AdaptiveDialog(
       title: 'نمط التحقّق',
       maxWidth: 380,
       actions: [

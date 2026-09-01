@@ -5,7 +5,7 @@ import '../../../core/time/app_clock.dart';
 import 'report_card.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
-import '../../../shared/widgets/adaptive_form_dialog.dart';
+import '../../../shared/widgets/adaptive_dialog.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../../../core/network/api_client.dart';
@@ -945,7 +945,7 @@ class _ReminderNoteDialogState extends State<_ReminderNoteDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return AdaptiveFormDialog(
+    return AdaptiveDialog(
       title: 'تسجيل تذكير — ${widget.customerName}',
       maxWidth: 380,
       actions: [

@@ -2,7 +2,7 @@ import 'dart:async';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
-import '../../../shared/widgets/adaptive_form_dialog.dart';
+import '../../../shared/widgets/adaptive_dialog.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -409,9 +409,9 @@ class _CustomerFormDialogState extends State<_CustomerFormDialog> {
 
   @override
   Widget build(BuildContext context) {
-    // التمرير وتثبيت الأزرار في AdaptiveFormDialog — وعلى الهاتف تصير
+    // التمرير وتثبيت الأزرار في AdaptiveDialog — وعلى الهاتف تصير
     // صفحةً كاملة: الحوار كان يأخذ نصف الشاشة، ولوحة المفاتيح نصف الباقي.
-    return AdaptiveFormDialog(
+    return AdaptiveDialog(
       title: _isEdit ? 'تعديل عميل' : 'إضافة عميل جديد',
       maxWidth: 380,
       body: Form(
@@ -700,7 +700,7 @@ class _WalletAdjustmentDialogState extends State<_WalletAdjustmentDialog> {
   Widget build(BuildContext context) {
     final balance = (widget.customer['walletBalance'] as num?)?.toDouble() ?? 0;
 
-    return AdaptiveFormDialog(
+    return AdaptiveDialog(
       title: 'رصيد المحفظة: ${widget.customer['fullName']}',
       actions: [
         TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('إلغاء')),
@@ -866,7 +866,7 @@ class _SponsorFormDialogState extends State<_SponsorFormDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return AdaptiveFormDialog(
+    return AdaptiveDialog(
       title: 'جهة ممولة جديدة',
       maxWidth: 340,
       actions: [
