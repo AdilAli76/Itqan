@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../../core/auth/current_user.dart';
 import '../../core/shell/open_tabs_provider.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text_styles.dart';
@@ -23,17 +22,14 @@ class AppNavbar extends ConsumerStatefulWidget {
 }
 
 class _AppNavbarState extends ConsumerState<AppNavbar> {
-  bool _isPlatformAdmin = false;
-
-  @override
-  void initState() {
-    super.initState();
-    readJwtClaims().then((claims) {
-      if (mounted) {
-        setState(() => _isPlatformAdmin = claims?['is_platform_admin'] == 'True');
-      }
-    });
-  }
+  // ⚠ من isPlatformAdminProvider لا من نسخةٍ محلّية في initState.
+  //
+  // كانت الدعوى تُقرأ مرّةً واحدة عند أوّل بناء وتُحفَظ في الحالة. فمن
+  // خرج ودخل بحسابٍ آخر بلا إعادة تحميل الصفحة يبقى على قيمة الحساب
+  // الأوّل — يرى بنود المنصّة وليس مالكها، أو لا يراها وهو مالكها.
+  //
+  // والمُوفِّر واحدٌ للتطبيق كلّه: الشريط الجانبي وشريط الهاتف كانا
+  // يقرآن الدعوى كلٌّ على حدة، فيفترقان أوّل مرّة يتغيّر أحدهما.
 
   void _open(NavItem item) =>
       ref.read(openTabsProvider.notifier).open(item.route, title: item.label, icon: item.icon);
@@ -43,7 +39,7 @@ class _AppNavbarState extends ConsumerState<AppNavbar> {
     final perms = ref.perms;
     final groups = filterByPermissions(
       navGroupsFor(
-        isPlatformAdmin: _isPlatformAdmin,
+        isPlatformAdmin: ref.watch(isPlatformAdminProvider).valueOrNull ?? false,
         edition: ref.watch(brandingProvider).valueOrNull?.edition ?? 'standard',
       ),
       (route) {
