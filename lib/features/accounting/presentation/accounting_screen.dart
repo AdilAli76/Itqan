@@ -11,6 +11,7 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_text_styles.dart';
 import '../../../shared/widgets/app_surface.dart';
 import '../data/accounting_providers.dart';
+import 'accounting_print.dart';
 
 final _money = NumberFormat('#,##0.00', 'en');
 final _date = DateFormat('yyyy-MM-dd');
@@ -138,6 +139,7 @@ class _ChartTab extends ConsumerWidget {
         return ListView(
           padding: const EdgeInsets.all(16),
           children: [
+            _PrintBar(onPrint: () => printChartOfAccounts(ref)),
             for (final root in children[null] ?? const <Map<String, dynamic>>[])
               _AccountNode(
                 account: root,
@@ -323,9 +325,13 @@ class _JournalTab extends ConsumerWidget {
 
     return Column(
       children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+          child: _PrintBar(onPrint: () => printJournal(ref)),
+        ),
         if (canWrite)
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
             child: SizedBox(
               width: double.infinity,
               child: OutlinedButton.icon(
@@ -766,6 +772,24 @@ class _EntryCard extends ConsumerWidget {
 //  ميزان المراجعة
 // ═══════════════════════════════════════════════════════════════════════════
 
+/// شريطٌ رفيع يحمل زرّ الطباعة أعلى الدفتر.
+///
+/// أعلاه لا أسفله: دفترٌ بمئتَي سطر يدفع زرّاً في ذيله خارج الشاشة، ومن
+/// يفتح الدفتر ليطبعه لا يمرّره أوّلاً ليجد كيف.
+class _PrintBar extends StatelessWidget {
+  const _PrintBar({required this.onPrint});
+  final Future<void> Function() onPrint;
+
+  @override
+  Widget build(BuildContext context) => Align(
+        alignment: AlignmentDirectional.centerStart,
+        child: Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: PrintLedgerButton(onPrint: onPrint),
+        ),
+      );
+}
+
 class _TrialBalanceTab extends ConsumerWidget {
   const _TrialBalanceTab();
 
@@ -788,6 +812,7 @@ class _TrialBalanceTab extends ConsumerWidget {
         return ListView(
           padding: const EdgeInsets.all(16),
           children: [
+            _PrintBar(onPrint: () => printTrialBalance(ref)),
             // الحكم أولاً لا آخراً: من يفتح ميزان المراجعة يسأل سؤالاً
             // واحداً — «هل يوازن؟». وضعُه في الأسفل يعني تمريراً لمعرفته.
             Container(
@@ -914,6 +939,7 @@ class _IncomeStatementTab extends ConsumerWidget {
         return ListView(
           padding: const EdgeInsets.all(16),
           children: [
+            _PrintBar(onPrint: () => printIncomeStatement(ref)),
             // النتيجة أولاً: من يفتح قائمة الدخل يسأل سؤالاً واحداً، ووضعُها
             // في الأسفل يعني تمريراً لمعرفته.
             Container(
@@ -995,6 +1021,7 @@ class _BalanceSheetTab extends ConsumerWidget {
         return ListView(
           padding: const EdgeInsets.all(16),
           children: [
+            _PrintBar(onPrint: () => printBalanceSheet(ref)),
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
