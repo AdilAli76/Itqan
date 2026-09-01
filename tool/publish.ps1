@@ -48,6 +48,21 @@ param(
       في ملفٍّ يُنزَّل مرّة، مقابل حزمتين تفترقان لو فُصل.
     #>
     [switch]$SkipDesktop,
+    <#
+      رقم النسخة المطبوع داخل التطبيق — من الوسم عادةً (بلا حرف v).
+
+      ⚠ **العطب الذي يصلحه:** pubspec.yaml على 1.0.0+1 منذ أوّل يوم، وسير
+      البناء كان يمرّر الرقم لـ`flutter build apk` **وحده**. فالويب وسطح
+      المكتب يُعلنان أنفسهما «1.0.0» مهما بلغ الوسم — يراه المستخدم في
+      شاشته فيظنّ الترقية لم تصل، ويرى مدقّق التحديث نسخةً أقدم دائماً
+      فيعرض «تحديث متاح» بلا انقطاع.
+
+      وفارغٌ يعني بناءً محلّياً: يبقى على ما في pubspec، ولا يُلزَم من
+      يبني على جهازه بوسم.
+    #>
+    [string]$Version,
+    <# رقم الجولة — يتزايد أبداً ولا يتكرّر ولو أُعيد بناء نفس الوسم. #>
+    [string]$BuildNumber,
     # للتجربة الأولى على عنوان IP قبل توفّر النطاق والشهادة. لا يُستعمل
     # لتسليم حقيقي: التوكنات وكلمات المرور تمرّ نصاً واضحاً على الشبكة.
     [switch]$AllowInsecure
@@ -59,6 +74,14 @@ $OutputEncoding = [Console]::OutputEncoding = [Text.Encoding]::UTF8
 $root = Split-Path -Parent $PSScriptRoot
 if (-not $Output) { $Output = Join-Path $root 'publish' }
 $api = Join-Path $root 'backend\KineticEnterprise.Api'
+
+# وسائط النسخة لأوامر flutter — مصدرٌ واحد لهما.
+#
+# كُتبت مرّتين في سير البناء من قبل (الأندرويد وحده يأخذها)، وتلك بالضبط
+# هي العلّة: ما يُكتب مرّتين يُنسى في إحداهما.
+$versionArgs = @()
+if ($Version)     { $versionArgs += @('--build-name', $Version) }
+if ($BuildNumber) { $versionArgs += @('--build-number', $BuildNumber) }
 
 function Step($n, $t) { Write-Host "`n[$n] $t" -ForegroundColor Cyan }
 function Ok($t) { Write-Host "    $t" -ForegroundColor Green }
@@ -148,9 +171,9 @@ if (-not $SkipWeb) {
         # نطاق. ويُخبَز العنوان فقط إن مُرِّر -ApiUrl صراحةً — حالة استضافة
         # الـAPI على أصل مختلف.
         if ($ApiUrl) {
-            & flutter build web --release --dart-define=API_BASE_URL=$ApiUrl
+            & flutter build web --release --dart-define=API_BASE_URL=$ApiUrl @versionArgs
         } else {
-            & flutter build web --release
+            & flutter build web --release @versionArgs
         }
         if ($LASTEXITCODE -ne 0) { throw 'flutter build web فشل' }
     } finally { Pop-Location }
@@ -191,7 +214,7 @@ if (-not $SkipDesktop) {
     Step 5 'بناء تطبيق سطح المكتب (ويندوز)'
     Push-Location $root
     try {
-        & flutter build windows --release
+        & flutter build windows --release @versionArgs
         if ($LASTEXITCODE -ne 0) { throw 'flutter build windows فشل' }
     } finally { Pop-Location }
 

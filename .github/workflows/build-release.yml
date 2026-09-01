@@ -171,9 +171,18 @@ jobs:
       - name: بناء الحزمة
         shell: pwsh
         run: |
+          # رقم النسخة يُمرَّر للحزمة كلّها لا للأندرويد وحده.
+          #
+          # كان يُمرَّر لـ flutter build apk فقط، فالويب وسطح المكتب يُعلنان
+          # أنفسهما 1.0.0 (قيمة pubspec منذ أوّل يوم) مهما بلغ الوسم — يراه
+          # المستخدم في شاشته فيظنّ الترقية لم تصل، ويرى مدقّق التحديث نسخةً
+          # أقدم دائماً فيعرض «تحديث متاح» بلا انقطاع.
+          $name = "${env:GITHUB_REF_NAME}" -replace '^v',''
+          if (-not $name -or $name -like 'refs/*') { $name = '0.0.0' }
+          Write-Host "version: $name  build: ${env:GITHUB_RUN_NUMBER}"
           flutter clean
           flutter pub get
-          .\tool\publish.ps1
+          .\tool\publish.ps1 -Version $name -BuildNumber "${env:GITHUB_RUN_NUMBER}"
 
       # الاسم مؤرَّخ لا ثابت (kinetic_pkg_2026-08-30_1412.zip) — راجع
       # publish.ps1. فيُلتقط بنمطه لا بحرفه، وغيابُه خطأ يوقف السير:
