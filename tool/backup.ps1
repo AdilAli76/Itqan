@@ -301,7 +301,12 @@ if (-not $UploadsPath) {
 # مرفقاتٌ داخل مجلد النشر تُقال صراحةً لا تمرّ صامتة: الترقية تنسخ
 # backend فوق القديم (لا تمحوه) فتنجو اليوم، لكن أي إعادة تركيب نظيفة
 # تمحوها — والاكتشاف يقع ساعتها لا الآن. راجع appsettings.Production.example.
-if ($UploadsPath -and ($UploadsPath -match '(?i)\backend\uploads$')) {
+# ‏-like لا -match: مسارات ويندوز مليئة بالشرطات الخلفية، وكلٌّ منها رمزُ
+# هروبٍ في التعابير النمطية. و«\uploads» تعني بداية رمزٍ سداسي عشري، فيرمي
+# المحرّك «Insufficient hexadecimal digits» — وقع فعلاً وأوقف نشرة إنتاج
+# **بعد** نجاح النسخة الاحتياطية والتحقّق منها، أي أن سطر تحذيرٍ أسقط عملاً
+# تمّ كلّه. و-like لا يعرف الهروب أصلاً فلا مصيدة فيه.
+if ($UploadsPath -and ($UploadsPath.TrimEnd('\') -like '*\backend\uploads')) {
     Write-Log "المرفقات داخل مجلد النشر: $UploadsPath" 'WARN'
     Write-Log 'انقلها إلى C:\kinetic-data\uploads واضبط Storage:Path عليها.' 'WARN'
 }
