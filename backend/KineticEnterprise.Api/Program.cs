@@ -269,11 +269,26 @@ app.UseStaticFiles(new StaticFileOptions
     DefaultContentType = "application/octet-stream",
     OnPrepareResponse = ctx =>
     {
-        // أصول Flutter تحمل بصمة في اسمها أو تُنقَض بـflutter_service_worker،
-        // فالتخزين الطويل آمن ويُلغي إعادة التنزيل عند كل زيارة.
+        // ⚠ كان هنا تخزينٌ لسنة كاملة لكل شيء عدا ثلاثة ملفات، بافتراض أن
+        // «أصول Flutter تحمل بصمة في اسمها أو تُنقَض بعامل الخدمة».
+        // **والافتراض خاطئ**، وكلّفنا نشرةً كاملة:
         //
-        // index.html مستثنى: تخزينه يعني أن نشرة جديدة لا تصل للمستخدم حتى
-        // يمسح ذاكرة متصفّحه — وهو ما لا يفعله أحد.
+        // `flutter_bootstrap.js` يحمّل `main.dart.js` **بهذا الاسم حرفياً**
+        // بلا بصمة ولا استعلام نسخة — وكلاهما يتغيّر في كل بناء. فمتصفّحٌ
+        // زار الموقع مرّةً يحتفظ بتطبيق الشهر الماضي سنةً كاملة ولا يسأل
+        // الخادم عنه أصلاً (max-age يمنع حتى طلب التحقّق). فنُشرت النسخة
+        // الجديدة على الخادم — ملفاتها هناك فعلاً — ولا يراها أحد، فيبدو
+        // النشر وكأنه نشر «نسخة قديمة جداً».
+        //
+        // ولا عامل خدمة يُنقذ: index.html لم يعد يسجّله (يفعل ذلك
+        // flutter_bootstrap.js المخزَّن هو الآخر سنة).
+        //
+        // فالقاعدة الآن **تحقُّقٌ دائم لكل شيء**: الملفات تبقى في ذاكرة
+        // المتصفّح، ويردّ الخادم 304 لما لم يتغيّر — فلا تتغيّر البايتات
+        // المنقولة، ويُدفع ثمنُ طلبٍ شَرطي واحد لكل ملف. وذاك ثمنٌ زهيد
+        // مقابل نشرةٍ تصل فعلاً.
+        //
+        // وأي أصلٍ يحمل بصمةً حقيقية في اسمه مستقبلاً يُستثنى هنا صراحةً.
         // الاسم قد يحمل ‎.br/.gz‎ بعد إعادة الكتابة، فيُجرَّد قبل المقارنة.
         var path = ctx.File.Name;
         if (path.EndsWith(".br") || path.EndsWith(".gz"))
@@ -292,16 +307,10 @@ app.UseStaticFiles(new StaticFileOptions
             }
         }
 
-        if (path.Equals("index.html", StringComparison.OrdinalIgnoreCase) ||
-            path.Equals("flutter_service_worker.js", StringComparison.OrdinalIgnoreCase) ||
-            path.Equals("version.json", StringComparison.OrdinalIgnoreCase))
-        {
-            ctx.Context.Response.Headers["Cache-Control"] = "no-cache, must-revalidate";
-        }
-        else
-        {
-            ctx.Context.Response.Headers["Cache-Control"] = "public, max-age=31536000";
-        }
+        // no-cache لا no-store: الفرق بينهما هو كل المكسب. no-store يمنع
+        // الحفظ فيُعاد تنزيل ستّة ميغابايت عند كل فتح؛ وno-cache يحفظ
+        // ويسأل «أتغيّر؟» فيردّ الخادم 304 بلا جسم.
+        ctx.Context.Response.Headers["Cache-Control"] = "no-cache, must-revalidate";
     },
 });
 
