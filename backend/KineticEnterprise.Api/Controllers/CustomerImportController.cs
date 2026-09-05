@@ -269,15 +269,20 @@ public class CustomerImportController : ControllerBase
         var first = categories.ElementAtOrDefault(0) ?? "";
         var second = categories.ElementAtOrDefault(1) ?? first;
 
-        var csv = "الاسم,الهاتف,الفئة,الفرع,المبلغ,ملاحظات\n"
-                + $"{Csv(SpreadsheetReader.ExamplePrefix + " محمد علي")},0910000000,{Csv(first)},{Csv(branch)},,{Csv("احذف صفوف المثال أو اتركها — تُتجاهَل")}\n"
-                + $"{Csv(SpreadsheetReader.ExamplePrefix + " فاطمة أحمد")},0920000000,{Csv(second)},{Csv(branch)},250,{Csv("مبلغ خاص يَجُبّ الفئة")}\n";
+        var bytes = SpreadsheetTemplate.Build(
+            sheetName: "المنتسبون",
+            headers: new[] { "الاسم", "الهاتف", "الفئة", "الفرع", "المبلغ", "ملاحظات" },
+            rows: new[]
+            {
+                new[] { SpreadsheetReader.ExamplePrefix + " محمد علي", "0910000000", first, branch, "",
+                        "احذف صفوف المثال أو اتركها — تُتجاهَل" },
+                new[] { SpreadsheetReader.ExamplePrefix + " فاطمة أحمد", "0920000000", second, branch, "250",
+                        "مبلغ خاص يَجُبّ الفئة" },
+            },
+            // الهاتف نصٌّ لا رقم — راجع [SpreadsheetTemplate].
+            textColumns: new[] { 1 });
 
-        // BOM إلزامي: إكسل يقرأ CSV بلا علامة ترتيب بايتات بترميز النظام
-        // فتظهر العربية طلاسم — وهو أوّل ما يشتكي منه من يفتح القالب.
-        var bytes = new byte[] { 0xEF, 0xBB, 0xBF }
-            .Concat(System.Text.Encoding.UTF8.GetBytes(csv)).ToArray();
-        return File(bytes, "text/csv", "قالب-استيراد-العملاء.csv");
+        return File(bytes, SpreadsheetTemplate.ContentType, "قالب-استيراد-العملاء.xlsx");
     }
 
     /// <summary>

@@ -103,6 +103,7 @@ public class ProductImportController : ControllerBase
         var toCreate = new List<Product>();
         var toUpdate = new List<Product>();
         var seenSkus = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var exampleRowsSkipped = 0;
 
         for (var i = 0; i < rows.Count; i++)
         {
@@ -126,7 +127,11 @@ public class ProductImportController : ControllerBase
 
             // صفّ المثال في القالب يُخطَّى — من يكتب أصنافه تحته ولا يحذفه
             // كان يزرع «مثال: أرز 5كغ» صنفاً حقيقياً في الكتالوج.
-            if (SpreadsheetReader.IsExampleRow(name)) continue;
+            if (SpreadsheetReader.IsExampleRow(name))
+            {
+                exampleRowsSkipped++;
+                continue;
+            }
 
             if (string.IsNullOrWhiteSpace(name))
             {
@@ -236,6 +241,11 @@ public class ProductImportController : ControllerBase
 
         var willCreate = results.Count(r => r.Action == "جديد");
         var willUpdate = results.Count(r => r.Action == "تحديث");
+        // قالبٌ رُفع كما نُزّل: رسالةٌ تقول ما العمل، لا معاينةٌ بأصفار
+        // يقف عندها المستخدم لا يدري أنجح أم فشل.
+        if (results.Count == 0 && exampleRowsSkipped > 0)
+            return BadRequest(new { message = "الملف لا يحوي إلا صفّ المثال — اكتب أصنافك مكانه ثم أعد الرفع" });
+
         var withErrors = results.Count(r => r.Action == "خطأ");
 
         if (!dryRun)
@@ -273,11 +283,22 @@ public class ProductImportController : ControllerBase
     [RequirePermission("inventory.manage")]
     public IActionResult Template()
     {
-        var csv = "﻿" + // BOM حتى يفتح إكسل العربية بالترميز الصحيح
-            "الاسم,الرمز,الباركود,سعر البيع,سعر التكلفة,حد الطلب,الوحدة,التصنيف,المورد,يتبع المخزون\r\n" +
-            "مثال: أرز 5كغ,RICE-5,6221234567890,45,38,10,piece,,,نعم\r\n";
+        var bytes = SpreadsheetTemplate.Build(
+            sheetName: "الأصناف",
+            headers: new[]
+            {
+                "الاسم", "الرمز", "الباركود", "سعر البيع", "سعر التكلفة",
+                "حد الطلب", "الوحدة", "التصنيف", "المورد", "يتبع المخزون",
+            },
+            rows: new[]
+            {
+                new[] { "مثال: أرز 5كغ", "RICE-5", "6221234567890", "45", "38", "10", "piece", "", "", "نعم" },
+            },
+            // الرمز والباركود نصّاً: باركود من ثلاثة عشر رقماً يصير في
+            // إكسل ‎6.22E+12‎ فيُرفع صنفٌ بباركود لا يطابق شيئاً على الرفّ.
+            textColumns: new[] { 1, 2 });
 
-        return File(System.Text.Encoding.UTF8.GetBytes(csv), "text/csv", "قالب-استيراد-الأصناف.csv");
+        return File(bytes, SpreadsheetTemplate.ContentType, "قالب-استيراد-الأصناف.xlsx");
     }
 
     /// <summary>

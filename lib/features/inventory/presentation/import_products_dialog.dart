@@ -91,7 +91,7 @@ class _ImportProductsDialogState extends ConsumerState<ImportProductsDialog> {
       if (bytes == null) throw Exception('empty');
 
       final path = await FilePicker.saveFile(
-        fileName: 'قالب-استيراد-الأصناف.csv',
+        fileName: 'قالب-استيراد-الأصناف.xlsx',
         bytes: Uint8List.fromList(bytes),
       );
       if (mounted && path != null) {
