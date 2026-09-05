@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
@@ -8,6 +9,7 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import '../../../core/pdf/arabic_pdf_theme.dart';
+import '../../../core/network/api_client.dart';
 import '../../../core/responsive/adaptive_scaffold.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_text_styles.dart';
@@ -25,6 +27,18 @@ const _actionLabels = {
   'customer.wallet_adjusted': 'تعديل رصيد محفظة',
   'category.deleted': 'حذف فئة',
   'invoice.refunded': 'استرجاع فاتورة',
+  'customer.restored': 'استرجاع عميل',
+  'product.restored': 'استرجاع صنف',
+};
+
+/// أي عمليات حذفٍ يمكن التراجع عنها من هنا، وبأي نقطة.
+///
+/// <para><b>سبب وجودها:</b> نافذة الحذف تَعِد صراحةً «يمكن استرجاعه لاحقاً
+/// من سجل التدقيق»، ولم يكن في السجلّ زرٌّ ولا في الخادم نقطة. فمن حذف
+/// عميلاً بالخطأ وثِق بالوعد ثم لم يجد شيئاً.</para>
+const _restorableActions = {
+  'customer.deleted': ('/customers', 'العميل'),
+  'product.deleted': ('/products', 'الصنف'),
 };
 
 const _entityTableLabels = {
@@ -160,15 +174,67 @@ class _AuditLogScreenState extends ConsumerState<AuditLogScreen> {
       Text(log['userName'] as String? ?? '-'),
       Text(_actionLabel(log['action'] as String? ?? '')),
       Text(_entityTableLabel(log['entityTable'] as String? ?? '')),
-      IconButton(
-        tooltip: 'عرض التفاصيل',
-        icon: const Icon(Icons.visibility_outlined, size: 18),
-        onPressed: () => showDialog(
-          context: context,
-          builder: (_) => _AuditLogDetailDialog(log: log),
-        ),
+      Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // الاسترجاع بجوار التفاصيل لا داخلها: من يبحث عن المحذوف يمرّ
+          // على السجلّ بعينه، وإخفاء الزرّ خطوةً أعمق يجعله غير موجود
+          // عملياً — وهو ما كان.
+          if (_restorableActions.containsKey(log['action']) && log['entityId'] != null)
+            IconButton(
+              tooltip: 'استرجاع',
+              icon: const Icon(Icons.restore_from_trash_outlined, size: 18),
+              onPressed: () => _restore(context, log),
+            ),
+          IconButton(
+            tooltip: 'عرض التفاصيل',
+            icon: const Icon(Icons.visibility_outlined, size: 18),
+            onPressed: () => showDialog(
+              context: context,
+              builder: (_) => _AuditLogDetailDialog(log: log),
+            ),
+          ),
+        ],
       ),
     ];
+  }
+
+  /// يستدعي نقطة الاسترجاع ويُظهر ما قاله الخادم.
+  ///
+  /// <para>ورسالة الخادم تُعرض كما هي: قد يكون الهاتف صار لعميل آخر أو
+  /// الباركود لصنفٍ آخر — وهي أسبابٌ يفهمها المستخدم ويعالجها، بخلاف
+  /// «تعذّر الاسترجاع» التي تتركه واقفاً.</para>
+  Future<void> _restore(BuildContext context, Map<String, dynamic> log) async {
+    final entry = _restorableActions[log['action']]!;
+    final id = log['entityId'] as String;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text('استرجاع ${entry.$2}'),
+        content: Text('سيعود ${entry.$2} إلى القوائم برصيده وحركاته كما كان.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('تراجع')),
+          FilledButton(onPressed: () => Navigator.pop(dialogContext, true), child: const Text('استرجاع')),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    try {
+      await ApiClient.instance.dio.post('${entry.$1}/$id/restore');
+      if (!context.mounted) return;
+      ref.invalidate(auditLogProvider);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('عاد ${entry.$2}')),
+      );
+    } catch (e) {
+      if (!context.mounted) return;
+      final message = e is DioException && e.response?.data is Map
+          ? (e.response!.data as Map)['message'] as String? ?? 'تعذّر الاسترجاع'
+          : 'تعذّر الاسترجاع';
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+    }
   }
 
   Future<void> _exportPdf() async {

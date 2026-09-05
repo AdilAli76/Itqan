@@ -9,7 +9,20 @@ using KineticEnterprise.Api.Models;
 
 namespace KineticEnterprise.Api.Controllers;
 
-public record LoginRequest(string EmailOrUsername, string Password);
+/// <param name="RememberMe">
+/// «ابقني مسجَّلاً على هذا الجهاز» — جلسةٌ بمدّة
+/// [AuthController.RememberLifetime] بدل ثماني ساعات.
+///
+/// <para><b>سبب وجوده:</b> الجلسة كانت ثماني ساعات لكل حالة، فصاحب المحلّ
+/// يفتح النظام كل صباح فيُطالَب بكلمة مروره — كل يوم، بلا استثناء. وما
+/// يُطلَب يومياً يُختصر: تصير الكلمة قصيرة، أو مكتوبةً على ورقة تحت لوحة
+/// المفاتيح.</para>
+///
+/// <para><b>واختيارٌ صريح لا افتراض:</b> جهاز كاشير في محلّ تمرّ عليه
+/// أيدٍ كثيرة، وجلسةٌ لا تنتهي عليه بابٌ مفتوح. فمن يعلّم الخانة يقرّر
+/// لجهازه هو.</para>
+/// </param>
+public record LoginRequest(string EmailOrUsername, string Password, bool RememberMe = false);
 public record ChangePasswordRequest(string CurrentPassword, string NewPassword);
 public record LoginResponse(
     string Token, string Role, Guid OrganizationId, Guid? BranchId, string FullName,
@@ -70,7 +83,7 @@ public class AuthController : ControllerBase
             return Unauthorized(new { message = "بيانات الدخول غير صحيحة" });
         }
 
-        var token = IssueToken(user);
+        var token = IssueToken(user, request.RememberMe);
 
         // لوح الفرع يُقرأ بلا سياق عزل: المستخدم لم يُصادَق بعد في هذه
         // اللحظة، وقراءة صفّ فرعه هو بمعرّفه المعلوم لا تُسرّب شيئاً.
@@ -166,13 +179,26 @@ public class AuthController : ControllerBase
     public static readonly TimeSpan SessionLifetime = TimeSpan.FromHours(8);
 
     /// <summary>
+    /// مدّة جلسة «ابقني مسجَّلاً» — ثلاثون يوماً.
+    ///
+    /// <para><b>ولماذا مدّةٌ لا «إلى الأبد»:</b> توكنٌ بلا انتهاء يبقى صالحاً
+    /// على جهازٍ ضاع أو بِيع بعد سنتين. وثلاثون يوماً تكفي ألّا يُسأل أحد عن
+    /// كلمته في عملٍ يومي، وتُغلق الباب على جهازٍ نُسي.</para>
+    ///
+    /// <para><b>وحسابٌ يُعطَّل لا ينتظرها:</b> صلاحية التوكن تُفحَص عند كل
+    /// طلب مقابل حالة الحساب — راجع فحص <c>is_active</c> في
+    /// <c>Program.cs</c>. وبدونه كان تعطيل موظّفٍ سُرِّح لا يُنفَّذ إلا بعد
+    /// ثلاثين يوماً.</para>
+    public static readonly TimeSpan RememberLifetime = TimeSpan.FromDays(30);
+
+    /// <summary>
     /// يبني توكن هذا المستخدم — المصدر الوحيد لدعاواه.
     ///
     /// <para>استُخرج حين أُضيف التجديد: نسختان من قائمة الدعاوى تفترقان أوّل
     /// مرّة تُضاف دعوى، فيفقد من جدّد جلسته دعوىً يملكها من دخل للتوّ —
     /// ويظهر ذلك كصلاحيةٍ تختفي بعد ثماني ساعات بلا سبب.</para>
     /// </summary>
-    private string IssueToken(AppUser user)
+    private string IssueToken(AppUser user, bool remember = false)
     {
         var claims = new List<Claim>
         {
@@ -186,6 +212,11 @@ public class AuthController : ControllerBase
             // ادّعاء قصير مكرَّر "role" خصيصاً للواجهة، بلا مساس بمنطق التصريح
             // في الباك اند الذي يبقى يعتمد على ClaimTypes.Role كما هو.
             new(ClaimTypes.Role, user.Role),
+            // علامة «ابقني مسجَّلاً» في التوكن نفسه: التجديد يقرأها ليُصدر
+            // بنفس المدّة. وبدونها كان من يمدّ جلسته الطويلة يسقط إلى ثماني
+            // ساعات بلا أن يطلب ذلك — فيُطالَب بكلمته صباح الغد وقد اختار
+            // ألّا يُطالَب.
+            new("remember", remember ? "1" : "0"),
             // الاسم في التوكن لا في نداء منفصل: يُطبَع على أوامر الشراء
             // تحت خانة «أصدره»، ويُعرض في الواجهة. توقيع بلا اسم مقروء لا
             // يدلّ على أحد بعد شهور.
@@ -224,7 +255,7 @@ public class AuthController : ControllerBase
             issuer: _config["Jwt:Issuer"],
             audience: _config["Jwt:Audience"],
             claims: claims,
-            expires: DateTime.UtcNow.Add(SessionLifetime),
+            expires: DateTime.UtcNow.Add(remember ? RememberLifetime : SessionLifetime),
             signingCredentials: creds
         );
         return new JwtSecurityTokenHandler().WriteToken(jwt);
@@ -265,7 +296,8 @@ public class AuthController : ControllerBase
             : "default";
 
         return new LoginResponse(
-            IssueToken(user), user.Role, user.OrganizationId, user.BranchId,
+            IssueToken(user, User.FindFirstValue("remember") == "1"),
+            user.Role, user.OrganizationId, user.BranchId,
             user.FullName, branchPalette, user.MustChangePassword);
     }
 

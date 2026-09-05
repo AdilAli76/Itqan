@@ -24,6 +24,17 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   bool _loading = false;
   String? _error;
 
+  /// «ابقني مسجَّلاً على هذا الجهاز» — جلسة ثلاثين يوماً بدل ثماني ساعات.
+  ///
+  /// <para><b>سبب وجوده:</b> الجلسة كانت ثماني ساعات لكل حالة، فصاحب المحلّ
+  /// يُطالَب بكلمة مروره كل صباح. وما يُطلَب يومياً يُختصر: تصير الكلمة
+  /// قصيرة أو مكتوبةً على ورقة تحت لوحة المفاتيح — فيصير الإجراء الأمني
+  /// نفسه هو الثغرة.</para>
+  ///
+  /// <para><b>ومطفأ افتراضياً:</b> أوّل جهازٍ يُفتح عليه النظام غالباً جهاز
+  /// كاشير تمرّ عليه أيدٍ كثيرة. فمن يريدها يعلّمها لجهازه هو.</para>
+  bool _remember = false;
+
   /// يستدعي POST /api/auth/login على الـ .NET Backend، يحفظ توكن JWT،
   /// ثم يعيد تحميل brandingProvider حتى تُطبَّق ألوان المنظمة فور الدخول.
   Future<void> _submit() async {
@@ -35,6 +46,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       final response = await ApiClient.instance.dio.post('/auth/login', data: {
         'emailOrUsername': _emailController.text.trim(),
         'password': _passwordController.text,
+        'rememberMe': _remember,
       });
       final token = response.data['token'] as String;
       await ApiClient.instance.saveToken(token);
@@ -114,6 +126,24 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                 tooltip: _obscure ? 'إظهار كلمة المرور' : 'إخفاء كلمة المرور',
                 onPressed: () => setState(() => _obscure = !_obscure),
               ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          // خانةٌ لا مفتاح: الخيار ثنائيٌّ يُقرأ مع نصّه سطراً واحداً، ولا
+          // يحتمل التباساً يستحقّ مفتاحاً بحجمه.
+          CheckboxListTile(
+            value: _remember,
+            onChanged: _loading ? null : (v) => setState(() => _remember = v ?? false),
+            contentPadding: EdgeInsets.zero,
+            controlAffinity: ListTileControlAffinity.leading,
+            dense: true,
+            title: Text('ابقني مسجَّلاً على هذا الجهاز',
+                style: AppTextStyles.bodyMd(color: AppColors.textPrimary)),
+            subtitle: Text(
+              // التحذير في مكانه لا في دليل: من يعلّم الخانة على جهاز كاشير
+              // يفعلها لأنه لم يُقَل له شيء.
+              'ثلاثون يوماً بلا إعادة تسجيل. لا تفعّلها على جهاز يستعمله غيرك.',
+              style: AppTextStyles.labelMd(),
             ),
           ),
           if (_error != null) ...[

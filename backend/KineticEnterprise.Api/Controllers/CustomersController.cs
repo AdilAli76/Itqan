@@ -697,6 +697,52 @@ public class CustomersController : ControllerBase
         return NoContent();
     }
 
+    /// <summary>
+    /// يُرجع عميلاً محذوفاً.
+    ///
+    /// <para><b>العطب الذي يصلحه:</b> نافذة الحذف كانت تَعِد صراحةً: «يمكن
+    /// استرجاعه لاحقاً من سجل التدقيق» — **ولا استرجاع في النظام كلّه**: لا
+    /// نقطة ولا زرّ. فمن حذف عميلاً بالخطأ وثِق بالوعد ثم بحث عن الزرّ فلم
+    /// يجده، وبقي رصيدُ العميل وحركاته في القاعدة لا يصل إليها أحد. ووعدٌ
+    /// لا يُوفى في لحظة حذفٍ أسوأ من ألّا يُوعَد أصلاً: من قرأه ضغط «حذف»
+    /// وهو مطمئنّ.</para>
+    ///
+    /// <para><b>وبنفس صلاحية الحذف</b> — من يملك أن يُخفي يملك أن يُظهر،
+    /// وصلاحيةٌ ثالثة لا تضيف حمايةً بل تُعقّد المصفوفة.</para>
+    /// </summary>
+    [HttpPost("{id:guid}/restore")]
+    [RequirePermission("customers.delete")]
+    public async Task<IActionResult> Restore(Guid id)
+    {
+        var customer = await _db.Customers.FindAsync(id);
+        if (customer is null) return NotFound();
+
+        // ليس خطأً بل حالةٌ تُقال: اثنان يعملان على نفس السجلّ، أو ضغطةٌ
+        // ثانية على الزرّ نفسه.
+        if (!customer.IsDeleted)
+            return BadRequest(new { message = "العميل غير محذوف أصلاً" });
+
+        // الهاتف مفتاح المطابقة في الاستيراد وفي البحث. وقد يكون قد أُعيد
+        // استعماله لعميلٍ جديد بعد الحذف، فإرجاعُ القديم بنفس الرقم يُنتج
+        // عميلين بهاتفٍ واحد — والاستيراد بعدها يُحدّث أيّهما صادفه أوّلاً.
+        if (!string.IsNullOrWhiteSpace(customer.Phone))
+        {
+            var taken = await _db.Customers.AnyAsync(c =>
+                !c.IsDeleted && c.Id != customer.Id && c.Phone == customer.Phone);
+            if (taken)
+                return BadRequest(new
+                {
+                    message = $"الهاتف {customer.Phone} صار لعميل آخر — غيّر رقمه ثم أعد الاسترجاع",
+                });
+        }
+
+        customer.IsDeleted = false;
+        _db.LogAudit(customer.OrganizationId, CurrentUserId(), "customer.restored", "customers", customer.Id,
+            newValues: new { customer.FullName });
+        await _db.SaveChangesAsync();
+        return NoContent();
+    }
+
     /// اسم الجهة الممولة — عمود واحد لا الكيان كاملاً، ولا استعلام أصلاً لمن
     /// لا جهة له. غيابه كان يجعل القراءة المفردة تُرجع اسماً فارغاً بينما
     /// تُرجعه القائمة، فيختفي اسم الجهة عند فتح نموذج العميل.

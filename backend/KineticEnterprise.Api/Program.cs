@@ -1,4 +1,7 @@
-﻿using System.Text;
+﻿using System.Security.Claims;
+using System.IdentityModel.Tokens.Jwt;
+using Microsoft.Extensions.Caching.Memory;
+using System.Text;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -91,9 +94,53 @@ builder.Services
                     context.Token = accessToken;
                 }
                 return Task.CompletedTask;
-            }
+            },
+
+            // ── حسابٌ عُطِّل يخرج الآن لا بعد ثلاثين يوماً ────────────────
+            //
+            // <para><b>سبب وجوده:</b> «ابقني مسجَّلاً» يُصدر توكناً لثلاثين
+            // يوماً (راجع [AuthController.RememberLifetime])، والتوكن
+            // مُوقَّع لا مُخزَّن — فلا سبيل لإبطاله. وموظّفٌ سُرِّح صباحاً
+            // كان يبقى يبيع من هاتفه شهراً كاملاً: النظام لا يسأل عن حسابه
+            // بعد الدخول إطلاقاً.</para>
+            //
+            // <para><b>وذاكرةٌ لدقيقتين لا استعلامٌ لكل طلب:</b> نقطة البيع
+            // تنادي الخادم عشرات المرّات في الدقيقة، واستعلامٌ إضافي على كل
+            // نداء ثمنٌ يُدفع في أسخن مسار في النظام. ودقيقتان أقصى ما يبقاه
+            // حسابٌ عُطِّل عاملاً — وهو مقبول لقرارٍ إداري، بخلاف ثلاثين
+            // يوماً.</para>
+            OnTokenValidated = async context =>
+            {
+                var userId = context.Principal?.FindFirstValue(JwtRegisteredClaimNames.Sub)
+                             ?? context.Principal?.FindFirstValue(ClaimTypes.NameIdentifier);
+                if (!Guid.TryParse(userId, out var id)) return;
+
+                var cache = context.HttpContext.RequestServices.GetRequiredService<IMemoryCache>();
+                var active = await cache.GetOrCreateAsync($"user-active:{id}", async entry =>
+                {
+                    entry.AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(2);
+                    var db = context.HttpContext.RequestServices.GetRequiredService<AppDbContext>();
+                    // AsNoTracking وعمودٌ واحد: هذا المسار يُنفَّذ قبل كل
+                    // طلب، فلا يُحمَّل كيانٌ كامل ولا يُتتبَّع.
+                    return await db.AppUsers.AsNoTracking()
+                        .Where(u => u.Id == id)
+                        .Select(u => (bool?)u.IsActive)
+                        .FirstOrDefaultAsync();
+                });
+
+                // NULL = حسابٌ حُذف من القاعدة. وغيابُ الصفّ لا يقلّ عن
+                // تعطيله دلالةً.
+                if (active != true)
+                {
+                    context.Fail("الحساب معطَّل");
+                }
+            },
         };
     });
+
+// ذاكرةٌ قصيرة لفحص «الحساب ما زال مفعَّلاً» في كل طلب — راجع
+// OnTokenValidated أعلاه.
+builder.Services.AddMemoryCache();
 
 builder.Services.AddAuthorization();
 builder.Services.AddControllers(options =>

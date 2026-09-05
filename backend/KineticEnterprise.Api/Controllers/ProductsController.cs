@@ -518,4 +518,43 @@ public class ProductsController : ControllerBase
         await _db.SaveChangesAsync();
         return NoContent();
     }
+
+    /// <summary>
+    /// يُرجع صنفاً محذوفاً — نافذة الحذف تَعِد بذلك، ولم يكن للوعد وفاء.
+    ///
+    /// <para>راجع <c>CustomersController.Restore</c>: نفس العطب في شاشتين،
+    /// ونفس العلاج. والصنف أحوج: مخزونه وحركاته وارتباطه بفواتير سابقة
+    /// كلّها باقية في القاعدة بعد الحذف، ولا طريق إليها.</para>
+    /// </summary>
+    [HttpPost("{id:guid}/restore")]
+    [RequirePermission("inventory.delete")]
+    public async Task<IActionResult> Restore(Guid id)
+    {
+        var product = await _db.Products.FindAsync(id);
+        if (product is null) return NotFound();
+
+        if (!product.IsDeleted)
+            return BadRequest(new { message = "الصنف غير محذوف أصلاً" });
+
+        // الرمز فريدٌ بقيدٍ على القاعدة (UQ_products_org_sku) يشمل المحذوف،
+        // فلا يمكن أن يكون قد أُخذ. أمّا الباركود فلا قيد عليه، وصنفٌ جديد
+        // قد يحمله الآن — وباركودان متطابقان يجعلان المسح في نقطة البيع
+        // يختار أحدهما بلا قاعدة.
+        if (!string.IsNullOrWhiteSpace(product.Barcode))
+        {
+            var taken = await _db.Products.AnyAsync(p =>
+                !p.IsDeleted && p.Id != product.Id && p.Barcode == product.Barcode);
+            if (taken)
+                return BadRequest(new
+                {
+                    message = $"الباركود {product.Barcode} صار لصنف آخر — غيّره ثم أعد الاسترجاع",
+                });
+        }
+
+        product.IsDeleted = false;
+        _db.LogAudit(product.OrganizationId, CurrentUserId(), "product.restored", "products", product.Id,
+            newValues: new { product.Name, product.Sku });
+        await _db.SaveChangesAsync();
+        return NoContent();
+    }
 }
