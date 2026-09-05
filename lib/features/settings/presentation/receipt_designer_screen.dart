@@ -176,6 +176,96 @@ class _Controls extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // القوالب الجاهزة أوّلاً: نقطة البداية قبل التفاصيل — راجع
+            // [ReceiptPresets]. ومن لا يريد ضبط شيء يكتفي باختيار واحد.
+            Text('القالب', style: AppTextStyles.bodyLg()),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final preset in ReceiptPresets.all)
+                  ChoiceChip(
+                    selected: draft.preset == preset,
+                    onSelected: (_) => onChanged(draft.applyPreset(preset)),
+                    label: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(ReceiptPresets.labelOf(preset)),
+                        Text(ReceiptPresets.describe(preset),
+                            style: AppTextStyles.caption(color: AppColors.textSecondary)),
+                      ],
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 20),
+            Text('التنسيق', style: AppTextStyles.bodyLg()),
+            const SizedBox(height: 8),
+            DropdownButtonFormField<String>(
+              initialValue: draft.tableStyle,
+              isExpanded: true,
+              decoration: const InputDecoration(labelText: 'شكل قائمة الأصناف'),
+              items: [
+                for (final style in ReceiptTableStyles.all)
+                  DropdownMenuItem(value: style, child: Text(ReceiptTableStyles.labelOf(style))),
+              ],
+              onChanged: (v) => v == null ? null : onChanged(draft.copyWith(tableStyle: v)),
+            ),
+            const SizedBox(height: 12),
+            Text('حجم الخطّ', style: AppTextStyles.labelMd()),
+            Slider(
+              value: draft.fontScale,
+              min: 0.8,
+              max: 1.4,
+              divisions: 6,
+              // النسبة مكتوبة: «١١٠٪» تُفهم، وموضعُ مؤشّرٍ على خطّ لا يُفهم.
+              label: '${(draft.fontScale * 100).round()}%',
+              onChanged: (v) => onChanged(draft.copyWith(fontScale: v)),
+            ),
+            const SizedBox(height: 4),
+            Text('لون القالب', style: AppTextStyles.labelMd()),
+            const SizedBox(height: 6),
+            Wrap(
+              spacing: 8,
+              children: [
+                // ألوانٌ مختارة لا منتقي ألوان: الطباعة الحرارية سوداء على
+                // أي حال، واللون لمن يطبع A4 — وخمسةُ ألوان تكفي، ومنتقٍ
+                // كامل يُخرج إيصالات بألوان لا تُقرأ.
+                for (final color in const ['#0B2540', '#1F2937', '#4B5563', '#0F766E', '#9A3412'])
+                  GestureDetector(
+                    onTap: () => onChanged(draft.copyWith(accentColor: color)),
+                    child: Container(
+                      width: 32,
+                      height: 32,
+                      decoration: BoxDecoration(
+                        color: Color(int.parse('FF${color.substring(1)}', radix: 16)),
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: draft.accentColor == color ? AppColors.textPrimary : AppColors.border,
+                          width: draft.accentColor == color ? 3 : 1,
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              value: draft.showPageBorder,
+              onChanged: (v) => onChanged(draft.copyWith(showPageBorder: v)),
+              title: const Text('إطار حول الصفحة'),
+              subtitle: Text(
+                // قول السبب أصدق من مفتاحٍ يُفعَّل ولا يظهر أثره.
+                ReceiptPapers.isRoll(draft.paper)
+                    ? 'لا يظهر على اللفّة الحرارية — تُقصّ بلا هامش ثابت'
+                    : 'إطار رفيع للفاتورة الورقية',
+                style: AppTextStyles.caption(color: AppColors.textSecondary),
+              ),
+            ),
+            const SizedBox(height: 20),
             Text('المقاس', style: AppTextStyles.bodyLg()),
             const SizedBox(height: 8),
             DropdownButtonFormField<String>(

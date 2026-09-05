@@ -46,10 +46,75 @@ class ReceiptPapers {
   static bool isRoll(String paper) => paper == roll80 || paper == roll58;
 }
 
+/// القوالب الجاهزة — نقطة بداية تُختار ثم تُعدَّل.
+///
+/// <para><b>سبب وجودها:</b> «صمّم إيصالك» أمام صاحب محلٍّ يعني عشرين خياراً
+/// بلا نقطة بداية، فيخرج بإيصالٍ أسوأ ممّا كان أو يترك الشاشة كما هي. أمّا
+/// أربعة قوالب مسمّاة فيختار منها بنظرةٍ واحدة، ثم يغيّر ما لا يعجبه —
+/// وهو نفس ما تفعله معالجات النصوص.</para>
+///
+/// <para>والقالب ليس قفلاً: تطبيقه يضبط حزمة قيم، وكلُّ قيمةٍ بعده قابلة
+/// للتغيير على حدة.</para>
+class ReceiptPresets {
+  const ReceiptPresets._();
+
+  /// أبيض وأسود بخطوط فاصلة — أقرب شيء لإيصال الكاشير المألوف.
+  static const classic = 'classic';
+
+  /// شريط ملوّن بالعنوان وصفوفٌ متناوبة التظليل.
+  static const modern = 'modern';
+
+  /// بلا خطوط ولا تظليل ومسافات أوسع — للطابعات الحرارية الباهتة.
+  static const minimal = 'minimal';
+
+  /// جدولٌ مؤطَّر وإطارٌ للصفحة — للفاتورة الورقية التي تُحفَظ وتُختَم.
+  static const formal = 'formal';
+
+  static const all = [classic, modern, minimal, formal];
+
+  static String labelOf(String preset) => switch (preset) {
+        modern => 'حديث',
+        minimal => 'مبسّط',
+        formal => 'رسمي',
+        _ => 'كلاسيكي',
+      };
+
+  static String describe(String preset) => switch (preset) {
+        modern => 'شريط ملوّن وصفوف متناوبة',
+        minimal => 'بلا خطوط، مسافات أوسع',
+        formal => 'جدول مؤطَّر وإطار للصفحة',
+        _ => 'خطوط فاصلة، أبيض وأسود',
+      };
+}
+
+/// شكل قائمة الأصناف.
+class ReceiptTableStyles {
+  const ReceiptTableStyles._();
+
+  static const plain = 'plain';
+  static const lines = 'lines';
+  static const zebra = 'zebra';
+  static const grid = 'grid';
+
+  static const all = [plain, lines, zebra, grid];
+
+  static String labelOf(String style) => switch (style) {
+        lines => 'خطوط فاصلة',
+        zebra => 'صفوف متناوبة',
+        grid => 'جدول مؤطَّر',
+        _ => 'بلا خطوط',
+      };
+}
+
 /// قالب الإيصال كما تحفظه المنظمة، ومعه ما يملأه.
 class ReceiptTemplate {
   const ReceiptTemplate({
     this.paper = ReceiptPapers.roll80,
+    this.preset = ReceiptPresets.classic,
+    this.accentColor = '#0B2540',
+    this.fontScale = 1.0,
+    this.tableStyle = ReceiptTableStyles.lines,
+    this.showPageBorder = false,
     this.showLogo = true,
     this.showTaxNumber = true,
     this.showCommercialRegistry = false,
@@ -62,6 +127,29 @@ class ReceiptTemplate {
   });
 
   final String paper;
+
+  /// القالب الجاهز الذي بُدئ منه — يُحفظ ليُعرَف المختار عند فتح الشاشة.
+  final String preset;
+
+  /// لون الترويسة وسطر الإجمالي، بصيغة ‎#RRGGBB‎.
+  ///
+  /// <para>واحدٌ لا لوحة ألوان: إيصالٌ بأربعة ألوان يبدو نشرةً إعلانية،
+  /// ولون الطباعة الحرارية أسودٌ دائماً على أي حال — فاللون لمن يطبع على
+  /// A4 بطابعة ملوّنة.</para>
+  final String accentColor;
+
+  /// مضاعِف حجم الخطّ (0.8 – 1.4).
+  ///
+  /// <para>مضاعِفٌ لا مقاسٌ مطلق: الإيصال الحراري وA4 يختلفان في الأساس،
+  /// ورقمٌ واحد لهما يجعل ضبط أحدهما يُفسد الآخر.</para>
+  final double fontScale;
+
+  /// شكل قائمة الأصناف — راجع [ReceiptTableStyles].
+  final String tableStyle;
+
+  /// إطارٌ حول الصفحة — للورق الرسمي، ولا معنى له على اللفّة.
+  final bool showPageBorder;
+
   final bool showLogo;
   final bool showTaxNumber;
   final bool showCommercialRegistry;
@@ -87,6 +175,17 @@ class ReceiptTemplate {
 
     return ReceiptTemplate(
       paper: ReceiptPapers.all.contains(paper) ? paper! : ReceiptPapers.roll80,
+      preset: ReceiptPresets.all.contains(template['preset'])
+          ? template['preset'] as String
+          : ReceiptPresets.classic,
+      accentColor: (template['accentColor'] as String?) ?? '#0B2540',
+      // مقيَّدٌ بالحدود عند القراءة أيضاً: قيمةٌ خارجها في قاعدةٍ عُدّلت
+      // يدوياً تُنتج إيصالاً بخطٍّ لا يُقرأ أو صفحةً بسطرٍ واحد.
+      fontScale: ((template['fontScale'] as num?)?.toDouble() ?? 1.0).clamp(0.8, 1.4),
+      tableStyle: ReceiptTableStyles.all.contains(template['tableStyle'])
+          ? template['tableStyle'] as String
+          : ReceiptTableStyles.lines,
+      showPageBorder: template['showPageBorder'] as bool? ?? false,
       showLogo: template['showLogo'] as bool? ?? true,
       showTaxNumber: template['showTaxNumber'] as bool? ?? true,
       showCommercialRegistry: template['showCommercialRegistry'] as bool? ?? false,
@@ -101,6 +200,11 @@ class ReceiptTemplate {
 
   ReceiptTemplate copyWith({
     String? paper,
+    String? preset,
+    String? accentColor,
+    double? fontScale,
+    String? tableStyle,
+    bool? showPageBorder,
     bool? showLogo,
     bool? showTaxNumber,
     bool? showCommercialRegistry,
@@ -112,6 +216,11 @@ class ReceiptTemplate {
   }) =>
       ReceiptTemplate(
         paper: paper ?? this.paper,
+        preset: preset ?? this.preset,
+        accentColor: accentColor ?? this.accentColor,
+        fontScale: fontScale ?? this.fontScale,
+        tableStyle: tableStyle ?? this.tableStyle,
+        showPageBorder: showPageBorder ?? this.showPageBorder,
         showLogo: showLogo ?? this.showLogo,
         showTaxNumber: showTaxNumber ?? this.showTaxNumber,
         showCommercialRegistry: showCommercialRegistry ?? this.showCommercialRegistry,
@@ -123,8 +232,44 @@ class ReceiptTemplate {
         logoUrl: logoUrl,
       );
 
+  /// يطبّق قالباً جاهزاً: حزمة قيمٍ تُبدَّل، وما لا يخصّ الشكل يبقى.
+  ///
+  /// <para>النصوص والشعار والرقم الضريبي **لا تُمسّ**: من اختار «حديث»
+  /// بعد أن كتب تذييله لا يقصد محوَه.</para>
+  ReceiptTemplate applyPreset(String preset) => switch (preset) {
+        ReceiptPresets.modern => copyWith(
+            preset: preset,
+            tableStyle: ReceiptTableStyles.zebra,
+            showPageBorder: false,
+            accentColor: '#0B2540',
+          ),
+        ReceiptPresets.minimal => copyWith(
+            preset: preset,
+            tableStyle: ReceiptTableStyles.plain,
+            showPageBorder: false,
+            accentColor: '#4B5563',
+          ),
+        ReceiptPresets.formal => copyWith(
+            preset: preset,
+            tableStyle: ReceiptTableStyles.grid,
+            showPageBorder: true,
+            accentColor: '#1F2937',
+          ),
+        _ => copyWith(
+            preset: ReceiptPresets.classic,
+            tableStyle: ReceiptTableStyles.lines,
+            showPageBorder: false,
+            accentColor: '#0B2540',
+          ),
+      };
+
   Map<String, dynamic> toRequest() => {
         'paper': paper,
+        'preset': preset,
+        'accentColor': accentColor,
+        'fontScale': fontScale,
+        'tableStyle': tableStyle,
+        'showPageBorder': showPageBorder,
         'showLogo': showLogo,
         'showTaxNumber': showTaxNumber,
         'showCommercialRegistry': showCommercialRegistry,

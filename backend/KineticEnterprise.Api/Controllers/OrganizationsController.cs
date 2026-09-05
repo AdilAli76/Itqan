@@ -33,7 +33,16 @@ public record UpdateSettingsRequest(string CurrencyCode, string CurrencySymbol, 
 /// </summary>
 public record ReceiptTemplateDto(
     string Paper, bool ShowLogo, bool ShowTaxNumber, bool ShowCommercialRegistry,
-    bool ShowQr, string? HeaderText, string? FooterText);
+    bool ShowQr, string? HeaderText, string? FooterText,
+    /// <summary>
+    /// القالب الجاهز وتفاصيل شكله — راجع ReceiptPresets في الواجهة.
+    ///
+    /// <para><b>ولماذا داخل نفس الـJSON:</b> هي قيم **عرض** لا يُستعلَم
+    /// عنها ولا تُفهرَس، فعمودٌ لكل واحدة يعني هجرةً لكل خيار جديد — وهو
+    /// الطريق الذي انتهى بجدولٍ ذي ١٦٥ عموداً في نظامٍ آخر دُرس.</para>
+    /// </summary>
+    string? Preset = null, string? AccentColor = null, double? FontScale = null,
+    string? TableStyle = null, bool ShowPageBorder = false);
 
 /// <summary>القالب ومعه ما يملأه — ردٌّ واحد فتطبع الشاشة بلا نداءين.</summary>
 public record ReceiptTemplateResponse(
@@ -43,7 +52,9 @@ public record ReceiptTemplateResponse(
 public record UpdateReceiptTemplateRequest(
     string Paper, bool ShowLogo, bool ShowTaxNumber, bool ShowCommercialRegistry,
     bool ShowQr, string? HeaderText, string? FooterText,
-    string? TaxNumber, string? CommercialRegistry);
+    string? TaxNumber, string? CommercialRegistry,
+    string? Preset = null, string? AccentColor = null, double? FontScale = null,
+    string? TableStyle = null, bool ShowPageBorder = false);
 
 public record BarcodeTemplateDto(double WidthMm, double HeightMm, bool ShowName, bool ShowPrice, bool ShowSku);
 
@@ -292,10 +303,23 @@ public class OrganizationsController : ControllerBase
 
         org.TaxNumber = Trimmed(request.TaxNumber);
         org.CommercialRegistry = Trimmed(request.CommercialRegistry);
+        // اللون يُفحَص لا يُخزَّن كما جاء: نصٌّ حرّ في حقل لونٍ يُقرأ
+        // لاحقاً في محرِّك PDF، ولا يجوز أن يصل إليه ما لم يُتحقّق منه.
+        var accent = request.AccentColor;
+        if (accent is not null && !System.Text.RegularExpressions.Regex.IsMatch(accent, "^#[0-9a-fA-F]{6}$"))
+        {
+            return BadRequest(new { message = $"لون غير صالح: {accent}" });
+        }
+
         org.ReceiptTemplateJson = JsonSerializer.Serialize(new ReceiptTemplateDto(
             request.Paper, request.ShowLogo, request.ShowTaxNumber,
             request.ShowCommercialRegistry, request.ShowQr,
-            Trimmed(request.HeaderText), Trimmed(request.FooterText)));
+            Trimmed(request.HeaderText), Trimmed(request.FooterText),
+            Trimmed(request.Preset), accent,
+            // يُقيَّد هنا لا في الواجهة وحدها: نداءٌ مباشر بقيمة ٩٩ يُنتج
+            // إيصالاً بسطرٍ واحد على الصفحة.
+            request.FontScale is null ? null : Math.Clamp(request.FontScale.Value, 0.8, 1.4),
+            Trimmed(request.TableStyle), request.ShowPageBorder));
 
         // العرض القديم يتبع المقاس فلا يفترق مصدرا الحقيقة: شاشةٌ تقرأ
         // receiptWidthMm وأخرى تقرأ القالب كانتا ستطبعان بعرضين.

@@ -61,12 +61,22 @@ pw.Page buildReceiptPage({
   // اللفّة الحرارية ضيّقة فخطّها صغير؛ وA4 صفحةٌ يضيع عليها خطّ الثماني
   // نقاط. مقياسٌ واحد يضبط الأحجام كلها بدل جدولٍ لكل مقاس.
   final roll = ReceiptPapers.isRoll(template.paper);
-  final scale = roll ? 1.0 : 1.5;
+  // مقياس الورق × اختيار المستخدم: الأوّل يمنع خطّ الثماني نقاط على A4،
+  // والثاني يترك لمن عينه ضعيفة أن يكبّر بلا أن يكسر التخطيط.
+  final scale = (roll ? 1.0 : 1.5) * template.fontScale;
+  final accent = _accentOf(template);
 
   return pw.Page(
       pageFormat: ReceiptPapers.formatOf(template.paper),
       textDirection: pw.TextDirection.rtl,
-      build: (context) => pw.Column(
+      build: (context) => pw.Container(
+        // إطار الصفحة للورق الرسمي وحده: اللفّة الحرارية تُقصّ بلا هامش
+        // ثابت، فإطارٌ عليها يخرج مقطوعاً من جهة.
+        decoration: (template.showPageBorder && !roll)
+            ? pw.BoxDecoration(border: pw.Border.all(color: accent, width: 1))
+            : null,
+        padding: (template.showPageBorder && !roll) ? const pw.EdgeInsets.all(10) : null,
+        child: pw.Column(
         crossAxisAlignment: pw.CrossAxisAlignment.stretch,
         children: [
           if (template.showLogo && logoBytes != null) ...[
@@ -76,7 +86,25 @@ pw.Page buildReceiptPage({
             ),
             pw.SizedBox(height: 4),
           ],
-          pw.Center(child: pdfAutoDir(orgName, style: pw.TextStyle(fontSize: 12 * scale, fontWeight: pw.FontWeight.bold))),
+          // شريط ملوّن باسم الجهة في القالب الحديث: هو ما يجعل الإيصال
+          // «يشبه المحلّ» — والاسم وحده وسط ورقة بيضاء لا يفعل ذلك.
+          if (template.preset == ReceiptPresets.modern)
+            pw.Container(
+              width: double.infinity,
+              color: accent,
+              padding: const pw.EdgeInsets.symmetric(vertical: 4, horizontal: 6),
+              child: pw.Center(
+                child: pdfAutoDir(orgName,
+                    style: pw.TextStyle(
+                        fontSize: 12 * scale,
+                        fontWeight: pw.FontWeight.bold,
+                        color: PdfColors.white)),
+              ),
+            )
+          else
+            pw.Center(
+                child: pdfAutoDir(orgName,
+                    style: pw.TextStyle(fontSize: 12 * scale, fontWeight: pw.FontWeight.bold))),
           if (template.showTaxNumber && template.taxNumber != null)
             pw.Center(child: pdfLtr(pw.Text('الرقم الضريبي: ${template.taxNumber}',
                 style: pw.TextStyle(fontSize: 7 * scale)))),
@@ -97,23 +125,41 @@ pw.Page buildReceiptPage({
             pw.Center(child: pdfLtr(pw.Text(_dateFormat.format(createdAt), style: pw.TextStyle(fontSize: 8 * scale)))),
           if (invoice['customerName'] != null)
             pw.Center(child: pw.Text('العميل: ${invoice['customerName']}', style: pw.TextStyle(fontSize: 8 * scale))),
-          pw.Divider(),
-          ...items.map((item) => pw.Padding(
-                padding: const pw.EdgeInsets.symmetric(vertical: 2),
-                child: pw.Row(
-                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                  children: [
-                    pw.Expanded(
-                      child: pw.Text(
-                        '${item['productName']}  x${_currencyFormat.format((item['quantity'] as num?) ?? 0)}',
-                        style: pw.TextStyle(fontSize: 8 * scale),
-                      ),
-                    ),
-                    pdfLtr(pw.Text(_currencyFormat.format((item['lineTotal'] as num?) ?? 0), style: pw.TextStyle(fontSize: 8 * scale))),
-                  ],
+          if (template.tableStyle != ReceiptTableStyles.plain) pw.Divider(),
+          ...items.asMap().entries.map((entry) {
+            final item = entry.value;
+            final line = pw.Row(
+              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+              children: [
+                pw.Expanded(
+                  child: pw.Text(
+                    '${item['productName']}  x${_currencyFormat.format((item['quantity'] as num?) ?? 0)}',
+                    style: pw.TextStyle(fontSize: 8 * scale),
+                  ),
                 ),
-              )),
-          pw.Divider(),
+                pdfLtr(pw.Text(_currencyFormat.format((item['lineTotal'] as num?) ?? 0),
+                    style: pw.TextStyle(fontSize: 8 * scale))),
+              ],
+            );
+
+            return pw.Container(
+              // التظليل المتناوب يُقرأ بالعين على صفحةٍ بعشرين سطراً،
+              // والمسافة الأوسع في «المبسّط» تعوّض غياب الخطوط.
+              decoration: pw.BoxDecoration(
+                color: template.tableStyle == ReceiptTableStyles.zebra && entry.key.isEven
+                    ? PdfColors.grey100
+                    : null,
+                border: template.tableStyle == ReceiptTableStyles.grid
+                    ? const pw.Border(bottom: pw.BorderSide(width: 0.4))
+                    : null,
+              ),
+              padding: pw.EdgeInsets.symmetric(
+                  vertical: template.tableStyle == ReceiptTableStyles.plain ? 3.5 : 2,
+                  horizontal: template.tableStyle == ReceiptTableStyles.zebra ? 3 : 0),
+              child: line,
+            );
+          }),
+          if (template.tableStyle != ReceiptTableStyles.plain) pw.Divider(),
           _summaryRow('الإجمالي الفرعي', invoice['subtotal'], scale),
           _summaryRow('الضريبة', invoice['taxAmount'], scale),
           _summaryRow('الخصم', invoice['discountAmount'], scale),
@@ -121,10 +167,13 @@ pw.Page buildReceiptPage({
           pw.Row(
             mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
             children: [
-              pw.Text('الإجمالي', style: pw.TextStyle(fontSize: 10 * scale, fontWeight: pw.FontWeight.bold)),
+              pw.Text('الإجمالي',
+                  style: pw.TextStyle(
+                      fontSize: 10 * scale, fontWeight: pw.FontWeight.bold, color: accent)),
               pdfLtr(pw.Text(
                 '${_currencyFormat.format((invoice['totalAmount'] as num?) ?? 0)} $currencySymbol',
-                style: pw.TextStyle(fontSize: 10 * scale, fontWeight: pw.FontWeight.bold),
+                style: pw.TextStyle(
+                    fontSize: 10 * scale, fontWeight: pw.FontWeight.bold, color: accent),
               )),
             ],
           ),
@@ -154,7 +203,18 @@ pw.Page buildReceiptPage({
             pw.Center(child: pdfAutoDir(template.footerText!, style: pw.TextStyle(fontSize: 8 * scale))),
         ],
       ),
+      ),
     );
+}
+
+/// لون القالب — أو الرمادي الداكن إن كانت القيمة تالفة.
+///
+/// <para>لونٌ مكتوب بخطأ لا يجوز أن يُسقط الطباعة: الكاشير أمامه زبون.</para>
+PdfColor _accentOf(ReceiptTemplate template) {
+  final raw = template.accentColor.replaceAll('#', '');
+  final value = int.tryParse(raw, radix: 16);
+  if (value == null || raw.length != 6) return PdfColors.blueGrey800;
+  return PdfColor.fromInt(0xFF000000 | value);
 }
 
 pw.Widget _summaryRow(String label, dynamic amount, double scale) {
