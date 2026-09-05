@@ -81,7 +81,7 @@ class _ImportCustomersDialogState extends ConsumerState<ImportCustomersDialog> {
                 // الأعمدة مذكورة هنا لا في القالب وحده: من يبني ملفه من
                 // كشفٍ قديم لا يفتح القالب أصلاً.
                 'الأعمدة: الاسم · الهاتف · الفئة · الفرع · المبلغ · ملاحظات — '
-                'والاسم وحده إلزامي.',
+                'والاسم وحده إلزامي. وصفوف «مثال:» في القالب تُتجاهَل.',
                 style: AppTextStyles.caption(color: AppColors.textSecondary),
               ),
             ],
@@ -112,6 +112,7 @@ class _ImportCustomersDialogState extends ConsumerState<ImportCustomersDialog> {
     final update = (preview['willUpdate'] as num?)?.toInt() ?? 0;
     final errors = (preview['withErrors'] as num?)?.toInt() ?? 0;
     final unknown = (preview['unknownCategories'] as List? ?? const []).cast<String>();
+    final examples = (preview['exampleRowsSkipped'] as num?)?.toInt() ?? 0;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -126,6 +127,15 @@ class _ImportCustomersDialogState extends ConsumerState<ImportCustomersDialog> {
             _fact('أخطاء', '$errors', danger: errors > 0),
           ],
         ),
+        if (examples > 0) ...[
+          const SizedBox(height: 6),
+          Text(
+            // تُعلَن ولا تُخفى: من ترك صفّ المثال يجب أن يعرف أنه لم
+            // يدخل، وإلا بحث عن «محمد علي» في الكشف ولم يجده.
+            'صفوف المثال المتجاهَلة: $examples',
+            style: AppTextStyles.caption(color: AppColors.textSecondary),
+          ),
+        ],
         if (errors > 0) ...[
           const SizedBox(height: 8),
           Text(

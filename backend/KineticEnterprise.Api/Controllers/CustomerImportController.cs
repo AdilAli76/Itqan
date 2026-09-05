@@ -15,7 +15,9 @@ public record CustomerImportSummary(
     int TotalRows, int WillCreate, int WillUpdate, int WithErrors, bool Committed,
     List<CustomerImportRowResult> Rows,
     /// فئاتٌ ذُكرت في الملف ولا وجود لها — تُعرَض قبل التأكيد.
-    List<string> UnknownCategories);
+    List<string> UnknownCategories,
+    /// صفوف المثال التي بقيت في القالب فتُخطَّت — تُعلَن ولا تُحسَب خطأً.
+    int ExampleRowsSkipped = 0);
 
 /// <summary>
 /// استيراد العملاء من ملف إكسل أو CSV.
@@ -93,6 +95,7 @@ public class CustomerImportController : ControllerBase
         var toCreate = new List<Customer>();
         var toUpdate = new List<Customer>();
         var seenPhones = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var exampleRowsSkipped = 0;
 
         for (var i = 0; i < rows.Count; i++)
         {
@@ -105,6 +108,15 @@ public class CustomerImportController : ControllerBase
             var branchName = SpreadsheetReader.Value(row, "الفرع", "branch");
             var note = SpreadsheetReader.Value(row, "ملاحظات", "ملاحظة", "notes", "note");
             var overrideRaw = SpreadsheetReader.Value(row, "المبلغ", "مبلغ خاص", "المرتب", "amount", "override");
+
+            // صفّ المثال من القالب يُخطَّى قبل أي تحقّق — راجع
+            // [SpreadsheetReader.IsExampleRow]. وفحصُه بعد التحقّق كان يعني
+            // أن فئة المثال تُبلَّغ «غير معرَّفة» فتُوقف الملف كلّه.
+            if (SpreadsheetReader.IsExampleRow(name))
+            {
+                exampleRowsSkipped++;
+                continue;
+            }
 
             if (string.IsNullOrWhiteSpace(name))
             {
@@ -195,6 +207,11 @@ public class CustomerImportController : ControllerBase
             }
         }
 
+        // ملفٌ ليس فيه إلا المثال: رسالةٌ تقول ما العمل، لا معاينةٌ فارغة
+        // بأصفارٍ يقف عندها المستخدم لا يدري أنجح أم فشل.
+        if (results.Count == 0 && exampleRowsSkipped > 0)
+            return BadRequest(new { message = "الملف لا يحوي إلا صفّ المثال — اكتب بياناتك مكانه ثم أعد الرفع" });
+
         var withErrors = results.Count(r => r.Error is not null);
         var willCreate = results.Count(r => r.Action == "إنشاء");
         var willUpdate = results.Count(r => r.Action == "تحديث");
@@ -212,22 +229,49 @@ public class CustomerImportController : ControllerBase
         }
 
         return new CustomerImportSummary(
-            results.Count, willCreate, willUpdate, withErrors, commit, results, unknownCategories);
+            results.Count, willCreate, willUpdate, withErrors, commit, results, unknownCategories,
+            exampleRowsSkipped);
     }
 
     /// <summary>
-    /// قالب الاستيراد — بصفٍّ مثال لا بعناوين فارغة.
+    /// قالب الاستيراد — بصفِّ مثالٍ من بيانات الجهة نفسها.
     ///
     /// <para>عناوين وحدها تترك المستخدم يخمّن صيغة كل عمود، فيكتب الفئة
     /// «أ» بينما اسمها «فئة أ» ويفشل ألف صفّ دفعةً واحدة.</para>
+    ///
+    /// <para><b>ولماذا يُقرأ من قاعدة البيانات لا نصّاً ثابتاً:</b> كان
+    /// المثال مكتوباً «فئة أ» و«الفرع الرئيسي» — أسماءٌ لا وجود لها عند
+    /// أكثر الجهات. فمن ينزّل القالب ويرفعه ليجرّب يرى خطأين فوراً:
+    /// «الفئة غير معرَّفة»، وهما خطأ القالب لا خطؤه — والاستيراد كلّه
+    /// يتوقّف لأنه لا يقبل ملفاً فيه خطأ. الآن يحمل المثال فئةً وفرعاً
+    /// موجودَين فعلاً، فيصلح نموذجاً يُنسَخ عنه.</para>
+    ///
+    /// <para>ويبدأ الاسم بـ«مثال:» فيُخطّيه الاستيراد صراحةً — لأن من
+    /// يكتب بياناته تحت المثال ولا يحذفه كان يزرع «محمد علي» في كشف
+    /// المنتسبين.</para>
     /// </summary>
     [HttpGet("template")]
     [RequirePermission("customers.manage")]
-    public IActionResult Template()
+    public async Task<IActionResult> Template()
     {
+        // فئتان إن وُجدتا: الأولى مثالٌ لمنتسب على فئته، والثانية لمن
+        // له مبلغٌ خاص يَجُبّ الفئة. وفارغةٌ إن لم تُعرَّف فئات بعد —
+        // العمود اختياري أصلاً، والفراغ أصدق من اسمٍ لا يوجد.
+        var categories = await _db.CustomerCategories
+            .Where(c => c.IsActive)
+            .OrderBy(c => c.Name)
+            .Select(c => c.Name)
+            .Take(2)
+            .ToListAsync();
+
+        var branch = await _db.Branches.OrderBy(b => b.Name).Select(b => b.Name).FirstOrDefaultAsync() ?? "";
+
+        var first = categories.ElementAtOrDefault(0) ?? "";
+        var second = categories.ElementAtOrDefault(1) ?? first;
+
         var csv = "الاسم,الهاتف,الفئة,الفرع,المبلغ,ملاحظات\n"
-                + "محمد علي,0910000000,فئة أ,الفرع الرئيسي,,\n"
-                + "فاطمة أحمد,0920000000,فئة ب,الفرع الرئيسي,250,مبلغ خاص يَجُبّ الفئة\n";
+                + $"{Csv(SpreadsheetReader.ExamplePrefix + " محمد علي")},0910000000,{Csv(first)},{Csv(branch)},,{Csv("احذف صفوف المثال أو اتركها — تُتجاهَل")}\n"
+                + $"{Csv(SpreadsheetReader.ExamplePrefix + " فاطمة أحمد")},0920000000,{Csv(second)},{Csv(branch)},250,{Csv("مبلغ خاص يَجُبّ الفئة")}\n";
 
         // BOM إلزامي: إكسل يقرأ CSV بلا علامة ترتيب بايتات بترميز النظام
         // فتظهر العربية طلاسم — وهو أوّل ما يشتكي منه من يفتح القالب.
@@ -235,6 +279,15 @@ public class CustomerImportController : ControllerBase
             .Concat(System.Text.Encoding.UTF8.GetBytes(csv)).ToArray();
         return File(bytes, "text/csv", "قالب-استيراد-العملاء.csv");
     }
+
+    /// <summary>
+    /// تهريب خلية CSV — الاسم يأتي من قاعدة البيانات لا من ثابتٍ عندنا،
+    /// وفئةٌ اسمها «فئة أ، ب» كانت تكسر أعمدة القالب صامتةً.
+    /// </summary>
+    static string Csv(string value) =>
+        value.Contains(',') || value.Contains('"') || value.Contains('\n')
+            ? '"' + value.Replace("\"", "\"\"") + '"'
+            : value;
 
     private Guid? CurrentUserId()
     {

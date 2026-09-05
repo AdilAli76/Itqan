@@ -124,6 +124,10 @@ public class ProductImportController : ControllerBase
             var tracksStock = SpreadsheetReader.Boolean(
                 SpreadsheetReader.Value(row, "يتبع المخزون", "tracks_stock", "trackstock")) ?? true;
 
+            // صفّ المثال في القالب يُخطَّى — من يكتب أصنافه تحته ولا يحذفه
+            // كان يزرع «مثال: أرز 5كغ» صنفاً حقيقياً في الكتالوج.
+            if (SpreadsheetReader.IsExampleRow(name)) continue;
+
             if (string.IsNullOrWhiteSpace(name))
             {
                 results.Add(new ImportRowResult(rowNumber, "", sku, "خطأ", "اسم الصنف مفقود"));

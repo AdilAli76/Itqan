@@ -149,6 +149,29 @@ public static class SpreadsheetReader
     static string Normalize(string value) =>
         value.Replace("‏", "").Replace("‎", "").Replace("﻿", "").Trim();
 
+    /// <summary>البادئة التي تُعلَّم بها صفوف المثال في كل القوالب.</summary>
+    public const string ExamplePrefix = "مثال:";
+
+    /// <summary>
+    /// أهذا صفُّ مثالٍ من القالب لا بياناتُ مستخدم؟
+    ///
+    /// <para><b>سبب وجوده:</b> القوالب تُسلَّم بصفِّ مثالٍ مملوء — عناوين
+    /// وحدها تترك المستخدم يخمّن صيغة كل عمود. لكن أكثر من يفتح القالب
+    /// يكتب بياناته **تحت** صفّ المثال ولا يحذفه، فيُرفَع الملف بمثالٍ
+    /// فيه فئةٌ وفرعٌ من عندنا لا من عنده — وهو ما كان يُفشل الاستيراد
+    /// كلَّه بخطأين لا علاقة لهما ببيانات المستخدم، أو — أسوأ — يزرع
+    /// «محمد علي» عميلاً حقيقياً في الكشف.</para>
+    ///
+    /// <para>فتُتجاهَل هذه الصفوف صراحةً ويُعلَن عددها، ولا تُحسَب خطأً.</para>
+    /// </summary>
+    public static bool IsExampleRow(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return false;
+        var trimmed = Normalize(name).TrimStart('#', ' ');
+        return trimmed.StartsWith(ExamplePrefix, StringComparison.Ordinal)
+            || trimmed.StartsWith("مثال ", StringComparison.Ordinal);
+    }
+
     /// <summary>
     /// يقرأ قيمة عمود بأي من الأسماء المقبولة له — الملف قد يكتب "الاسم"
     /// أو "اسم الصنف" أو "name"، وكلها تعني الشيء نفسه.
