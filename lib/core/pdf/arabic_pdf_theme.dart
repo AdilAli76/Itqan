@@ -1,30 +1,43 @@
+import 'package:flutter/services.dart' show rootBundle;
 import 'package:pdf/widgets.dart' as pw;
-import 'package:printing/printing.dart';
 
-/// خطوط PDF الافتراضية (Helvetica وغيرها من Base-14) لا تحتوي حروفاً عربية
-/// إطلاقاً — هذا هو سبب "الحروف المتقطعة" في كل تقرير/ملصق/بطاقة يُصدَّر
-/// PDF في النظام (مصمِّم الباركود، بطاقة العميل، تصدير سجل التدقيق). الحل:
-/// تحميل خط عربي فعلي (Noto Sans Arabic عبر PdfGoogleFonts من نفس حزمة
-/// printing المستخدَمة أصلاً) وتعيينه كخط افتراضي للمستند.
+/// خطوط PDF — مضمَّنة في الحزمة لا مُنزَّلة من الشبكة.
 ///
-/// ملاحظة: يحتاج اتصال إنترنت أول مرة فقط (يُنزَّل الخط ويُخزَّن مؤقتاً
-/// محلياً بعدها عبر نفس آلية تخزين حزمة printing المؤقت — لا تحميل متكرر).
+/// <para><b>سبب وجودها:</b> خطوط PDF الافتراضية (Helvetica وأخواتها) لا
+/// حرف عربي فيها إطلاقاً، فكل إيصال وملصق وتقرير يخرج حروفاً متقطّعة.</para>
 ///
-/// وبالمقابل: Noto Sans Arabic يغطي العربية والأرقام فقط ولا يحوي الأبجدية
-/// اللاتينية إطلاقاً، فتعيينه وحده يقلب كل حرف إنجليزي إلى مربّع فارغ (رموز
-/// البطاقات مثل EWMT2DJ5، أسماء المنتجات الإنجليزية، أكواد SKU على الملصقات).
-/// لذلك يُضاف Noto Sans كخط احتياطي: محرِّك PDF يبحث عن كل رمز في الخط
-/// الأساسي أولاً، فإن لم يجده انتقل للاحتياطي — فتُرسَم العربية بالخط العربي
-/// واللاتينية بالخط اللاتيني داخل السطر الواحد.
-Future<pw.ThemeData> arabicPdfTheme() async {
-  final arabic = await PdfGoogleFonts.notoSansArabicRegular();
-  final arabicBold = await PdfGoogleFonts.notoSansArabicBold();
-  final latin = await PdfGoogleFonts.notoSansRegular();
-  final latinBold = await PdfGoogleFonts.notoSansBold();
+/// <para><b>والعطب الذي أُصلح هنا:</b> كانت تُجلب من خطوط قوقل **وقت
+/// الطباعة** (`PdfGoogleFonts`). والنظام يُنشر داخل متجر (راجع
+/// DEPLOYMENT.md)، وواجهته تستعمل خطّاً مضمَّناً لهذا السبب بعينه — بينما
+/// بقيت الطباعة معلَّقة بالشبكة. فكاشيرٌ في محلٍّ بلا إنترنت يطبع أول
+/// إيصال فيقف انتظاراً ثم يخرج بخطٍّ بديل، والزبون واقف. والطباعة أحوج
+/// إلى العمل بلا شبكة من أي شاشة: هي آخر خطوة في البيع.</para>
+///
+/// <para>وIBM Plex Sans Arabic — وهو خطّ الواجهة نفسه — يغطّي العربية
+/// واللاتينية معاً، فالإيصال يخرج بخطٍّ واحد لا بخطّين متنافرين، ورموز
+/// البطاقات وأكواد الأصناف الإنجليزية تُرسم كما تُرسم في الشاشة.</para>
+///
+/// <para><b>ويُحمَّل مرّة واحدة</b>: قراءة أربعة ملفات خطوط عند كل طباعة
+/// تُبطئ أوّل صفحة بلا سبب — والكاشير يطبع عشرات المرّات في الساعة.</para>
+Future<pw.ThemeData>? _cached;
+
+Future<pw.ThemeData> arabicPdfTheme() => _cached ??= _load();
+
+Future<pw.ThemeData> _load() async {
+  Future<pw.Font> font(String weight) async =>
+      pw.Font.ttf(await rootBundle.load('assets/fonts/IBMPlexSansArabic-$weight.ttf'));
+
+  final regular = await font('Regular');
+  final bold = await font('Bold');
+  final medium = await font('Medium');
+
   return pw.ThemeData.withFont(
-    base: arabic,
-    bold: arabicBold,
-    fontFallback: [latin, latinBold],
+    base: regular,
+    bold: bold,
+    // المتوسط احتياطياً لا خطّاً ثالثاً: محرِّك PDF يبحث عن الرمز في
+    // الأساسي ثم في الاحتياطي، وتغطية العائلة واحدة — فالفائدة أن يبقى
+    // للرموز النادرة مصدرٌ ثانٍ من نفس العائلة بدل مربّع فارغ.
+    fontFallback: [medium, bold],
   );
 }
 
