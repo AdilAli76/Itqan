@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/auth/current_user.dart';
 import '../../../core/auth/permissions.dart';
+import '../../../core/shell/home_layout.dart';
 import '../../../core/network/api_client.dart';
 import '../../../core/responsive/adaptive_scaffold.dart';
 import '../../../core/theme/app_colors.dart';
@@ -184,6 +185,56 @@ class _SettingsFormState extends ConsumerState<_SettingsForm> {
   /// تعطيله.
   List<Widget> _sections(BuildContext context) {
     return [
+            SectionCard(
+              title: 'الشاشة الرئيسية',
+              icon: Icons.home_outlined,
+              children: [
+                Text(
+                  // الخيار يُشرَح بمن يستعمله لا بشكله: «شبكة» و«لوحة»
+                  // كلمتان لا تقولان لأحد أيّهما له.
+                  'من يفتح النظام ليعرف أرقام اليوم يريد اللوحة، ومن يفتحه '
+                  'ليصل إلى شاشة البيع يريد الشبكة. والتفضيل لهذا الجهاز '
+                  'وحده — لا يُفرض على بقيّة الأجهزة.',
+                  style: AppTextStyles.labelMd(),
+                ),
+                const SizedBox(height: 8),
+                // RadioGroup لا groupValue على كل عنصر: الأخير مهجور منذ
+                // 3.32، والمجموعة تُدار من الجدّ.
+                RadioGroup<HomeLayout>(
+                  groupValue: ref.watch(homeLayoutProvider),
+                  onChanged: (v) =>
+                      v == null ? null : ref.read(homeLayoutProvider.notifier).set(v),
+                  child: Column(
+                    children: [
+                      for (final option in HomeLayout.values)
+                        RadioListTile<HomeLayout>(
+                          value: option,
+                          contentPadding: EdgeInsets.zero,
+                          dense: true,
+                          title: Text(
+                            switch (option) {
+                              HomeLayout.auto => 'تبع الجهاز',
+                              HomeLayout.dashboard => 'لوحة الأرقام',
+                              HomeLayout.shortcuts => 'شبكة الاختصارات',
+                            },
+                            style: AppTextStyles.bodyMd(color: AppColors.textPrimary),
+                          ),
+                          subtitle: Text(
+                            switch (option) {
+                              HomeLayout.auto =>
+                                'شبكة على الهاتف، ولوحة أرقام على الشاشات الأوسع',
+                              HomeLayout.dashboard => 'مبيعات اليوم والفواتير والمخزون',
+                              HomeLayout.shortcuts => 'أيقونات كبيرة لكل شاشة',
+                            },
+                            style: AppTextStyles.labelMd(),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
             SectionCard(
               title: 'العملة واللغة',
               icon: Icons.language_outlined,

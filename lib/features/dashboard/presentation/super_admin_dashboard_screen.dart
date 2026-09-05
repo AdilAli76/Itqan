@@ -5,6 +5,8 @@ import '../../../core/responsive/adaptive_scaffold.dart';
 import '../../../core/responsive/breakpoints.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../settings/presentation/backup_quick_bar.dart';
+import '../../../core/shell/home_layout.dart';
+import 'shortcuts_home.dart';
 import '../../../core/theme/app_text_styles.dart';
 import '../../../shared/widgets/stat_card.dart';
 import '../../../shared/widgets/currency_badge.dart';
@@ -34,11 +36,35 @@ class SuperAdminDashboardScreen extends ConsumerWidget {
     // صباح. هذا أسوأ انطباع أول ممكن عن النظام.
     //
     // الفحص هنا قبل أي طلب: لا نُرسل طلباً نعرف أنه سيُرفض بـ403.
-    if (!ref.perms.can(Perm.reportsView)) {
+    final canSeeNumbers = ref.perms.can(Perm.reportsView);
+
+    // ── متى تُعرض شبكة الاختصارات بدل الأرقام ───────────────────────────
+    //
+    // ثلاث حالات، وكلٌّ منها سببه:
+    //
+    // 1. اختارها المستخدم صراحةً.
+    // 2. «تبع الجهاز» على هاتف: من يفتح النظام من هاتفه يفتحه ليصل إلى
+    //    شاشة، لا ليقرأ جدول أرقام على شاشة ستّ بوصات.
+    // 3. **ولا يملك صلاحية التقارير**: كان الكاشير يُقابَل بـ«لا صلاحية»
+    //    على أوّل شاشة تُفتح كل صباح — رسالة منعٍ مكان شاشة عمل. والشبكة
+    //    تعطيه ما يستطيع فعله بدل أن تقول له ما لا يستطيع.
+    final layout = ref.watch(homeLayoutProvider);
+    final showShortcuts = layout == HomeLayout.shortcuts ||
+        (layout == HomeLayout.auto && Breakpoints.isMobile(context)) ||
+        !canSeeNumbers;
+
+    if (showShortcuts) {
       return const AdaptiveScaffold(
-        title: 'لوحة التحكم',
+        title: 'الرئيسية',
         activeRoute: '/dashboard',
-        body: NoPermissionView(moduleName: 'لوحة التحكم والتقارير'),
+        body: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            BackupQuickBar(),
+            SizedBox(height: 16),
+            ShortcutsHome(),
+          ],
+        ),
       );
     }
 
