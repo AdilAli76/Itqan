@@ -1,0 +1,24 @@
+{
+  "organization": "متجر الاختبار",
+  "edition": "standard",
+  "tables": 18,
+  "totalRows": 2417,
+  "missingTables": [],
+  "skippedTables": [
+    "medicine_reference",
+    "platform_organizations",
+    "platform_settings"
+  ],
+  "lastExportAt": null,
+  "generatedAt": "2026-08-18T18:20:00.0000000Z",
+  "auto": {
+    "serverConfigured": true,
+    "connected": false,
+    "accountEmail": null,
+    "enabled": false,
+    "hour": 3,
+    "lastAt": null,
+    "lastStatus": null,
+    "lastError": null
+  }
+}

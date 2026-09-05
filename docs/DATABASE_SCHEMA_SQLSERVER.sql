@@ -71,6 +71,16 @@ CREATE TABLE organizations (
   card_mode_default NVARCHAR(20) NOT NULL DEFAULT 'pin',
   -- سقف نمط «بطاقة فقط». صفر = النمط معطَّل فعلياً.
   card_open_mode_daily_cap DECIMAL(18,2) NOT NULL DEFAULT 50,
+  -- النسخة الاحتياطية التلقائية إلى Google Drive. الساعة بتوقيت المنظمة لا
+  -- بـUTC (راجع OrgClock)، ورمز التحديث سرٌّ لا يخرج في أي استجابة.
+  auto_backup_enabled BIT NOT NULL DEFAULT 0,
+  auto_backup_hour INT NOT NULL DEFAULT 3,
+  google_refresh_token NVARCHAR(MAX) NULL,
+  google_account_email NVARCHAR(200) NULL,
+  google_folder_id NVARCHAR(100) NULL,
+  last_auto_backup_at DATETIME2 NULL,
+  last_auto_backup_status NVARCHAR(20) NULL,
+  last_auto_backup_error NVARCHAR(500) NULL,
   is_active BIT NOT NULL DEFAULT 1,
   created_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
   updated_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
@@ -257,7 +267,8 @@ INSERT INTO permissions (code, label_ar, module) VALUES
   ('expenses.manage',        N'تسجيل المصروفات',                           N'expenses'),
   ('reports.view',            N'عرض التقارير',                              N'reports'),
   ('audit_log.view',          N'عرض سجل التدقيق',                           N'audit_log'),
-  ('license.view',            N'عرض الترخيص والاشتراك',                     N'license');
+  ('license.view',            N'عرض الترخيص والاشتراك',                     N'license'),
+  ('backup.manage',           N'تنزيل نسخة احتياطية من بيانات المنظمة',      N'backup');
 GO
 
 CREATE TABLE role_permissions (

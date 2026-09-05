@@ -52,6 +52,8 @@ PATHS = [
     '/purchase-orders',
     '/stock-transfers',
     '/stock-counts',
+    # قسم النسخة الاحتياطية في شاشة الإعدادات — راجع BackupSection.
+    '/backup/summary',
     '/notifications',
     '/audit-log?page=1&pageSize=50',
     '/audit-log/entity-tables',

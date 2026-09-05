@@ -206,6 +206,54 @@ public class Organization
     /// المدير، لا بكامل رصيد الزبون.</para>
     /// </summary>
     public decimal CardOpenModeDailyCap { get; set; } = 50;
+
+    // ── النسخة الاحتياطية التلقائية ─────────────────────────────────────
+    //
+    // النسخة اليدوية تعتمد على أن يتذكّرها إنسان، والإنسان يتذكّرها شهراً
+    // ثم ينساها — ولا يكتشف نسيانه إلا يوم يحتاجها. فالتلقائية هي التي
+    // تحمي فعلاً، واليدوية تبقى لمن يريد نسخةً الآن.
+
+    /// <summary>هل تُؤخذ نسخة ليلية وتُرفع إلى درايف المنظمة؟</summary>
+    public bool AutoBackupEnabled { get; set; }
+
+    /// <summary>
+    /// ساعة الرفع **بتوقيت المنظمة** لا بـUTC — راجع [OrgClock].
+    ///
+    /// <para>«الثالثة فجراً» عند صاحب المحلّ تعني الثالثة عنده. وضبطها
+    /// بـUTC كان يجعل النسخة تُؤخذ الواحدة صباحاً في ليبيا والسابعة مساءً
+    /// في مكانٍ آخر — أي في ذروة البيع.</para>
+    /// </summary>
+    public int AutoBackupHour { get; set; } = 3;
+
+    /// <summary>
+    /// رمز التحديث من قوقل — به يُصدر الخادم رمز وصولٍ عند كل رفع.
+    ///
+    /// <para><b>ولا يخرج في أي استجابة أبداً:</b> من يملكه يكتب في درايف
+    /// صاحبه بلا كلمة مرور ولا تحقّق ثانٍ. فالنقاط تُرجع البريد المرتبط
+    /// وحده — راجع [BackupController].</para>
+    /// </summary>
+    public string? GoogleRefreshToken { get; set; }
+
+    /// <summary>بريد الحساب المرتبط — ليعرف المالك أين تذهب نسخه.</summary>
+    public string? GoogleAccountEmail { get; set; }
+
+    /// <summary>مجلّد الدرايف الذي تُرفع إليه النسخ — يُنشأ عند أول رفع.</summary>
+    public string? GoogleFolderId { get; set; }
+
+    public DateTime? LastAutoBackupAt { get; set; }
+
+    /// <summary>ok أو failed — وسببُ الفشل في [LastAutoBackupError].</summary>
+    public string? LastAutoBackupStatus { get; set; }
+
+    /// <summary>
+    /// آخر سبب فشل، مقروءاً.
+    ///
+    /// <para><b>ولماذا يُخزَّن ويُعرَض:</b> رفعٌ يفشل ليلة بعد ليلة بلا أثر
+    /// في الشاشة هو أسوأ من ألّا يكون هناك رفع: المالك يظنّ نفسه محميّاً.
+    /// </para>
+    /// </summary>
+    public string? LastAutoBackupError { get; set; }
+
     public bool IsActive { get; set; } = true;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;

@@ -124,6 +124,13 @@ builder.Services.AddHostedService<ExpirySweepService>();
 // إنذار الديون المتأخّرة يومياً — الآجل كان دَيناً بلا موعد ولا تذكير ولا
 // تصنيف تأخّر. راجع DebtReminderSweeper.
 builder.Services.AddHostedService<DebtReminderSweepService>();
+
+// النسخة الليلية إلى درايف المنظمة — النسخة اليدوية تعتمد على أن يتذكّرها
+// إنسان، والإنسان ينسى ولا يكتشف نسيانه إلا يوم يحتاجها. راجع BackupSweeper.
+//
+// وتدور كل ساعة لا كل يوم: الساعة مضبوطة بتوقيت كل منظمة على حدة.
+builder.Services.AddHttpClient();
+builder.Services.AddHostedService<BackupSweepService>();
 // ضغط الاستجابات — أكبر مكسب سرعة في النظام كلّه.
 //
 // web.config يمرّر **كل** طلب إلى ASP.NET Core (‎path="*"‎)، فالملفات الساكنة

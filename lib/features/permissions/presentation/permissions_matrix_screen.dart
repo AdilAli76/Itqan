@@ -37,6 +37,7 @@ const _moduleLabels = {
   'reports': 'التقارير',
   'audit_log': 'سجل التدقيق',
   'license': 'الترخيص',
+  'backup': 'النسخة الاحتياطية',
 };
 
 const _moduleIcons = {
@@ -49,6 +50,7 @@ const _moduleIcons = {
   'reports': Icons.bar_chart_outlined,
   'audit_log': Icons.history_outlined,
   'license': Icons.verified_user_outlined,
+  'backup': Icons.backup_outlined,
 };
 
 /// تحويل الأدوار الثابتة (المُبرمَجة سابقاً مباشرة في كل Controller) إلى

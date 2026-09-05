@@ -20,6 +20,7 @@ class Perm {
   const Perm._();
 
   static const auditLogView = 'audit_log.view';
+  static const backupManage = 'backup.manage';
   static const cardsIssue = 'cards.issue';
   static const categoriesManage = 'categories.manage';
   static const customersDelete = 'customers.delete';

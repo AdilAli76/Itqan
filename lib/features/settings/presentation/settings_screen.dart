@@ -2,6 +2,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/auth/current_user.dart';
+import '../../../core/auth/permissions.dart';
 import '../../../core/network/api_client.dart';
 import '../../../core/responsive/adaptive_scaffold.dart';
 import '../../../core/theme/app_colors.dart';
@@ -9,6 +10,7 @@ import '../../../core/theme/app_text_styles.dart';
 import '../../../shared/widgets/section_card.dart';
 import '../data/settings_providers.dart';
 import '../../../shared/widgets/app_surface.dart';
+import 'backup_section.dart';
 
 const _localeLabels = {'ar': 'العربية', 'en': 'English'};
 
@@ -369,6 +371,20 @@ class _SettingsFormState extends ConsumerState<_SettingsForm> {
                   ),
                 ),
               ],
+            ),
+            // النسخة الاحتياطية بصلاحيتها لا بدور المستخدم: مالك المنظمة
+            // قد يمنحها محاسبه ليحفظ النسخ الأسبوعية، وقد لا يمنحها أحداً.
+            // و`Can` يقرأ نفس الرمز الذي يفحصه الخادم (backup.manage)، فلا
+            // يظهر زرٌّ يردّه الخادم بـ403 بلا سبب يفهمه من ضغطه.
+            //
+            // ولا يتبع canEdit: تلك «أيعدّل الإعدادات؟» وهي شيء آخر —
+            // ربطُهما كان يعني أن منح صلاحية النسخ يستلزم فتح كل الإعدادات.
+            //
+            // والمسافة داخل `Can` لا قبله: خارجه تبقى فجوة 16 بكسل معلّقة
+            // في قائمة من لا يملك الصلاحية.
+            const Can(
+              permission: Perm.backupManage,
+              child: Padding(padding: EdgeInsets.only(top: 16), child: BackupSection()),
             ),
     ];
   }
