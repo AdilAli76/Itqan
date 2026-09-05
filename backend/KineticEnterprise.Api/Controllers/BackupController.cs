@@ -243,6 +243,49 @@ public class BackupController : ControllerBase
         }
     }
 
+    /// <summary>
+    /// رفعُ نسخةٍ إلى درايف **الآن** — لا انتظار الليل.
+    ///
+    /// <para><b>سبب وجوده:</b> الرفع الليلي يحمي من النسيان، لكن من يُغلق
+    /// المحلّ بعد جردٍ أو يوم تحصيلٍ كبير يريد نسخته الآن لا بعد ساعات. وهو
+    /// أيضاً الطريق الوحيد للتأكّد أن الربط يعمل فعلاً قبل الاعتماد عليه —
+    /// وإلا انتُظرت ليلةٌ كاملة ليُكتشف أن الحساب غير مربوط.</para>
+    /// </summary>
+    [HttpPost("google/upload")]
+    [RequirePermission("backup.manage")]
+    public async Task<IActionResult> UploadNow()
+    {
+        var scope = await BranchScopeGuard();
+        if (scope is not null) return scope;
+
+        var options = GoogleOptions.From(_config);
+        if (!options.Configured)
+            return BadRequest(new { message = "الرفع إلى درايف غير مهيّأ على هذا الخادم" });
+
+        var org = await _db.Organizations.FirstOrDefaultAsync();
+        if (org is null) return Forbid();
+        if (string.IsNullOrEmpty(org.GoogleRefreshToken))
+            return BadRequest(new { message = "اربط حساب قوقل أولاً" });
+
+        try
+        {
+            var size = await GoogleBackupUploader.UploadAsync(_db, org, options, _http.CreateClient());
+            _db.LogAudit(org.Id, CurrentUserId(), "backup.uploaded", "organizations", org.Id,
+                newValues: new { At = DateTime.UtcNow, Bytes = size });
+            await _db.SaveChangesAsync();
+            return Ok(new { bytes = size });
+        }
+        catch (Exception ex)
+        {
+            // الفشل يُسجَّل في صفّ المنظمة كما يفعل الرفع الليلي: الشاشة
+            // تقرأ الحالة من مكانٍ واحد.
+            org.LastAutoBackupStatus = "failed";
+            org.LastAutoBackupError = ex.Message.Length > 500 ? ex.Message[..500] : ex.Message;
+            await _db.SaveChangesAsync();
+            return BadRequest(new { message = $"تعذّر الرفع: {ex.Message}" });
+        }
+    }
+
     /// <summary>فكّ الارتباط: يُنسى الرمز ويتوقّف الرفع.</summary>
     [HttpPost("google/disconnect")]
     [RequirePermission("backup.manage")]

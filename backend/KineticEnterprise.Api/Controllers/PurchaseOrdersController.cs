@@ -18,7 +18,21 @@ public record CreatePurchaseOrderRequest(
 public record ReceiveLineRequest(
     Guid ProductId, string? BatchNumber, DateTime? ExpiryDate,
     /// المستلَم فعلياً من هذا السطر. NULL = المتبقّي كاملاً (وهو الغالب).
-    decimal? Quantity = null);
+    decimal? Quantity = null,
+    /// <summary>
+    /// السعر الذي حاسب به المورّد فعلاً. NULL = السعر المطلوب به.
+    ///
+    /// <para><b>العطب الذي يصلحه:</b> الأمر يُطبَع ويُرسل بسعر الكتالوج
+    /// يوم الطلب، ثم يصل المورّد بسعرٍ آخر — وهو الغالب لا النادر. وكان
+    /// الاستلام يُدخل البضاعة بالسعر **القديم** دائماً، فلا مكان يُكتب فيه
+    /// السعر الحقيقي. والنتيجة: مخزونٌ مقوَّم بسعرٍ لم يُدفع، وربحٌ محسوب
+    /// على تكلفةٍ خاطئة، وفاتورة مورّد لا تطابق ما في الدفتر — ولا شيء في
+    /// الشاشة يقول إن هناك فرقاً.</para>
+    ///
+    /// <para>وحين يُذكَر ويختلف: يُدخَل به المخزون، ويُحدَّث سعر السطر
+    /// (فالمتبقّي من الأمر يتبعه)، ويُسجَّل الفرق في سجلّ التدقيق.</para>
+    /// </summary>
+    decimal? UnitCost = null);
 public record ReceivePurchaseOrderRequest(
     List<ReceiveLineRequest> Lines,
     /// رقم إشعار المورّد — راجع PurchaseReceipt.SupplierNoteNumber.
@@ -214,6 +228,10 @@ public class PurchaseOrdersController : ControllerBase
             Notes = string.IsNullOrWhiteSpace(request.Notes) ? null : request.Notes.Trim(),
         };
 
+        // فروق الأسعار تُجمَع لتُسجَّل دفعةً في سجلّ التدقيق: سطرٌ لكل صنف
+        // يُغرق السجلّ، وحدثٌ واحد بقائمة الفروق يُقرأ.
+        var priceChanges = new List<object>();
+
         foreach (var item in order.Items)
         {
             var product = await _db.Products.FirstOrDefaultAsync(p => p.Id == item.ProductId);
@@ -227,6 +245,23 @@ public class PurchaseOrdersController : ControllerBase
             var batchNumber = product?.TrackExpiry == true ? (receiveLine?.BatchNumber ?? "") : "";
             var expiryDate = product?.TrackExpiry == true ? receiveLine?.ExpiryDate : null;
 
+            // سعر المورّد الفعلي إن ذُكر — راجع [ReceiveLineRequest.UnitCost].
+            var unitCost = item.UnitCost;
+            if (receiveLine?.UnitCost is decimal actual && actual >= 0 && actual != item.UnitCost)
+            {
+                priceChanges.Add(new
+                {
+                    Product = product?.Name ?? "-",
+                    Ordered = item.UnitCost,
+                    Actual = actual,
+                });
+                unitCost = actual;
+                // سعر السطر يتبع الواقع: الأمر قد يصل على ثلاث شحنات،
+                // وترْكُ السعر القديم يجعل الشحنتين التاليتين تدخلان بسعرٍ
+                // عرف الجميع أنه لم يعد قائماً.
+                item.UnitCost = actual;
+            }
+
             // سطر الإدخال في الدفتر يشير إلى **مستند الاستلام** لا إلى أمر
             // الشراء: الأمر قد يصل على ثلاث شحنات، ونسبة البضاعة إليه تجعل
             // «متى وصلت هذه القطعة» بلا جواب. راجع PurchaseReceipt.
@@ -234,7 +269,7 @@ public class PurchaseOrdersController : ControllerBase
                 _db, order.OrganizationId, order.BranchId, warehouseId: null,
                 productId: item.ProductId,
                 quantity: receiving,
-                unitCost: item.UnitCost,
+                unitCost: unitCost,
                 sourceType: StockSourceTypes.PurchaseReceipt, sourceId: receipt.Id,
                 userId: CurrentUserId(),
                 batchNumber: batchNumber, expiryDate: expiryDate,
@@ -250,7 +285,7 @@ public class PurchaseOrdersController : ControllerBase
                 Quantity = receiving,
                 BatchNumber = batchNumber,
                 ExpiryDate = expiryDate,
-                UnitCost = item.UnitCost,
+                UnitCost = unitCost,
             });
 
             if (product is not null)
@@ -272,6 +307,13 @@ public class PurchaseOrdersController : ControllerBase
         }
         _db.PurchaseReceipts.Add(receipt);
 
+        // إجمالي الأمر يتبع الأسعار الفعلية: تركُه على المطلوب يجعل «قيمة
+        // أوامر الشراء» في التقارير رقماً لم يُدفَع.
+        if (priceChanges.Count > 0)
+        {
+            order.TotalAmount = order.Items.Sum(i => i.Quantity * i.UnitCost);
+        }
+
         var fullyReceived = order.Items.All(i => i.RemainingQuantity <= 0);
         if (fullyReceived) order.Status = "received";
         _db.LogAudit(order.OrganizationId, CurrentUserId(),
@@ -283,6 +325,9 @@ public class PurchaseOrdersController : ControllerBase
                 receipt.SupplierNoteNumber,
                 receipt.ReceivedOn,
                 Lines = order.Items.Select(i => new { i.ProductId, i.Quantity, i.ReceivedQuantity }),
+                // فروق سعر المورّد تُسجَّل صراحةً: تكلفةٌ تغيّرت بلا أثر
+                // تُقرأ لاحقاً كخطأ في التقييم لا كسعرٍ جديد وافق عليه أحد.
+                PriceChanges = priceChanges,
             });
         await _db.SaveChangesAsync();
 

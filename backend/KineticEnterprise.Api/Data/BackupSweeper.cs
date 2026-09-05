@@ -112,53 +112,12 @@ public class BackupSweepService : BackgroundService
         }
 
         var http = _http.CreateClient();
-        var accessToken = await GoogleDrive.AccessTokenAsync(http, options, org.GoogleRefreshToken, token);
+        var size = await GoogleBackupUploader.UploadAsync(db, org, options, http, token);
 
-        if (string.IsNullOrEmpty(org.GoogleFolderId))
-        {
-            org.GoogleFolderId = await GoogleDrive.EnsureFolderAsync(
-                http, accessToken, $"نسخ Kinetic — {org.DisplayName}", token);
-        }
-
-        // ملفٌ مؤقّت لا ذاكرة: النسخة قد تبلغ عشرات الميغابايتات، وحملُها
-        // في الذاكرة داخل خدمةٍ خلفية يزاحم الخادم وهو يبيع.
-        var tempPath = Path.Combine(Path.GetTempPath(), $"kinetic-backup-{Guid.NewGuid():N}.zip");
-        try
-        {
-            var connection = db.Database.GetDbConnection();
-            var plan = await BackupArchive.PlanAsync(db, connection);
-
-            await using (var file = File.Create(tempPath))
-            {
-                await BackupArchive.WriteAsync(
-                    connection,
-                    new BackupOrg(org.Id, org.DisplayName, org.LegalName, org.Edition),
-                    plan,
-                    file);
-            }
-
-            var stamp = OrgClock.Now(org).ToString("yyyy-MM-dd-HHmm");
-            await using (var upload = File.OpenRead(tempPath))
-            {
-                await GoogleDrive.UploadAsync(
-                    http, accessToken, org.GoogleFolderId!, $"kinetic-backup-{stamp}.zip", upload, token);
-            }
-
-            org.LastAutoBackupAt = DateTime.UtcNow;
-            org.LastAutoBackupStatus = "ok";
-            org.LastAutoBackupError = null;
-
-            db.LogAudit(org.Id, null, "backup.auto_uploaded", "organizations", org.Id,
-                newValues: new { At = DateTime.UtcNow, Bytes = new FileInfo(tempPath).Length });
-            await db.SaveChangesAsync(token);
-            _logger.LogInformation("رُفعت نسخة {Org} إلى درايف", org.DisplayName);
-        }
-        finally
-        {
-            // الملف المؤقّت يُحذف ولو فشل الرفع: نسخةٌ كاملة بكل البيانات
-            // متروكةً في مجلّد مؤقّت على الخادم هي تسريبٌ ينتظر.
-            if (File.Exists(tempPath)) File.Delete(tempPath);
-        }
+        db.LogAudit(org.Id, null, "backup.auto_uploaded", "organizations", org.Id,
+            newValues: new { At = DateTime.UtcNow, Bytes = size });
+        await db.SaveChangesAsync(token);
+        _logger.LogInformation("رُفعت نسخة {Org} إلى درايف", org.DisplayName);
     }
 
     /// <summary>

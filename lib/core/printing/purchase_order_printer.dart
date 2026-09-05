@@ -32,6 +32,26 @@ Future<void> printPurchaseOrder({
   String? branchPhone,
   /// اسم من أصدر الأمر — يُطبع تحت خانة التوقيع.
   String? issuedBy,
+
+  /// <summary>
+  /// أتُطبَع الأسعار؟
+  ///
+  /// <para><b>سبب وجوده:</b> ما يُرسَل إلى المورّد أحياناً **طلب عرض سعر**
+  /// لا أمر شراء: الكميات مطلوبة والسعر هو ما يُسأل عنه. وإرسال الورقة
+  /// بأسعارنا القديمة يقول للمورّد بكم اشترينا آخر مرّة — فيبني عرضه
+  /// عليها ولا ينزل تحتها.</para>
+  /// </summary>
+  bool showPrices = true,
+
+  /// <summary>
+  /// يفتح لوحة المشاركة بدل حوار الطباعة — واتساب، بريد، أي تطبيق.
+  ///
+  /// <para>أقصر طريق إلى المورّد: لا تكامل مع واتساب ولا رقمٌ يُخزَّن، بل
+  /// ملفٌّ يُسلَّم لنظام الجهاز فيختار صاحبه إلى أين. وتكاملٌ مباشر يعني
+  /// حساب أعمال ومفاتيح ورسوماً لكل رسالة — لأمرٍ يُرسَل مرّة في الأسبوع.
+  /// </para>
+  /// </summary>
+  bool share = false,
 }) async {
   final doc = pw.Document(theme: await arabicPdfTheme());
   final items = List<Map<String, dynamic>>.from(order['items'] as List? ?? []);
@@ -82,7 +102,8 @@ Future<void> printPurchaseOrder({
                 children: [
                   pw.Text(orgName, style: const pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold)),
                   pw.SizedBox(height: 2),
-                  pw.Text('أمر شراء', style: const pw.TextStyle(fontSize: 11)),
+                  pw.Text(showPrices ? 'أمر شراء' : 'طلب عرض سعر',
+                      style: const pw.TextStyle(fontSize: 11)),
                 ],
               ),
             ),
@@ -156,19 +177,27 @@ Future<void> printPurchaseOrder({
         // وأعرض عمود (اسم الصنف) يصير 3 بدل 1 بعد القلب.
         pw.Table(
           border: pw.TableBorder.all(width: 0.6, color: PdfColors.grey600),
-          columnWidths: {
-            0: const pw.FlexColumnWidth(1.8),
-            1: const pw.FlexColumnWidth(1.6),
-            2: const pw.FlexColumnWidth(1.2),
-            3: const pw.FlexColumnWidth(4),
-            4: const pw.FlexColumnWidth(0.6),
-          },
+          columnWidths: showPrices
+              ? {
+                  0: const pw.FlexColumnWidth(1.8),
+                  1: const pw.FlexColumnWidth(1.6),
+                  2: const pw.FlexColumnWidth(1.2),
+                  3: const pw.FlexColumnWidth(4),
+                  4: const pw.FlexColumnWidth(0.6),
+                }
+              // بلا عمودَي السعر يتّسع اسم الصنف وخانة الكمية: ورقةٌ فيها
+              // عمودان وثلثا الصفحة بياض تبدو ناقصةً لا مقصودة.
+              : {
+                  0: const pw.FlexColumnWidth(1.6),
+                  1: const pw.FlexColumnWidth(5),
+                  2: const pw.FlexColumnWidth(0.6),
+                },
           children: [
             pw.TableRow(
               decoration: const pw.BoxDecoration(color: PdfColors.grey300),
               children: [
-                cell('الإجمالي', bold: true, align: pw.TextAlign.center),
-                cell('التكلفة', bold: true, align: pw.TextAlign.center),
+                if (showPrices) cell('الإجمالي', bold: true, align: pw.TextAlign.center),
+                if (showPrices) cell('التكلفة', bold: true, align: pw.TextAlign.center),
                 cell('الكمية', bold: true, align: pw.TextAlign.center),
                 cell('الصنف', bold: true),
                 cell('#', bold: true, align: pw.TextAlign.center),
@@ -180,8 +209,8 @@ Future<void> printPurchaseOrder({
               final unitCost = (it['unitCost'] as num?)?.toDouble() ?? 0;
               final lineTotal = (it['lineTotal'] as num?)?.toDouble() ?? (qty * unitCost);
               return pw.TableRow(children: [
-                cell(_currencyFormat.format(lineTotal), align: pw.TextAlign.center),
-                cell(_currencyFormat.format(unitCost), align: pw.TextAlign.center),
+                if (showPrices) cell(_currencyFormat.format(lineTotal), align: pw.TextAlign.center),
+                if (showPrices) cell(_currencyFormat.format(unitCost), align: pw.TextAlign.center),
                 cell(_currencyFormat.format(qty), align: pw.TextAlign.center),
                 cell(it['productName'] as String? ?? ''),
                 cell('${e.key + 1}', align: pw.TextAlign.center),
@@ -191,7 +220,13 @@ Future<void> printPurchaseOrder({
         ),
         pw.SizedBox(height: 10),
 
-        pw.Row(
+        if (!showPrices)
+          // سطرٌ يقول للمورّد ما المطلوب منه: ورقةٌ بلا أسعار وبلا طلبٍ
+          // صريح تُقرأ أمرَ شراءٍ نُسيت أسعاره.
+          pw.Text('يرجى تسعير الأصناف أعلاه وإعادة الورقة.',
+              style: const pw.TextStyle(fontSize: 10)),
+
+        if (showPrices) pw.Row(
           mainAxisAlignment: pw.MainAxisAlignment.end,
           children: [
             pw.Container(
@@ -225,6 +260,15 @@ Future<void> printPurchaseOrder({
       ],
     ),
   );
+
+  if (share) {
+    final stamp = DateTime.now().toIso8601String().substring(0, 10);
+    await Printing.sharePdf(
+      bytes: await doc.save(),
+      filename: '${showPrices ? 'أمر-شراء' : 'طلب-عرض-سعر'}-$stamp.pdf',
+    );
+    return;
+  }
 
   await Printing.layoutPdf(onLayout: (format) => doc.save());
 }

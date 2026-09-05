@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import '../../../core/responsive/adaptive_scaffold.dart';
 import '../../../core/responsive/breakpoints.dart';
 import '../../../core/theme/app_colors.dart';
+import '../../settings/presentation/backup_quick_bar.dart';
 import '../../../core/theme/app_text_styles.dart';
 import '../../../shared/widgets/stat_card.dart';
 import '../../../shared/widgets/currency_badge.dart';
@@ -59,6 +60,13 @@ class SuperAdminDashboardScreen extends ConsumerWidget {
           // الذي يحتاج قراراً الآن» — والثاني هو سبب فتح اللوحة أصلاً.
           // ولها حالة تحميل مستقلة فلا تؤخّر ظهور الأرقام ولا تنتظرها.
           const InsightsPanel(),
+          // شريط النسخ الاحتياطي: الفعل اليومي في الشاشة التي تُفتح كل
+          // صباح — راجع [BackupQuickBar]. ويختفي كلياً لمن لا يملك
+          // صلاحيته.
+          const Padding(
+            padding: EdgeInsets.only(bottom: 16),
+            child: BackupQuickBar(),
+          ),
           loading
               // هيكل بطاقات الإحصاء بعدد أعمدة الشبكة نفسه — لوحة التحكم أول
               // شاشة تُفتح كل صباح، فانطباع سرعتها هو انطباع سرعة النظام كله.

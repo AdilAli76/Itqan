@@ -205,6 +205,26 @@ class _PurchaseOrderDetailDialogState extends ConsumerState<_PurchaseOrderDetail
       title: 'تفاصيل أمر الشراء',
       maxWidth: 460,
       actions: [
+        // إرسالٌ بجوار الطباعة: أكثر ما يُفعل بأمر الشراء أن يُرسَل إلى
+        // المورّد لا أن يُطبع على ورق. ولوحة مشاركة النظام تُوصله إلى
+        // واتساب أو البريد بلا تكاملٍ مع أيٍّ منهما.
+        PopupMenuButton<String>(
+          enabled: !_printing,
+          tooltip: 'إرسال',
+          icon: const Icon(Icons.share_outlined, size: 20),
+          onSelected: (value) => _print(
+            detailAsync.valueOrNull,
+            share: true,
+            showPrices: value == 'priced',
+          ),
+          itemBuilder: (_) => const [
+            PopupMenuItem(value: 'priced', child: Text('إرسال بالأسعار (أمر شراء)')),
+            // بلا أسعار: ما يُرسَل قبل الاتفاق طلبُ تسعير، وإرسالُه
+            // بأسعارنا القديمة يقول للمورّد بكم اشترينا آخر مرّة فيبني
+            // عرضه عليها ولا ينزل تحتها.
+            PopupMenuItem(value: 'quote', child: Text('طلب عرض سعر (بلا أسعار)')),
+          ],
+        ),
         TextButton(
           onPressed: _printing ? null : () => _print(detailAsync.valueOrNull),
           child: _printing
@@ -226,7 +246,11 @@ class _PurchaseOrderDetailDialogState extends ConsumerState<_PurchaseOrderDetail
   /// الشعار يُجلب هنا بايتاتٍ لا برابط: نقطة الملفات محمية بتوكن، ومحرِّك
   /// الـPDF لا يحمل ترويسة مصادقة — فرابط مباشر كان سيُنتج مستنداً بلا شعار
   /// بلا رسالة خطأ.
-  Future<void> _print(Map<String, dynamic>? order) async {
+  Future<void> _print(
+    Map<String, dynamic>? order, {
+    bool share = false,
+    bool showPrices = true,
+  }) async {
     if (order == null) return;
     setState(() => _printing = true);
     try {
@@ -269,6 +293,8 @@ class _PurchaseOrderDetailDialogState extends ConsumerState<_PurchaseOrderDetail
         branchAddress: address,
         branchPhone: phone,
         issuedBy: await readCurrentUserName(),
+        showPrices: showPrices,
+        share: share,
       );
     } finally {
       if (mounted) setState(() => _printing = false);
@@ -484,6 +510,20 @@ class _ReceiveExpiryDialogState extends State<_ReceiveExpiryDialog> {
         text: '${((i['remainingQuantity'] as num?) ?? (i['quantity'] as num?) ?? 0)}',
       )
   };
+  /// سعر المورّد الفعلي لكل سطر — مبدوءاً بالسعر المطلوب به.
+  ///
+  /// <para><b>سبب وجوده:</b> الأمر يُرسَل بسعر الكتالوج يوم الطلب، ثم يصل
+  /// المورّد بسعرٍ آخر — وهو الغالب لا النادر. ولم يكن في الشاشة مكانٌ
+  /// يُكتب فيه السعر الحقيقي، فتدخل البضاعة بسعرٍ لم يُدفَع: مخزونٌ مقوَّم
+  /// بالخطأ، وربحٌ محسوب على تكلفةٍ خاطئة، وفاتورة مورّد لا تطابق
+  /// الدفتر.</para>
+  late final _costControllers = {
+    for (final i in widget.items)
+      i['productId'] as String: TextEditingController(
+        text: '${((i['unitCost'] as num?) ?? 0)}',
+      )
+  };
+
   final Map<String, DateTime> _expiryDates = {};
 
   // ترويسة مستند الاستلام — راجع PurchaseReceipt في Entities.cs.
@@ -498,6 +538,9 @@ class _ReceiveExpiryDialogState extends State<_ReceiveExpiryDialog> {
       c.dispose();
     }
     for (final c in _qtyControllers.values) {
+      c.dispose();
+    }
+    for (final c in _costControllers.values) {
       c.dispose();
     }
     _noteController.dispose();
@@ -522,6 +565,7 @@ class _ReceiveExpiryDialogState extends State<_ReceiveExpiryDialog> {
                     ? null
                     : _batchControllers[productId]!.text.trim(),
                 'expiryDate': _expiryDates[productId]?.toIso8601String(),
+                'unitCost': double.tryParse(_costControllers[productId]!.text.trim()),
               };
             }).toList();
             Navigator.pop(context, {
@@ -582,14 +626,35 @@ class _ReceiveExpiryDialogState extends State<_ReceiveExpiryDialog> {
                   children: [
                     Text(item['productName'] as String? ?? '', style: AppTextStyles.labelMd()),
                     const SizedBox(height: 6),
-                    TextField(
-                      controller: _qtyControllers[productId],
-                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                      decoration: InputDecoration(
-                        labelText: 'الكمية الواصلة',
-                        helperText: 'المتبقّي من الأمر: $remaining',
-                        isDense: true,
-                      ),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: _qtyControllers[productId],
+                            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                            decoration: InputDecoration(
+                              labelText: 'الكمية الواصلة',
+                              helperText: 'المتبقّي: $remaining',
+                              isDense: true,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: TextField(
+                            controller: _costControllers[productId],
+                            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                            // مبدوءاً بالسعر المطلوب: أمين المخزن لا يكتب
+                            // شيئاً إن لم يتغيّر، ويصحّح رقماً واحداً إن
+                            // تغيّر — والفرق يُسجَّل في سجلّ التدقيق.
+                            decoration: InputDecoration(
+                              labelText: 'سعر المورّد',
+                              helperText: 'المطلوب: ${_currencyFormat.format((item['unitCost'] as num?) ?? 0)}',
+                              isDense: true,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                     if (item['trackExpiry'] == true) ...[
                     const SizedBox(height: 6),
