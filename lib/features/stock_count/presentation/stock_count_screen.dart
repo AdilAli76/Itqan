@@ -132,6 +132,7 @@ class StockCountScreen extends ConsumerWidget {
               columns: const [
                 AppColumn('الفرع'),
                 AppColumn('الحالة'),
+                AppColumn('التقدّم'),
                 AppColumn('عدد الأصناف'),
                 AppColumn('أصناف بها فرق'),
                 AppColumn('التاريخ'),
@@ -143,6 +144,10 @@ class StockCountScreen extends ConsumerWidget {
                 return [
                   Text(c['branchName'] as String? ?? ''),
                   _statusTag(c['status'] as String? ?? ''),
+                  _ProgressCell(
+                    counted: (c['countedCount'] as num?)?.toInt() ?? 0,
+                    total: (c['itemCount'] as num?)?.toInt() ?? 0,
+                  ),
                   Text('${c['itemCount'] ?? 0}'),
                   Text(
                     '$varianceCount',
@@ -203,6 +208,55 @@ class StockCountScreen extends ConsumerWidget {
             .showSnackBar(SnackBar(content: Text(_dioErrorMessage(e, 'تعذّر بدء الجرد'))));
       }
     }
+  }
+}
+
+/// نسبة ما مُسَّ من سطور الجرد — شريطٌ ورقمان.
+///
+/// <para><b>سبب وجوده:</b> الجرد الموزَّع يمتدّ أياماً، و«كم بقي» سؤال
+/// المشرف الدائم. وقائمةٌ تعرض «عدد الأصناف» وحده لا تفرّق بين جردٍ بدأ
+/// أمس وقارب النهاية وجردٍ فُتح ونُسي عند 3%.</para>
+///
+/// <para>ورقمان مع الشريط لا شريطٌ وحده: «175 من 500» يقول ما لا تقوله
+/// نسبة مئوية — كم صنفاً بقي فعلاً على من سيقف أمام الرفوف.</para>
+class _ProgressCell extends StatelessWidget {
+  const _ProgressCell({required this.counted, required this.total});
+
+  final int counted;
+  final int total;
+
+  @override
+  Widget build(BuildContext context) {
+    if (total == 0) return Text('-', style: AppTextStyles.bodyMd(color: AppColors.textSecondary));
+
+    final ratio = (counted / total).clamp(0.0, 1.0);
+    final done = counted >= total;
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          width: 96,
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(3),
+            child: LinearProgressIndicator(
+              value: ratio,
+              minHeight: 6,
+              backgroundColor: AppColors.border,
+              // الأخضر للمكتمل ولون المعلومة للجاري: لونٌ واحد يجعل جرداً
+              // عند 99% يبدو كجردٍ انتهى، وبينهما قرار.
+              color: done ? AppColors.success : AppColors.info,
+            ),
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          '$counted من $total · ${(ratio * 100).round()}%',
+          style: AppTextStyles.caption(color: AppColors.textSecondary),
+        ),
+      ],
+    );
   }
 }
 
@@ -278,6 +332,39 @@ class _StockCountDetailDialogState extends ConsumerState<_StockCountDetailDialog
 
   String _formatQty(dynamic value) => NumberFormat('#,##0.###', 'en').format((value as num?) ?? 0);
 
+  /// قيمة الفرق بلون شدّته — راجع `VarianceSeverity` في الخادم.
+  ///
+  /// <para>الشدّة **لا تُحسَب هنا**: قاعدتها تحتاج قيمة الجرد كلّه وتكلفة
+  /// كل صنف، وحسابها في الواجهة يعني قاعدتين تفترقان — والواجهة هي التي
+  /// ستكذب لأنها لا ترى إلا ما حُمِّل في الشاشة.</para>
+  Widget _severityLine(Map<String, dynamic> item) {
+    final value = (item['varianceValue'] as num?)?.toDouble() ?? 0;
+    final severity = item['severity'] as String? ?? 'none';
+    if (value == 0) return const SizedBox.shrink();
+
+    final color = switch (severity) {
+      'high' => AppColors.danger,
+      'medium' => AppColors.warning,
+      _ => AppColors.textMuted,
+    };
+    final label = switch (severity) {
+      'high' => 'فرق جسيم',
+      'medium' => 'فرق متوسط',
+      _ => 'فرق طفيف',
+    };
+
+    return Tooltip(
+      message: label,
+      child: Text(
+        NumberFormat('#,##0', 'en').format(value),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        textAlign: TextAlign.end,
+        style: AppTextStyles.caption(color: color),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final detailAsync = ref.watch(stockCountDetailProvider(widget.countId));
@@ -309,6 +396,20 @@ class _StockCountDetailDialogState extends ConsumerState<_StockCountDetailDialog
             .where((i) => (i['productName'] as String? ?? '').toLowerCase().contains(_search.toLowerCase()))
             .toList();
 
+    // في المراجعة تُرتَّب الفروقات بقيمتها نازلةً — لا بالاسم.
+    //
+    // من يعتمد الفروقات لا يقرأ أربعين سطراً بحثاً عن الجسيم فيها؛ يقرأ
+    // الأوّل والثاني ثم يضغط «اعتماد». فترتيبٌ أبجدي يعني أن سطراً يساوي
+    // راتب شهر قد يكون في منتصف القائمة لا يراه أحد. أمّا أثناء العدّ
+    // فالترتيب الأبجدي هو الصحيح: العادّ يبحث عن صنفٍ باسمه.
+    if (status == 'pending_review') {
+      visibleItems.sort((a, b) {
+        final av = (a['varianceValue'] as num?)?.toDouble() ?? 0;
+        final bv = (b['varianceValue'] as num?)?.toDouble() ?? 0;
+        return bv.compareTo(av);
+      });
+    }
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -318,6 +419,12 @@ class _StockCountDetailDialogState extends ConsumerState<_StockCountDetailDialog
             _statusTag(status),
           ],
         ),
+        // حصيلة الجرد المُعتمَد: تُعرض بعد الاعتماد لا قبله — قبله الرقم
+        // المهمّ هو ما ينتظر قراراً، وبعده يصير السؤال «كيف كان مخزوننا؟».
+        if (status == 'reconciled') ...[
+          const SizedBox(height: 12),
+          _AccuracyStrip(count: count),
+        ],
         const SizedBox(height: 12),
         TextField(
           controller: _searchController,
@@ -369,18 +476,29 @@ class _StockCountDetailDialogState extends ConsumerState<_StockCountDetailDialog
                       ),
                     ),
                     SizedBox(
-                      width: 60,
-                      child: Text(
-                        currentVariance == 0
-                            ? '-'
-                            : (currentVariance > 0
-                                ? '+${_formatQty(currentVariance)}'
-                                : _formatQty(currentVariance)),
-                        textAlign: TextAlign.end,
-                        style: AppTextStyles.labelMd(
-                            color: currentVariance == 0
-                                ? AppColors.textMuted
-                                : (currentVariance > 0 ? AppColors.success : AppColors.danger)),
+                      width: 96,
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          Text(
+                            currentVariance == 0
+                                ? '-'
+                                : (currentVariance > 0
+                                    ? '+${_formatQty(currentVariance)}'
+                                    : _formatQty(currentVariance)),
+                            textAlign: TextAlign.end,
+                            style: AppTextStyles.labelMd(
+                                color: currentVariance == 0
+                                    ? AppColors.textMuted
+                                    : (currentVariance > 0 ? AppColors.success : AppColors.danger)),
+                          ),
+                          // قيمة الفرق تحت كميته: «ناقص 15» لا تقول شيئاً
+                          // حتى يُعرف أهي أكياس ملح أم علب دواء. وتُعرَض
+                          // للمحفوظ لا للمكتوب لحظتَه — القيمة تأتي من
+                          // الخادم بتكلفة الصنف.
+                          if (currentVariance != 0) _severityLine(item),
+                        ],
                       ),
                     ),
                   ],
@@ -573,6 +691,71 @@ class _StockCountDetailDialogState extends ConsumerState<_StockCountDetailDialog
   }
 }
 
+/// حصيلة الجرد المُعتمَد: الدقّة، والتغطية، وقيمة النقص والزيادة.
+///
+/// <para><b>سبب وجوده:</b> الجرد ينتهي بأثرٍ على المخزون ثم يُنسى، ولا
+/// يبقى منه رقمٌ يُقارَن بجرد الشهر القادم. ودقّة تهبط من 96% إلى 88% في
+/// ثلاثة جرود هي الإشارة الوحيدة التي تسبق اكتشاف تسرّبٍ منظّم.</para>
+///
+/// <para><b>والتغطية بجانب الدقّة دائماً:</b> «دقّة 100%» على عشرة سطور
+/// من ثلاثمئة ليست جرداً ناجحاً بل جرداً لم يبدأ — وعرضُ الدقّة وحدها
+/// يصنع رقماً يُطمئن كذباً.</para>
+class _AccuracyStrip extends StatelessWidget {
+  const _AccuracyStrip({required this.count});
+  final Map<String, dynamic> count;
+
+  @override
+  Widget build(BuildContext context) {
+    final items = List<Map<String, dynamic>>.from(count['items'] as List? ?? []);
+    final total = items.length;
+    final uncounted = (count['uncountedCount'] as num?)?.toInt() ?? 0;
+    final counted = total - uncounted;
+    final accuracy = (count['accuracyPercent'] as num?)?.toDouble();
+    final shortage = (count['shortageValue'] as num?)?.toDouble() ?? 0;
+    final surplus = (count['surplusValue'] as num?)?.toDouble() ?? 0;
+
+    final money = NumberFormat('#,##0', 'en');
+    // عتبة 95%: ليست رقماً مقدَّساً، لكنها الحدّ الشائع لسجلّ مخزونٍ يُوثَق
+    // به في التخطيط والشراء. ودونها يُقرأ باللون لا بالرقم وحده.
+    final poor = accuracy != null && accuracy < 95;
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceAlt,
+        border: Border.all(color: AppColors.border),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Wrap(
+        spacing: 24,
+        runSpacing: 10,
+        children: [
+          _fact(
+            'دقّة الجرد',
+            accuracy == null ? '—' : '${accuracy.toStringAsFixed(1)}%',
+            color: accuracy == null
+                ? AppColors.textMuted
+                : (poor ? AppColors.warning : AppColors.success),
+          ),
+          _fact('السطور المعدودة', '$counted من $total',
+              color: uncounted > 0 ? AppColors.warning : AppColors.textPrimary),
+          if (shortage > 0) _fact('قيمة النقص', money.format(shortage), color: AppColors.danger),
+          if (surplus > 0) _fact('قيمة الزيادة', money.format(surplus), color: AppColors.success),
+        ],
+      ),
+    );
+  }
+
+  Widget _fact(String label, String value, {Color? color}) => Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label, style: AppTextStyles.caption(color: AppColors.textSecondary)),
+          Text(value, style: AppTextStyles.bodyLg(color: color)),
+        ],
+      );
+}
+
 /// شريط المراجعة: من عدّ، وكم صنفاً اختلف، وهل سبق أن أُعيد العدّ.
 ///
 /// يسبق الأزرار لا يليها: القرار يُتخذ بعد قراءته، فوضعه تحت الزرّين كان
@@ -586,6 +769,13 @@ class _ReviewBanner extends StatelessWidget {
     final items = List<Map<String, dynamic>>.from(count['items'] as List? ?? []);
     final varianceCount = items.where((i) => ((i['variance'] as num?)?.toDouble() ?? 0) != 0).length;
     final rounds = (count['recountRounds'] as num?)?.toInt() ?? 0;
+    final severe = items.where((i) => i['severity'] == 'high').toList()
+      // «أكبرها» تعني أكبرها قيمةً — لا أوّلها أبجدياً.
+      ..sort((a, b) => ((b['varianceValue'] as num?) ?? 0)
+          .compareTo((a['varianceValue'] as num?) ?? 0));
+    final lossValue = items
+        .where((i) => ((i['variance'] as num?)?.toDouble() ?? 0) < 0)
+        .fold<double>(0, (sum, i) => sum + ((i['varianceValue'] as num?)?.toDouble() ?? 0));
     final submittedBy = count['submittedByName'] as String?;
     final reason = count['recountReason'] as String?;
 
@@ -605,6 +795,25 @@ class _ReviewBanner extends StatelessWidget {
             '${submittedBy != null ? ' — عدّها $submittedBy' : ''}',
             style: AppTextStyles.labelMd(color: AppColors.warning),
           ),
+          if (severe.isNotEmpty) ...[
+            const SizedBox(height: 4),
+            // الجسيم يُسمّى باسمه: «أربعون فرقاً» رقمٌ يمرّ، و«منها ثلاثة
+            // جسيمة، أكبرها زيت الزيتون» يوقف الإصبع عن زرّ الاعتماد.
+            Text(
+              'منها ${severe.length} ${severe.length == 1 ? 'فرق جسيم' : 'فروقات جسيمة'}'
+              ' — أكبرها «${severe.first['productName']}»',
+              style: AppTextStyles.labelMd(color: AppColors.danger),
+            ),
+          ],
+          if (lossValue > 0) ...[
+            const SizedBox(height: 4),
+            // النقص وحده لا صافي الفروقات: زيادةٌ في صنف لا تعوّض نقصاً في
+            // آخر، وجمعهما معاً يُخفي الخسارة تحت رقمٍ صغير.
+            Text(
+              'قيمة النقص: ${NumberFormat('#,##0', 'en').format(lossValue)}',
+              style: AppTextStyles.labelMd(color: AppColors.danger),
+            ),
+          ],
           const SizedBox(height: 4),
           Text(
             'الاعتماد يطبّق الفروقات على المخزون فوراً. وإن كان العدّ مشكوكاً فيه فأعده.',

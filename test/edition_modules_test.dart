@@ -122,6 +122,31 @@ void main() {
     });
   });
 
+  // الجرد لا يتبع وحدة المخزون: من يمسك عهدةً يُسأل عنها ولو لم يكن يبيع
+  // بضاعة، والخادم صار يفتح النقطة لكل إصدار. وحارسٌ هنا لأن الخطر هو أن
+  // يُقيَّد البند بمجموعة المخزون مرّةً أخرى فتُغلَق الشاشة على من فُتحت
+  // له على الخادم — بابٌ مفتوحٌ لا طريق إليه.
+  group('الجرد الدوري في كل الإصدارات', () {
+    test('يظهر لإصدار المحفظة رغم غياب مجموعة المخزون', () {
+      expect(labelsFor('wallet'), isNot(contains('المخزون')));
+      expect(routesFor('wallet'), contains('/stock-count'));
+    });
+
+    test('يظهر لمحفظة المحاسبة أيضاً', () {
+      expect(routesFor('wallet_plus'), contains('/stock-count'));
+    });
+
+    test('ولا يتكرّر عند من عنده مخزون — بندٌ واحد لا اثنان', () {
+      final routes = routesFor('standard');
+      expect(routes.where((r) => r == '/stock-count').length, 1);
+    });
+
+    test('ومؤسساتٌ سُحب منها المخزون تحتفظ بجردها', () {
+      final modules = {...modulesOfEdition('enterprise')}..remove('inventory');
+      expect(routesFor('enterprise', modules: modules), contains('/stock-count'));
+    });
+  });
+
   group('وحدة سُحبت من الإصدار', () {
     test('مؤسساتٌ بلا محاسبة تُخفي دفترها', () {
       final modules = {...modulesOfEdition('enterprise')}..remove('accounting');

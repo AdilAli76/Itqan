@@ -57,6 +57,12 @@ const _salesGroup = NavGroup(
   ],
 );
 
+/// الجرد الدوري — بندٌ مستقلّ لأنه يظهر في موضعين حسب الإصدار: داخل
+/// مجموعة المخزون لمن عنده مخزون، ومجموعةً وحده لمن لا مخزون عنده.
+/// وتكرارُ سطرِه في الموضعين كان يعني مساراً يُصحَّح في أحدهما ويُنسى في
+/// الآخر — راجع [navGroupsFor].
+const _stockCount = NavItem(Icons.fact_check_outlined, 'الجرد الدوري', '/stock-count');
+
 const _inventoryGroup = NavGroup(
   icon: Icons.inventory_2_outlined,
   label: 'المخزون',
@@ -67,7 +73,7 @@ const _inventoryGroup = NavGroup(
     // يُقرأ ويُنسى. المكان يحدّد هل تُقرأ الشاشة أم لا.
     NavItem(Icons.shopping_cart_checkout_outlined, 'إعادة الطلب', '/reorder'),
     NavItem(Icons.sync_alt_outlined, 'تحويل المخزون بين الفروع', '/stock-transfer'),
-    NavItem(Icons.fact_check_outlined, 'الجرد الدوري', '/stock-count'),
+    _stockCount,
     NavItem(Icons.qr_code_outlined, 'تخصيص ملصق الباركود', '/barcode-designer'),
     NavItem(Icons.receipt_outlined, 'قالب الإيصال', '/receipt-designer'),
   ],
@@ -132,6 +138,17 @@ List<NavGroup> navGroupsFor({
       // ثلاثة مواضع تعرض هذه القائمة (الشريط الجانبي والعلوي ولوحة
       // الأوامر)، وإخفاء يُنفَّذ في اثنين يترك الشاشة قابلة للفتح من الثالث.
       if (modules.contains('inventory')) _inventoryGroup,
+      // الجرد لا يتبع وحدة المخزون: من يمسك عهدةً يُسأل عنها ولو لم يكن
+      // يبيع بضاعة، والخادم صار يفتح النقطة لكل إصدار (راجع
+      // StockCountsController). فيظهر هنا وحده لمن أُخفيت عنه مجموعة
+      // المخزون — وإلا بقيت الشاشة مفتوحة على الخادم ولا طريق إليها في
+      // الواجهة.
+      if (!modules.contains('inventory'))
+        const NavGroup(
+          icon: Icons.fact_check_outlined,
+          label: 'الجرد الدوري',
+          items: [_stockCount],
+        ),
       // مجموعة تظهر لإصدار الصيدليات وحده — النظام يُباع لبقالة ومحل قطع
       // غيار، ودفتر الوصفات في قائمتهم بند لا معنى له.
       if (modules.contains('pharmacy'))

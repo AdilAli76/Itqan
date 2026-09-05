@@ -20,7 +20,14 @@ public record UpdateCountedQuantityRequest(decimal CountedQuantity);
 
 public record StockCountListItemDto(
     Guid Id, Guid BranchId, string BranchName, string Status, string Kind,
-    int ItemCount, int VarianceCount, DateTime CreatedAt, DateTime? ClosedAt);
+    int ItemCount, int VarianceCount, DateTime CreatedAt, DateTime? ClosedAt,
+    /// كم سطراً مُسَّ فعلاً — منه تُحسب نسبة التقدّم في القائمة.
+    ///
+    /// <para><b>ولماذا في القائمة لا في التفصيل وحده:</b> «كم بقي» سؤال
+    /// المشرف الدائم أثناء جردٍ موزَّع، وكان يلزمه فتح كل جرد ليعرف. وجردٌ
+    /// مفتوح منذ أسبوع عند 3% ليس جرداً بطيئاً بل جردٌ **متروك** — ولا
+    /// يُرى ذلك في قائمة تعرض عدد الأصناف وحده.</para>
+    int CountedCount);
 
 public record StockCountItemDto(
     Guid Id, Guid ProductId, string ProductName, decimal SystemQuantity, decimal CountedQuantity, decimal Variance,
@@ -28,7 +35,59 @@ public record StockCountItemDto(
     /// تفرّق بين «عُدَّ وطابق» و«لم يُنظَر إليه».
     DateTime? CountedAt,
     bool AddedDuringCount,
-    string? Barcode, string Sku, string UnitBase);
+    string? Barcode, string Sku, string UnitBase,
+    /// قيمة الفرق بالعملة — الكمية مضروبةً في تكلفة الصنف.
+    ///
+    /// <para>هي الرقم الذي يُقرَّر عليه: «ناقص 15» لا تقول شيئاً حتى يُعرف
+    /// أهي خمسة عشر كيس ملح أم خمس عشرة علبة دواء.</para>
+    decimal VarianceValue,
+    /// شدّة الفرق — راجع [VarianceSeverity].
+    string Severity);
+
+/// <summary>
+/// شدّة فرق الجرد: ما الذي يستحقّ أن يُنظر فيه أولاً.
+///
+/// <para><b>سبب وجودها:</b> جردٌ بمئتي صنف يخرج بأربعين فرقاً، ومن يعتمد
+/// الفروقات يقرأ قائمةً كل سطورها متساوية في الشكل. فيُعتمَد الكلّ دفعةً —
+/// وفيها سطرٌ واحد يساوي راتب شهر.</para>
+///
+/// <para><b>وبمحورين لا محور:</b> القيمة أولاً — صنفٌ غالٍ ينقص واحدةً
+/// أخطر من رخيصٍ ينقص عشرين، وهي القاعدة المحاسبية. لكن القيمة وحدها
+/// تُخفي **السرقة الصغيرة المتكرّرة**: نصف رفٍّ من صنفٍ رخيص اختفى إشارةٌ
+/// لا يجوز أن تُصنَّف «منخفضة» لأن ثمنه زهيد. فالشدّة أعلى الاثنتين.</para>
+///
+/// <para><b>والمرجع الجردُ نفسه لا رقمٌ ثابت:</b> «مئة دينار» فرقٌ جسيم
+/// عند بقّالة وتافهٌ عند مخزن جملة، وثابتٌ في الكود يعني إعداداً يضبطه كل
+/// عميل — أو لا يضبطه أحد فيبقى بلا معنى. فتُقاس قيمة الفرق **نسبةً إلى
+/// قيمة المخزون المعدود**: صنفٌ وحده يمثّل 2% من قيمة الجرد خطأً هو حدثٌ
+/// جسيم في أي نشاط مهما كان حجمه.</para>
+/// </summary>
+public static class VarianceSeverity
+{
+    public const string None = "none";
+    public const string Low = "low";
+    public const string Medium = "medium";
+    public const string High = "high";
+
+    /// <param name="varianceValue">قيمة الفرق المطلقة بالعملة.</param>
+    /// <param name="countValue">قيمة المخزون النظامية للجرد كلّه.</param>
+    /// <param name="systemQuantity">الكمية النظامية للصنف — مقام نسبة الكمية.</param>
+    /// <param name="variance">فرق الكمية بإشارته.</param>
+    public static string Of(decimal varianceValue, decimal countValue, decimal systemQuantity, decimal variance)
+    {
+        if (variance == 0) return None;
+
+        // قيمة الجرد صفر (كتالوجٌ بلا تكاليف مُدخَلة) تُسقط محور القيمة
+        // كلَّه إلى القسمة على صفر. فيبقى محور الكمية وحده — وهو خيرٌ من
+        // تصنيفٍ كاذب أو استثناءٍ يُسقط الشاشة.
+        var valueShare = countValue > 0 ? varianceValue / countValue : 0m;
+        var quantityShare = systemQuantity > 0 ? Math.Abs(variance) / systemQuantity : 1m;
+
+        if (valueShare >= 0.02m || quantityShare >= 0.5m) return High;
+        if (valueShare >= 0.005m || quantityShare >= 0.2m) return Medium;
+        return Low;
+    }
+}
 
 public record StockCountDetailDto(
     Guid Id, Guid BranchId, string BranchName, string Status,
@@ -38,7 +97,26 @@ public record StockCountDetailDto(
     string? ReviewedByName, DateTime? ReviewedAt,
     string? RecountReason, int RecountRounds,
     /// كم سطراً لم يُمَسّ بعد — سؤال الشاشة الميدانية الدائم «كم بقي».
-    int UncountedCount);
+    int UncountedCount,
+    /// <summary>
+    /// نسبة السطور **المعدودة** التي طابقت النظام — دقّة سجلّ المخزون.
+    ///
+    /// <para><b>ولماذا من المعدود لا من الكل:</b> الجرد يبدأ بـ
+    /// <c>CountedQuantity = SystemQuantity</c>، فسطرٌ لم يره أحد يُحسب
+    /// «مطابقاً» — وجردٌ مُسّ فيه عشرة سطور من ثلاثمئة كان سيخرج بدقّة
+    /// 97% وهي في الحقيقة دقّة **الجهل**. راجع [StockCountItem.CountedAt].
+    /// وNULL حين لا سطر مُسَّ بعد: لا دقّة تُحسَب من لا شيء.</para>
+    ///
+    /// <para>وتُقرأ مع [UncountedCount] لا وحدها: دقّةٌ 100% على عشرة
+    /// سطور ليست جرداً ناجحاً بل جرداً لم يبدأ.</para>
+    /// </summary>
+    decimal? AccuracyPercent,
+    /// قيمة النقص (ما نقص عن النظام) — خسارةٌ مالية معلومة.
+    decimal ShortageValue,
+    /// قيمة الزيادة — بضاعة ظهرت بلا مستند.
+    decimal SurplusValue,
+    /// قيمة المخزون النظامية للجرد كلّه — مرجع النسب.
+    decimal SystemValue);
 
 public record RecountRequest(string Reason);
 
@@ -82,8 +160,17 @@ public static class ScanCodes
 /// راجع DATABASE_TABLES_GUIDE.md §5.7. stock_counts يحمل branch_id واحداً
 /// فعلياً (على عكس stock_transfers)، فـ StockCountsPolicy تعزل تلقائياً حسب
 /// فرع المستخدم — لا فلترة يدوية مطلوبة هنا.
+///
+/// <para><b>ولا يُقيَّد بوحدة inventory</b> — وكان مقيَّداً بها. الجرد
+/// يُطلَب في كل إصدار: من يمسك عهدةً يُسأل عنها، ولو لم يكن يبيع بضاعة.
+/// وتقييده كان يعني أن جهةً على إصدار المحفظة لا تجد الشاشة أصلاً ولا
+/// تعرف أنها موجودة في المنتج.</para>
+///
+/// <para>وما يُعَدّ هو ما في الكتالوج: منظمةٌ لا أصناف عندها تفتح الشاشة
+/// فتجدها فارغة — وهو الصحيح، لا خطأ. أما ما لا يُعَدّ هنا فأرصدة
+/// البطاقات: مطابقتها شيء آخر لأن رصيد البطاقة التزامٌ في الدفتر لا قطعةٌ
+/// على رفّ.</para>
 /// </summary>
-[RequireModule("inventory")]
 [ApiController]
 [Route("api/stock-counts")]
 [Authorize]
@@ -104,7 +191,8 @@ public class StockCountsController : ControllerBase
 
         return counts.Select(c => new StockCountListItemDto(
             c.Id, c.BranchId, branchNames.GetValueOrDefault(c.BranchId, "-"), c.Status, c.Kind,
-            c.Items.Count, c.Items.Count(i => i.Variance != 0), c.CreatedAt, c.ClosedAt)).ToList();
+            c.Items.Count, c.Items.Count(i => i.Variance != 0), c.CreatedAt, c.ClosedAt,
+            c.Items.Count(i => i.CountedAt != null))).ToList();
     }
 
     [HttpGet("{id:guid}")]
@@ -246,9 +334,12 @@ public class StockCountsController : ControllerBase
                 $"«{product.Name}» موجود على الرفّ وليس في قائمة هذا الجرد.");
         }
 
+        var varianceValue = Math.Abs(item.Variance) * product.CostPrice;
         var dto = new StockCountItemDto(
             item.Id, item.ProductId, product.Name, item.SystemQuantity, item.CountedQuantity,
-            item.Variance, item.CountedAt, item.AddedDuringCount, product.Barcode, product.Sku, product.UnitBase);
+            item.Variance, item.CountedAt, item.AddedDuringCount, product.Barcode, product.Sku, product.UnitBase,
+            varianceValue,
+            VarianceSeverity.Of(varianceValue, await CountValueAsync(id), item.SystemQuantity, item.Variance));
 
         return new ScanResultDto(
             item.CountedAt is null ? ScanCodes.Found : ScanCodes.AlreadyCounted,
@@ -308,9 +399,25 @@ public class StockCountsController : ControllerBase
             newValues: new { product.Name, product.Sku, SystemQuantity = systemQuantity });
         await _db.SaveChangesAsync();
 
+        var addedValue = systemQuantity * product.CostPrice;
         return new StockCountItemDto(item.Id, product.Id, product.Name, systemQuantity, 0, -systemQuantity,
-            null, true, product.Barcode, product.Sku, product.UnitBase);
+            null, true, product.Barcode, product.Sku, product.UnitBase,
+            addedValue,
+            VarianceSeverity.Of(addedValue, await CountValueAsync(id), systemQuantity, -systemQuantity));
     }
+
+    /// <summary>
+    /// قيمة المخزون النظامية لجردٍ كامل — مقام نسبة القيمة في تصنيف الشدّة.
+    ///
+    /// <para>استعلامٌ مجمَّع واحد على مفتاحٍ مفهرس. وحسابه في الشاشة
+    /// الميدانية بدل تمرير صفر مقصود: صفرٌ يُسقط محور القيمة صامتاً فيصير
+    /// كل فرقٍ «منخفضاً»، وشاشةٌ تكذب أسوأ من شاشةٍ تتأخّر ميلي ثانية.</para>
+    /// </summary>
+    private async Task<decimal> CountValueAsync(Guid countId) =>
+        await _db.StockCountItems
+            .Where(i => i.StockCountId == countId)
+            .Join(_db.Products, i => i.ProductId, p => p.Id, (i, p) => i.SystemQuantity * p.CostPrice)
+            .SumAsync(v => (decimal?)v) ?? 0m;
 
     /// <summary>
     /// إنهاء العدّ. إن وُجد فرقٌ واحد على الأقل ينتقل الجرد إلى
@@ -545,9 +652,29 @@ public class StockCountsController : ControllerBase
         var productIds = count.Items.Select(i => i.ProductId).ToList();
         // الباركود والرمز والوحدة تُجلَب معها: الشاشة الميدانية تعرض الوحدة
         // بجانب الكمية («12 علبة» لا «12»)، وبلاها يُدخل العادّ حبّات مكان علب.
+        // والتكلفة معها: بها تُحسب قيمة الفرق وشدّته — راجع [VarianceSeverity].
         var products = await _db.Products.Where(p => productIds.Contains(p.Id))
-            .Select(p => new { p.Id, p.Name, p.Barcode, p.Sku, p.UnitBase })
+            .Select(p => new { p.Id, p.Name, p.Barcode, p.Sku, p.UnitBase, p.CostPrice })
             .ToDictionaryAsync(p => p.Id, p => p);
+
+        // قيمة الجرد النظامية — مقام نسبة القيمة في تصنيف الشدّة.
+        var countValue = count.Items.Sum(
+            i => i.SystemQuantity * (products.GetValueOrDefault(i.ProductId)?.CostPrice ?? 0m));
+
+        // الدقّة من السطور التي مُسَّت وحدها — راجع [StockCountDetailDto].
+        var counted = count.Items.Where(i => i.CountedAt is not null).ToList();
+        var matched = counted.Count(i => i.Variance == 0);
+        decimal? accuracy = counted.Count == 0
+            ? null
+            : Math.Round(matched * 100m / counted.Count, 1);
+
+        // النقص والزيادة منفصلان لا صافياً: زيادةٌ في صنف لا تعوّض نقصاً في
+        // آخر، وطرحُهما يُخفي خسارةً حقيقية تحت رقمٍ صغير — وهو أوّل ما
+        // يفعله من يريد إخفاء عجز.
+        var shortage = count.Items.Where(i => i.Variance < 0)
+            .Sum(i => -i.Variance * (products.GetValueOrDefault(i.ProductId)?.CostPrice ?? 0m));
+        var surplus = count.Items.Where(i => i.Variance > 0)
+            .Sum(i => i.Variance * (products.GetValueOrDefault(i.ProductId)?.CostPrice ?? 0m));
 
         // اسم من عدّ ومن راجع: الشاشة تعرضهما جنباً إلى جنب، فتطابقهما ظاهر
         // لمن ينظر بلا حاجة إلى فتح سجلّ التدقيق.
@@ -563,9 +690,12 @@ public class StockCountsController : ControllerBase
                 .Select(i =>
                 {
                     var p = products.GetValueOrDefault(i.ProductId);
+                    var varianceValue = Math.Abs(i.Variance) * (p?.CostPrice ?? 0m);
                     return new StockCountItemDto(
                         i.Id, i.ProductId, p?.Name ?? "-", i.SystemQuantity, i.CountedQuantity, i.Variance,
-                        i.CountedAt, i.AddedDuringCount, p?.Barcode, p?.Sku ?? "-", p?.UnitBase ?? "piece");
+                        i.CountedAt, i.AddedDuringCount, p?.Barcode, p?.Sku ?? "-", p?.UnitBase ?? "piece",
+                        varianceValue,
+                        VarianceSeverity.Of(varianceValue, countValue, i.SystemQuantity, i.Variance));
                 })
                 .OrderBy(i => i.ProductName)
                 .ToList(),
@@ -574,7 +704,8 @@ public class StockCountsController : ControllerBase
             count.ReviewedBy is null ? null : userNames.GetValueOrDefault(count.ReviewedBy.Value),
             count.ReviewedAt,
             count.RecountReason, count.RecountRounds,
-            count.Items.Count(i => i.CountedAt is null));
+            count.Items.Count(i => i.CountedAt is null),
+            accuracy, shortage, surplus, countValue);
     }
 
     private Guid? CurrentUserId()
