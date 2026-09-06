@@ -41,6 +41,108 @@
     For more details:
     * https://docs.flutter.dev/platform-integration/web/initialization
   -->
+  <!--
+    مفاتيح المرور (WebAuthn) — جسرٌ رقيق بين فلاتر والمتصفّح.
+
+    لماذا هنا لا في دارت: واجهة navigator.credentials تأخذ ArrayBuffer
+    وتُعيده، وتحويلُه ذهاباً وإياباً عبر js_interop سطحٌ واسع لخطأ صامت
+    لا يظهر إلا على جهاز المستخدم. فالتحويل كلّه يقع هنا، ولا يعبر الجسر
+    إلا نصٌّ بترميز base64url — وهو عين ما يفهمه الخادم.
+
+    والدوالّ تُعيد JSON نصّاً وتردّ الخطأ نصّاً في الحقل error: استثناءٌ
+    يعبر الجسر يصل إلى دارت بلا رسالة، فيرى المستخدم «تعذّرت العملية».
+  -->
+  <script>
+  (function () {
+    function b64urlToBytes(value) {
+      var s = value.replace(/-/g, '+').replace(/_/g, '/');
+      while (s.length % 4) s += '=';
+      var raw = atob(s);
+      var bytes = new Uint8Array(raw.length);
+      for (var i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+      return bytes;
+    }
+
+    function bytesToB64url(buffer) {
+      var bytes = new Uint8Array(buffer);
+      var s = '';
+      for (var i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+      return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    }
+
+    function descriptors(ids) {
+      return (ids || []).map(function (id) {
+        return { id: b64urlToBytes(id), type: 'public-key' };
+      });
+    }
+
+    window.kineticPasskey = {
+      supported: function () {
+        return !!(window.PublicKeyCredential && navigator.credentials &&
+                  navigator.credentials.create && window.isSecureContext);
+      },
+
+      register: function (optionsJson) {
+        var o = JSON.parse(optionsJson);
+        return navigator.credentials.create({
+          publicKey: {
+            challenge: b64urlToBytes(o.challenge),
+            rp: { id: o.rpId, name: o.rpName },
+            user: {
+              id: b64urlToBytes(o.userId),
+              name: o.userName,
+              displayName: o.userDisplayName,
+            },
+            // ES256 ثم RS256 — وهما وحدهما ما يتحقّق منه الخادم، فطلبُ
+            // غيرهما ينتج مفتاحاً يُسجَّل ثم يُرفض عند أوّل فتح.
+            pubKeyCredParams: [
+              { type: 'public-key', alg: -7 },
+              { type: 'public-key', alg: -257 },
+            ],
+            excludeCredentials: descriptors(o.excludeCredentials),
+            authenticatorSelection: {
+              userVerification: 'required',
+              residentKey: 'preferred',
+            },
+            timeout: 120000,
+            attestation: 'none',
+          },
+        }).then(function (cred) {
+          return JSON.stringify({
+            credentialId: bytesToB64url(cred.rawId),
+            clientDataJson: bytesToB64url(cred.response.clientDataJSON),
+            attestationObject: bytesToB64url(cred.response.attestationObject),
+          });
+        }).catch(function (e) {
+          return JSON.stringify({ error: (e && e.message) ? e.message : String(e) });
+        });
+      },
+
+      unlock: function (optionsJson) {
+        var o = JSON.parse(optionsJson);
+        return navigator.credentials.get({
+          publicKey: {
+            challenge: b64urlToBytes(o.challenge),
+            rpId: o.rpId,
+            allowCredentials: descriptors(o.allowCredentials),
+            userVerification: 'required',
+            timeout: 120000,
+          },
+        }).then(function (cred) {
+          return JSON.stringify({
+            credentialId: bytesToB64url(cred.rawId),
+            clientDataJson: bytesToB64url(cred.response.clientDataJSON),
+            authenticatorData: bytesToB64url(cred.response.authenticatorData),
+            signature: bytesToB64url(cred.response.signature),
+          });
+        }).catch(function (e) {
+          return JSON.stringify({ error: (e && e.message) ? e.message : String(e) });
+        });
+      },
+    };
+  })();
+  </script>
+
   <script src="flutter_bootstrap.js" async></script>
 </body>
 </html>
