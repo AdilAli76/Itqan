@@ -45,7 +45,21 @@ class PrinterPickerDialog extends ConsumerWidget {
               style: AppTextStyles.caption(color: AppColors.textSecondary),
             ),
             const SizedBox(height: 8),
-            ...PrinterProfiles.all.map((profile) => _tile(ref, profile, selected)),
+            // RadioGroup لا groupValue على كل عنصر: الأخير مهجور منذ 3.32،
+            // والمجموعة تُدار من الجدّ — كما في شاشة الإعدادات.
+            RadioGroup<String>(
+              groupValue: selected.id,
+              onChanged: (id) => id == null
+                  ? null
+                  : ref
+                      .read(selectedPrinterProfileProvider.notifier)
+                      .select(PrinterProfiles.byId(id)),
+              child: Column(
+                children: [
+                  for (final profile in PrinterProfiles.all) _tile(profile),
+                ],
+              ),
+            ),
           ],
         ),
       ),
@@ -59,13 +73,11 @@ class PrinterPickerDialog extends ConsumerWidget {
     );
   }
 
-  Widget _tile(WidgetRef ref, PrinterProfile profile, PrinterProfile selected) {
+  Widget _tile(PrinterProfile profile) {
     final layout = profile.code128Layout(codeLength);
 
     return RadioListTile<String>(
       value: profile.id,
-      groupValue: selected.id,
-      onChanged: (_) => ref.read(selectedPrinterProfileProvider.notifier).select(profile),
       dense: true,
       contentPadding: EdgeInsets.zero,
       title: Text(profile.label, style: AppTextStyles.bodyMd()),
