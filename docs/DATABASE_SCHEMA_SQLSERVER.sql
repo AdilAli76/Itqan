@@ -81,6 +81,9 @@ CREATE TABLE organizations (
   last_auto_backup_at DATETIME2 NULL,
   last_auto_backup_status NVARCHAR(20) NULL,
   last_auto_backup_error NVARCHAR(500) NULL,
+  -- حقول إضافية يعرّفها مالك المنظمة لحسابات الدليل. JSON لا أعمدة: قيمُ
+  -- عرضٍ لا يُستعلَم عنها، وعمودٌ لكل حقل يعني هجرةً لكل عميل.
+  account_field_defs_json NVARCHAR(MAX) NOT NULL DEFAULT N'[]',
   is_active BIT NOT NULL DEFAULT 1,
   created_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
   updated_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
@@ -1114,6 +1117,9 @@ CREATE TABLE accounts (
   -- أنشأه النظام ويعتمد عليه الترحيل الآلي — لا يُحذف. حذف «المبيعات»
   -- يُوقف كل بيع في المحلّ، والمستخدم لا يعرف ذلك وهو يضغط «حذف».
   is_system BIT NOT NULL DEFAULT 0,
+  -- قيم الحقول الإضافية بمفاتيح تعريفات المنظمة — راجع
+  -- organizations.account_field_defs_json.
+  custom_fields_json NVARCHAR(MAX) NOT NULL DEFAULT N'{}',
   is_active BIT NOT NULL DEFAULT 1,
   created_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
   CONSTRAINT UQ_accounts_org_code UNIQUE (organization_id, code)

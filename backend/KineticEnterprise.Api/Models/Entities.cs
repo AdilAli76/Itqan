@@ -254,6 +254,25 @@ public class Organization
     /// </summary>
     public string? LastAutoBackupError { get; set; }
 
+    /// <summary>
+    /// حقولٌ إضافية يعرّفها مالك المنظمة لحسابات الدليل — JSON.
+    ///
+    /// <para><b>سبب وجودها:</b> ما يحتاجه الحساب يختلف بالنشاط: مقاولاتٌ
+    /// تريد «مركز التكلفة» على كل حساب، وجهةٌ متعدّدة العملات تريد «عملة
+    /// الحساب»، ومكتبٌ يريد «رقم الحساب في النظام القديم» ليطابق. وإضافةُ
+    /// عمودٍ لكل واحدة تعني هجرةً لكل عميل — وهو الطريق الذي انتهى بجدولٍ
+    /// ذي ١٦٥ عموداً في نظامٍ آخر دُرس.</para>
+    ///
+    /// <para><b>ولماذا التعريف على المنظمة والقيمة على الحساب:</b> التعريف
+    /// يُكتب مرّةً ويُقرأ في كل نموذج، والقيمة تخصّ صفّاً واحداً. وخلطُهما
+    /// يعني تكرار اسم الحقل ونوعه في كل حساب — فيُعاد تسميته في مئة موضع.
+    /// </para>
+    ///
+    /// <para>الشكل: <c>[{"key":"f1","label":"مركز التكلفة","type":"text",
+    /// "required":false,"options":[]}]</c></para>
+    /// </summary>
+    public string AccountFieldDefsJson { get; set; } = "[]";
+
     public bool IsActive { get; set; } = true;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
@@ -1905,6 +1924,15 @@ public class Account
     /// بيع في المحلّ — والمستخدم لا يعرف ذلك وهو يضغط «حذف».</para>
     /// </summary>
     public bool IsSystem { get; set; }
+
+    /// <summary>
+    /// قيم الحقول الإضافية لهذا الحساب — JSON بمفاتيح التعريفات.
+    ///
+    /// <para>راجع <see cref="Organization.AccountFieldDefsJson"/>. ومفتاحٌ
+    /// لا تعريف له يُتجاهَل عند القراءة: حقلٌ حُذف من التعريفات لا يجوز أن
+    /// يُسقط شاشةً بقيمةٍ يتيمة بقيت في صفّ.</para>
+    /// </summary>
+    public string CustomFieldsJson { get; set; } = "{}";
 
     public bool IsActive { get; set; } = true;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;

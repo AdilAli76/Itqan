@@ -2734,6 +2734,34 @@ END
 GO
 
 -- ----------------------------------------------------------------------------
+--  حقولٌ إضافية على حسابات الدليل
+--
+--  ما يحتاجه الحساب يختلف بالنشاط: مقاولاتٌ تريد «مركز التكلفة»، وجهةٌ
+--  متعدّدة العملات تريد «عملة الحساب»، ومكتبٌ يريد رقم الحساب في نظامه
+--  القديم ليطابق. وعمودٌ لكل واحدة يعني هجرةً لكل عميل.
+--
+--  فالتعريفات على المنظمة (تُكتب مرّة وتُقرأ في كل نموذج)، والقيم على
+--  الحساب. وكلاهما JSON: قيمُ عرضٍ لا يُستعلَم عنها ولا تُفهرَس.
+-- ----------------------------------------------------------------------------
+IF NOT EXISTS (SELECT 1 FROM sys.columns
+               WHERE object_id = OBJECT_ID('dbo.organizations') AND name = 'account_field_defs_json')
+BEGIN
+    ALTER TABLE dbo.organizations ADD account_field_defs_json NVARCHAR(MAX) NOT NULL
+        CONSTRAINT DF_org_account_field_defs DEFAULT N'[]';
+    PRINT N'أُضيف عمود organizations.account_field_defs_json';
+END
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.columns
+               WHERE object_id = OBJECT_ID('dbo.accounts') AND name = 'custom_fields_json')
+BEGIN
+    ALTER TABLE dbo.accounts ADD custom_fields_json NVARCHAR(MAX) NOT NULL
+        CONSTRAINT DF_accounts_custom_fields DEFAULT N'{}';
+    PRINT N'أُضيف عمود accounts.custom_fields_json';
+END
+GO
+
+-- ----------------------------------------------------------------------------
 --  فهارس الأداء — ملف منفصل لأنه يُنفَّذ ويُعاد بلا خطر
 -- ----------------------------------------------------------------------------
 PRINT N'لا تنسَ تنفيذ docs\INDEXES.sql على هذه القاعدة أيضاً.';

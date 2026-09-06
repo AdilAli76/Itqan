@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import '../../../shared/widgets/adaptive_dialog.dart';
@@ -11,6 +13,7 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_text_styles.dart';
 import '../../../shared/widgets/app_surface.dart';
 import '../data/accounting_providers.dart';
+import 'account_fields_dialog.dart';
 import 'account_statement_dialog.dart';
 import 'import_accounts_dialog.dart';
 import 'accounting_print.dart';
@@ -161,6 +164,24 @@ class _ChartTab extends ConsumerWidget {
                       },
                       icon: const Icon(Icons.table_chart_outlined, size: 18),
                       label: const Text('استيراد/تصدير الدليل'),
+                    ),
+                  ),
+                ),
+              if (ref.perms.isSuperAdmin)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Align(
+                    alignment: AlignmentDirectional.centerStart,
+                    child: OutlinedButton.icon(
+                      onPressed: () async {
+                        final changed = await showDialog<bool>(
+                          context: context,
+                          builder: (_) => const AccountFieldsDialog(),
+                        );
+                        if (changed == true) ref.invalidate(chartOfAccountsProvider);
+                      },
+                      icon: const Icon(Icons.tune_outlined, size: 18),
+                      label: const Text('الحقول الإضافية'),
                     ),
                   ),
                 ),
@@ -1661,8 +1682,45 @@ class _AccountFormDialogState extends State<_AccountFormDialog> {
   late final _name = TextEditingController(text: widget.account['name'] as String? ?? '');
   late bool _active = widget.account['isActive'] as bool? ?? true;
 
+  /// تعريفات الحقول الإضافية للمنظمة — تُقرأ عند الفتح لا مرّةً في الشجرة:
+  /// النموذج قد يُفتح بعد أن غيّرها المالك في نافذةٍ أخرى.
+  List<Map<String, dynamic>> _defs = [];
+  late final Map<String, String> _values = _readValues();
+
   bool _busy = false;
   String? _error;
+
+  Map<String, String> _readValues() {
+    final raw = widget.account['customFields'];
+    if (raw is! String || raw.isEmpty) return {};
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map) return {};
+      return decoded.map((k, v) => MapEntry('$k', v == null ? '' : '$v'));
+    } catch (_) {
+      // نصٌّ تالف في عمود قيمٍ لا يمنع تعديل اسم الحساب.
+      return {};
+    }
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _loadDefs();
+  }
+
+  Future<void> _loadDefs() async {
+    try {
+      final response = await ApiClient.instance.dio.get('/accounting/account-fields');
+      if (!mounted) return;
+      setState(() => _defs = (response.data as List)
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList());
+    } catch (_) {
+      // تعذّر تحميل التعريفات يُخفي الحقول الإضافية ولا يمنع الحفظ: تعديل
+      // اسمٍ لا يجوز أن يتوقّف على نداءٍ ثانوي.
+    }
+  }
 
   @override
   void dispose() {
@@ -1714,6 +1772,10 @@ class _AccountFormDialogState extends State<_AccountFormDialog> {
               style: AppTextStyles.labelMd(),
             ),
           ),
+          for (final def in _defs) ...[
+            const SizedBox(height: 12),
+            _customField(def),
+          ],
           if (_error != null) ...[
             const SizedBox(height: 8),
             Text(_error!, style: AppTextStyles.bodyMd(color: AppColors.danger)),
@@ -1723,7 +1785,52 @@ class _AccountFormDialogState extends State<_AccountFormDialog> {
     );
   }
 
+  /// حقلٌ عرّفه مالك المنظمة — راجع [AccountFieldsDialog].
+  Widget _customField(Map<String, dynamic> def) {
+    final key = def['key'] as String? ?? '';
+    final label = def['label'] as String? ?? '';
+    final required = def['required'] as bool? ?? false;
+    final type = def['type'] as String? ?? 'text';
+    final title = required ? '$label *' : label;
+
+    if (type == 'select') {
+      final options = (def['options'] as List? ?? const []).map((e) => '$e').toList();
+      final current = _values[key];
+      return DropdownButtonFormField<String>(
+        isExpanded: true,
+        // قيمةٌ محفوظة حُذفت من الخيارات لا تُسقط القائمة: تُعرَض فارغةً
+        // ويعيد المستخدم اختيارها.
+        initialValue: options.contains(current) ? current : null,
+        decoration: InputDecoration(labelText: title),
+        items: [for (final option in options) DropdownMenuItem(value: option, child: Text(option))],
+        onChanged: (v) => setState(() => _values[key] = v ?? ''),
+      );
+    }
+
+    return TextFormField(
+      initialValue: _values[key] ?? '',
+      keyboardType: type == 'number'
+          ? const TextInputType.numberWithOptions(decimal: true)
+          : TextInputType.text,
+      decoration: InputDecoration(
+        labelText: title,
+        hintText: type == 'date' ? 'YYYY-MM-DD' : null,
+      ),
+      onChanged: (v) => _values[key] = v,
+    );
+  }
+
   Future<void> _save() async {
+    // الإلزامي يُفحَص هنا لا في الخادم: الخادم يحفظ ما أُرسل، والقاعدة
+    // «إلزامي» قاعدةُ إدخالٍ يقرّرها مالك المنظمة لشاشته.
+    for (final def in _defs) {
+      if ((def['required'] as bool? ?? false) &&
+          (_values[def['key'] as String? ?? ''] ?? '').trim().isEmpty) {
+        setState(() => _error = '«${def['label']}» حقل إلزامي');
+        return;
+      }
+    }
+
     setState(() {
       _busy = true;
       _error = null;
@@ -1735,6 +1842,7 @@ class _AccountFormDialogState extends State<_AccountFormDialog> {
           'code': _code.text.trim(),
           'name': _name.text.trim(),
           'isActive': _active,
+          'customFields': _values,
         },
       );
       if (mounted) Navigator.pop(context, true);

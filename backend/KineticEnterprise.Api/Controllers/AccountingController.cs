@@ -13,7 +13,9 @@ public record AccountDto(
     Guid Id, string Code, string Name, Guid? ParentId, string Type,
     bool IsPostable, bool IsSystem, bool IsActive,
     /// رصيد الحساب شاملاً أبناءه — الشجرة تُقرأ مجمَّعةً ومفصَّلةً معاً.
-    decimal Balance);
+    decimal Balance,
+    /// قيم الحقول الإضافية — JSON كما هو، تفكّه الشاشة بتعريفاتها.
+    string CustomFields = "{}");
 
 public record CreateAccountRequest(string Code, string Name, Guid? ParentId);
 
@@ -22,7 +24,11 @@ public record CreateAccountRequest(string Code, string Name, Guid? ParentId);
 /// ويُرتَّب به الدليل، وتغييرُه بعد الترحيل يجعل تقرير الشهر الماضي يذكر
 /// رمزاً لا وجود له.
 /// </param>
-public record UpdateAccountRequest(string Code, string Name, bool IsActive);
+public record UpdateAccountRequest(
+    string Code, string Name, bool IsActive,
+    /// قيم الحقول الإضافية بمفاتيح تعريفات المنظمة — راجع
+    /// [AccountFieldsController]. NULL = لا تُمسّ القيم المحفوظة.
+    Dictionary<string, string>? CustomFields = null);
 
 /// <param name="Balance">الرصيد قبل الفترة — بإشارة طبيعة الحساب.</param>
 public record AccountStatementLine(
@@ -159,7 +165,8 @@ public class AccountingController : ControllerBase
         return accounts.Select(a => new AccountDto(
             a.Id, a.Code, a.Name, a.ParentId, a.Type,
             a.IsPostable, a.IsSystem, a.IsActive,
-            totals.GetValueOrDefault(a.Id))).ToList();
+            totals.GetValueOrDefault(a.Id),
+            a.CustomFieldsJson)).ToList();
     }
 
     /// <summary>
@@ -361,7 +368,9 @@ public class AccountingController : ControllerBase
             .Where(a => a.ParentId == id)
             .OrderBy(a => a.Code)
             .Select(a => new AccountDto(a.Id, a.Code, a.Name, a.ParentId, a.Type,
-                a.IsPostable, a.IsSystem, a.IsActive, 0))
+                // القيمة الأخيرة صريحة: شجرةُ التعبير في EF لا تقبل وسيطاً
+                // اختيارياً متروكاً.
+                a.IsPostable, a.IsSystem, a.IsActive, 0, a.CustomFieldsJson))
             .ToListAsync();
 
         return new AccountStatementDto(
@@ -418,6 +427,15 @@ public class AccountingController : ControllerBase
         account.Code = code;
         account.Name = name;
         account.IsActive = request.IsActive;
+
+        // القيم تُكتب كما جاءت بمفاتيحها: التحقّق من التعريفات يقع في
+        // الشاشة التي ترسمها، والخادم يحفظ ما أُرسل ويتجاهل عند القراءة ما
+        // لا تعريف له. وحقلٌ حُذف تعريفه تبقى قيمته محفوظة — من حذفه بالخطأ
+        // يُعيده فيجد ما كُتب.
+        if (request.CustomFields is not null)
+        {
+            account.CustomFieldsJson = System.Text.Json.JsonSerializer.Serialize(request.CustomFields);
+        }
 
         _db.LogAudit(account.OrganizationId, CurrentUserId(), "account.updated", "accounts", account.Id,
             oldValues: old, newValues: new { account.Code, account.Name, account.IsActive });
