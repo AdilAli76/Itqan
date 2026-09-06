@@ -206,6 +206,50 @@ public static class SpreadsheetReader
         return sb.ToString().TrimEnd();
     }
 
+    /// <summary>كلمات الوصف التي يسبق بها الناس الاسم — تُسقَط في [FoldLoose] وحده.</summary>
+    static readonly string[] LabelWords =
+    {
+        "الفئة", "فئة", "التصنيف", "تصنيف", "الدرجة", "درجة", "الفرع", "فرع",
+        "category", "grade", "branch", "class",
+    };
+
+    /// <summary>
+    /// طيٌّ أوسع من <see cref="Fold"/>: يُسقط كلمة الوصف البادئة و«ال»
+    /// التعريف.
+    ///
+    /// <para><b>العطب الذي يمنعه:</b> الإدارة تسمّي الفئة «ب» في الشاشة،
+    /// ومن يعبّئ كشف المنتسبين يكتب في عمود «الفئة» كلمة «الفئة ب» — وهما
+    /// عنده شيءٌ واحد، فيسقط ملفُه كلّه. و<see cref="Fold"/> وحده لا يمسك
+    /// هذه لأن الفرق ليس في رسم الحرف بل في كلمةٍ زائدة.</para>
+    ///
+    /// <para><b>ولا يُطابَق به إلا اسمٌ واحد:</b> الفئة تحمل مرتَّباً،
+    /// وإسنادُ منتسبٍ إلى فئةٍ بمرتَّبٍ آخر خطأٌ لا يظهر إلا في كشف الصرف
+    /// بعد شهر. فحين يطويه اسمان إلى مفتاحٍ واحد — «أ» و«الفئة أ» مثلاً —
+    /// يُرفض الصفّ كما لو لم يُطابِق شيئاً، فيرى صاحبه الأسماء المعرَّفة
+    /// ويختار بنفسه.</para>
+    /// </summary>
+    public static string FoldLoose(string? value)
+    {
+        var key = Fold(value);
+        if (key.Length == 0) return key;
+
+        foreach (var word in LabelWords)
+        {
+            var prefix = Fold(word) + " ";
+            if (key.Length > prefix.Length && key.StartsWith(prefix, StringComparison.Ordinal))
+            {
+                key = key[prefix.Length..];
+                break;
+            }
+        }
+
+        // «ال» التعريف: «الرئيسي» و«رئيسي» فرعٌ واحد. والشرط على الطول يمنع
+        // ابتلاع اسمٍ قصيرٍ كـ«الف».
+        if (key.Length > 3 && key.StartsWith("ال", StringComparison.Ordinal)) key = key[2..];
+
+        return key;
+    }
+
     /// <summary>
     /// مقارِن مفاتيح الأعمدة: يطوي العربية قبل المقارنة — راجع [Fold].
     /// وهو مقارِن القاموس نفسه لا فحصٌ إضافي، فتستفيد منه كل عمليات
