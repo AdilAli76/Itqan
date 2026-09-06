@@ -142,6 +142,12 @@ class _AppShellState extends ConsumerState<AppShell> {
     CommandPalette.show(context, isPlatformAdmin: _isPlatformAdmin);
   }
 
+  /// مهلة الضغطتين — ومدّة الرسالة نفسها، فلا تختفي قبل أن تنتهي فرصتها.
+  static const _exitWindow = Duration(seconds: 2);
+
+  /// وقت آخر ضغطة رجوع بلا ما يُرجع إليه.
+  DateTime? _lastBackAt;
+
   Future<void> _logout() async {
     // إغلاق الاتصال اللحظي قبل مسح التوكن — تركه مفتوحاً يعني بقاء قناة
     // مصرَّح لها بعد خروج المستخدم حتى تنتهي مهلة الخادم.
@@ -179,21 +185,69 @@ class _AppShellState extends ConsumerState<AppShell> {
     // المشترك لكل التبويبات، فيلتقط Ctrl+K أياً كانت الشاشة النشطة —
     // بشرط ألّا يكون الفوكس داخل حقل نصّي يستهلك الضغطة أولاً، وهو ما
     // يضمنه Shortcuts تلقائياً.
-    return CallbackShortcuts(
-      bindings: {
-        const SingleActivator(LogicalKeyboardKey.keyK, control: true): _openPalette,
-        // Cmd+K على macOS — نفس الاختصار الذي اعتاده المستخدم هناك.
-        const SingleActivator(LogicalKeyboardKey.keyK, meta: true): _openPalette,
+    // <summary>
+    // زرّ الرجوع في الهاتف كان يُغلق التطبيق من أوّل ضغطة — شكوى زبون.
+    //
+    // <para><b>السبب:</b> بعد الدخول لا مسار في الموجّه إلا <c>/app</c>
+    // وحده؛ التنقّل كلّه بين تبويبات في الذاكرة (راجع [openTabsProvider]).
+    // فلا يجد النظام ما يرجع إليه، فيُسلّم الضغطة إلى أندرويد — وأندرويد
+    // يفهمها «اخرج».</para>
+    //
+    // <para><b>والخروج لا يكون بضغطةٍ واحدة أبداً:</b> ولو لم يبقَ ما
+    // يُرجع إليه. كاشيرٌ يضغط رجوع بالخطأ في منتصف فاتورة كان يفقدها.</para>
+    // </summary>
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) return;
+        _handleBack();
       },
-      child: Focus(
-        autofocus: true,
-        // RealtimeListener هنا لا داخل كل شاشة: التبويب الخلفي يجب أن يتحدّث
-        // أيضاً، وإلا عاد المستخدم إليه ليجد بيانات قديمة بلا أي إشارة.
-        child: RealtimeListener(
-          child: _buildScaffold(context, tabsState, isDesktop, useSidebar, useNavbar, tabBar, content),
+      child: CallbackShortcuts(
+        bindings: {
+          const SingleActivator(LogicalKeyboardKey.keyK, control: true): _openPalette,
+          // Cmd+K على macOS — نفس الاختصار الذي اعتاده المستخدم هناك.
+          const SingleActivator(LogicalKeyboardKey.keyK, meta: true): _openPalette,
+        },
+        child: Focus(
+          autofocus: true,
+          // RealtimeListener هنا لا داخل كل شاشة: التبويب الخلفي يجب أن
+          // يتحدّث أيضاً، وإلا عاد المستخدم إليه ليجد بيانات قديمة بلا إشارة.
+          child: RealtimeListener(
+            child: _buildScaffold(context, tabsState, isDesktop, useSidebar, useNavbar, tabBar, content),
+          ),
         ),
       ),
     );
+  }
+
+  /// <summary>
+  /// ما تفعله ضغطة الرجوع: التبويب السابق، ثم الأوّل، ثم تأكيد الخروج.
+  ///
+  /// <para>والتأكيد ليس حوار «هل أنت متأكد؟» بل ضغطتان متتاليتان — أسرع
+  /// لمن يريد الخروج فعلاً، ويكفي لمن لم يُرده.</para>
+  /// </summary>
+  void _handleBack() {
+    if (ref.read(openTabsProvider.notifier).back()) return;
+
+    final tabsState = ref.read(openTabsProvider);
+    final first = tabsState.tabs.isEmpty ? null : tabsState.tabs.first.route;
+    if (first != null && tabsState.activeRoute != first) {
+      ref.read(openTabsProvider.notifier).activate(first);
+      return;
+    }
+
+    final now = DateTime.now();
+    final last = _lastBackAt;
+    if (last != null && now.difference(last) < _exitWindow) {
+      SystemNavigator.pop();
+      return;
+    }
+
+    _lastBackAt = now;
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+      content: Text('اضغط رجوع مرّةً أخرى للخروج'),
+      duration: _exitWindow,
+    ));
   }
 
   Widget _buildScaffold(
