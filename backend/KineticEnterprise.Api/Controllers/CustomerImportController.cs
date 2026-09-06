@@ -79,16 +79,36 @@ public class CustomerImportController : ControllerBase
         var orgId = Guid.Parse(User.FindFirstValue("organization_id")!);
 
         // القوائم الحالية مرّةً واحدة — ملفٌ بألف صفّ كان سيُنتج ألفَي استعلام.
-        var existingByPhone = await _db.Customers
+        // **لا `ToDictionaryAsync` على الهاتف:** لا قيد فريد عليه في المخطّط،
+        // وعميلان بهاتفٍ واحد (أخوان، أو رقم المحلّ أُدخل مرّتين) كانا يرميان
+        // استثناءً **قبل قراءة صفٍّ واحد** — فيرى المستخدم «تعذّرت العملية»
+        // بلا معاينة ولا سبب. والأقدم يفوز: هو الذي بُنيت عليه الحركات.
+        var existingByPhone = new Dictionary<string, Customer>();
+        foreach (var c in await _db.Customers
             .Where(c => !c.IsDeleted && c.Phone != null && c.Phone != "")
-            .ToDictionaryAsync(c => c.Phone!, c => c);
+            .OrderBy(c => c.CreatedAt)
+            .ToListAsync())
+        {
+            existingByPhone.TryAdd(c.Phone!, c);
+        }
 
-        var categories = await _db.CustomerCategories
-            .Where(c => c.IsActive)
-            .ToDictionaryAsync(c => c.Name.Trim().ToLower(), c => c);
+        // الفئة والفرع يُطابَقان بطيّ العربية لا بـ`ToLower` وحده — راجع
+        // [SpreadsheetReader.Fold]. من كتب «فئه أ» أو «الفرع الرئيسى» كان
+        // يُرفض صفُّه وهو يرى الاسم نفسه أمامه على الشاشة.
+        var categories = new Dictionary<string, CustomerCategory>();
+        foreach (var c in await _db.CustomerCategories.Where(c => c.IsActive).ToListAsync())
+            categories.TryAdd(SpreadsheetReader.Fold(c.Name), c);
 
-        var branches = await _db.Branches
-            .ToDictionaryAsync(b => b.Name.Trim().ToLower(), b => b.Id);
+        var branches = new Dictionary<string, Guid>();
+        foreach (var b in await _db.Branches.ToListAsync())
+            branches.TryAdd(SpreadsheetReader.Fold(b.Name), b.Id);
+
+        // أسماء العرض كما كُتبت في النظام — تُذكَر في رسالة الخطأ ليقارن
+        // المستخدم بما في ملفه بدل أن يخمّن الصيغة المقبولة.
+        var definedCategoryNames = categories.Values.Select(c => c.Name).OrderBy(n => n).ToList();
+        var definedBranchNames = branches.Count == 0
+            ? new List<string>()
+            : await _db.Branches.OrderBy(b => b.Name).Select(b => b.Name).ToListAsync();
 
         var unknownCategories = new List<string>();
         var results = new List<CustomerImportRowResult>();
@@ -102,12 +122,17 @@ public class CustomerImportController : ControllerBase
             var row = rows[i];
             var rowNumber = i + 2; // +1 لسطر العناوين، +1 لأن الترقيم يبدأ من 1
 
-            var name = SpreadsheetReader.Value(row, "الاسم", "اسم العميل", "الاسم الكامل", "المنتسب", "name", "full_name");
-            var phone = SpreadsheetReader.Value(row, "الهاتف", "رقم الهاتف", "الجوال", "phone", "mobile");
-            var categoryName = SpreadsheetReader.Value(row, "الفئة", "التصنيف", "category", "grade");
+            var name = SpreadsheetReader.Value(row, "الاسم", "اسم العميل", "الاسم الكامل",
+                "المنتسب", "اسم المنتسب", "العميل", "الزبون", "الموظف", "اسم", "الاسم الثلاثي",
+                "name", "full_name", "customer", "customer_name");
+            var phone = SpreadsheetReader.Value(row, "الهاتف", "رقم الهاتف", "الجوال",
+                "رقم الجوال", "الموبايل", "التلفون", "هاتف", "phone", "mobile", "phone_number", "tel");
+            var categoryName = SpreadsheetReader.Value(row, "الفئة", "التصنيف", "الدرجة",
+                "category", "grade", "class");
             var branchName = SpreadsheetReader.Value(row, "الفرع", "branch");
-            var note = SpreadsheetReader.Value(row, "ملاحظات", "ملاحظة", "notes", "note");
-            var overrideRaw = SpreadsheetReader.Value(row, "المبلغ", "مبلغ خاص", "المرتب", "amount", "override");
+            var note = SpreadsheetReader.Value(row, "ملاحظات", "ملاحظة", "البيان", "notes", "note");
+            var overrideRaw = SpreadsheetReader.Value(row, "المبلغ", "مبلغ خاص", "المرتب",
+                "الراتب", "الاستحقاق", "amount", "override", "salary");
 
             // صفّ المثال من القالب يُخطَّى قبل أي تحقّق — راجع
             // [SpreadsheetReader.IsExampleRow]. وفحصُه بعد التحقّق كان يعني
@@ -136,12 +161,15 @@ public class CustomerImportController : ControllerBase
             CustomerCategory? category = null;
             if (!string.IsNullOrWhiteSpace(categoryName))
             {
-                if (!categories.TryGetValue(categoryName.Trim().ToLower(), out category))
+                if (!categories.TryGetValue(SpreadsheetReader.Fold(categoryName), out category))
                 {
                     if (!unknownCategories.Contains(categoryName)) unknownCategories.Add(categoryName);
                     results.Add(new CustomerImportRowResult(
                         rowNumber, name, phone, categoryName, "خطأ",
-                        $"الفئة «{categoryName}» غير معرَّفة — أنشئها بمرتَّبها أولاً"));
+                        $"الفئة «{categoryName}» غير معرَّفة — أنشئها بمرتَّبها أولاً"
+                        + (definedCategoryNames.Count > 0
+                            ? $"، أو استعمل إحدى المعرَّفة: {string.Join("، ", definedCategoryNames)}"
+                            : "")));
                     continue;
                 }
             }
@@ -149,10 +177,11 @@ public class CustomerImportController : ControllerBase
             Guid? branchId = null;
             if (!string.IsNullOrWhiteSpace(branchName))
             {
-                if (!branches.TryGetValue(branchName.Trim().ToLower(), out var found))
+                if (!branches.TryGetValue(SpreadsheetReader.Fold(branchName), out var found))
                 {
                     results.Add(new CustomerImportRowResult(
-                        rowNumber, name, phone, categoryName, "خطأ", $"الفرع «{branchName}» غير موجود"));
+                        rowNumber, name, phone, categoryName, "خطأ",
+                        $"الفرع «{branchName}» غير موجود — الفروع المعرَّفة: {string.Join("، ", definedBranchNames)}"));
                     continue;
                 }
                 branchId = found;
@@ -180,12 +209,12 @@ public class CustomerImportController : ControllerBase
                 existing.BranchId = branchId ?? existing.BranchId;
                 if (entitlementOverride is not null) existing.EntitlementOverride = entitlementOverride;
                 if (!string.IsNullOrWhiteSpace(note)) existing.Notes = note;
-                // نموذج الحساب لا يُقلَب على من له رصيدٌ مدفوع: قلبُه إلى
-                // استحقاق يُعرّض رصيده للإسقاط عند انتهاء الفترة.
-                if (isEntitlement && existing.AccountModel == AccountModels.Entitlement)
-                {
-                    existing.AccountModel = AccountModels.Entitlement;
-                }
+                // **ونموذج الحساب لا يُمسّ على القائم** — ولو أسند الملف فئة.
+                // قلبُ مدفوعٍ مقدماً إلى استحقاق يُعرّض رصيده المدفوع
+                // للإسقاط عند انتهاء الفترة، ومَن يريد القلب يفعله من شاشة
+                // العميل حيث يرى الرصيد أمامه. (كان هنا شرطٌ يُسند القيمة
+                // إلى نفسها، فالحماية المكتوبة في التعليق لم تكن مطبَّقة
+                // ولا مخروقة — سطرٌ لا أثر له يوهم القارئ أن الأمر محسوم.)
 
                 toUpdate.Add(existing);
                 results.Add(new CustomerImportRowResult(rowNumber, name, phone, categoryName, "تحديث", null));
@@ -205,6 +234,24 @@ public class CustomerImportController : ControllerBase
                 });
                 results.Add(new CustomerImportRowResult(rowNumber, name, phone, categoryName, "إنشاء", null));
             }
+        }
+
+        // **عمود الاسم غير معروف: سببٌ واحد يظهر ألف مرّة.** ملفٌ عنوانه
+        // «أسماء المنتسبين» أو فيه سطر عنوانٍ فوق سطر العناوين يُقرأ كلّه
+        // بلا اسم، فيخرج كل صفّ أحمرَ بـ«الاسم مطلوب» واسمٍ فارغ — ومن يرى
+        // ألف خطأ متطابق لا يستنتج منها أن المشكلة في سطرٍ واحد أعلى الملف.
+        // فتُقال المشكلة مرّة، وتُذكر الأعمدة التي قُرئت فعلاً ليقارنها.
+        if (results.Count > 0 && results.All(r => r.Error == "الاسم مطلوب"))
+        {
+            var found = rows[0].Keys.Where(k => !string.IsNullOrWhiteSpace(k)).ToList();
+            return BadRequest(new
+            {
+                message = "لم يُعرَف عمود الأسماء في الملف — سمِّه «الاسم». "
+                    + (found.Count > 0
+                        ? $"الأعمدة المقروءة: {string.Join(" · ", found)}."
+                        : "ولم يُقرأ أي عنوان عمود — تأكّد أن السطر الأول عناوينُ لا عنوانٌ للكشف.")
+                    + " والأعمدة المقبولة: الاسم · الهاتف · الفئة · الفرع · المبلغ · ملاحظات."
+            });
         }
 
         // ملفٌ ليس فيه إلا المثال: رسالةٌ تقول ما العمل، لا معاينةٌ فارغة

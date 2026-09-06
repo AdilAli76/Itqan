@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 using ClosedXML.Excel;
 
 namespace KineticEnterprise.Api.Data;
@@ -46,7 +46,7 @@ public static class SpreadsheetReader
 
         foreach (var row in rows.Skip(1).Take(MaxRows))
         {
-            var record = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            var record = new Dictionary<string, string>(HeaderComparer.Instance);
             for (var i = 0; i < headers.Count; i++)
             {
                 if (string.IsNullOrWhiteSpace(headers[i])) continue;
@@ -81,7 +81,7 @@ public static class SpreadsheetReader
         {
             if (string.IsNullOrWhiteSpace(line)) continue;
             var cells = SplitCsvLine(line, separator);
-            var record = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            var record = new Dictionary<string, string>(HeaderComparer.Instance);
             for (var i = 0; i < headers.Count && i < cells.Count; i++)
             {
                 if (string.IsNullOrWhiteSpace(headers[i])) continue;
@@ -149,6 +149,75 @@ public static class SpreadsheetReader
     static string Normalize(string value) =>
         value.Replace("‏", "").Replace("‎", "").Replace("﻿", "").Trim();
 
+    /// <summary>
+    /// توحيد نصٍّ عربي للمطابقة وحدها — لا للعرض ولا للتخزين.
+    ///
+    /// <para><b>العطب الذي يمنعه:</b> عناوين الأعمدة وأسماء الفئات والفروع
+    /// يكتبها إنسانٌ في إكسل، لا واجهةٌ برمجية. فمن كتب «الإسم» بهمزة —
+    /// وهي أشيع من «الاسم» في كشوف الجهات — كان يُطابَق حرفياً فلا يُطابِق،
+    /// فيخرج عمود الأسماء غير معروف، **فيفشل كل صفٍّ في الملف** برسالة
+    /// «الاسم مطلوب» واسمٍ فارغ. ومن رفع ملفاً كهذا يرى ألف خطأ لا يدلّ
+    /// أيٌّ منها على السبب الواحد.</para>
+    ///
+    /// <para>فتُوحَّد صور الهمزة والألف، والتاء المربوطة بالهاء، والألف
+    /// المقصورة بالياء، وتُحذف الحركات والتطويل، وتُحوَّل الأرقام
+    /// العربية-الهندية، وتُطوى المسافات المتكرّرة والمسافة غير الفاصلة.</para>
+    /// </summary>
+    public static string Fold(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return "";
+
+        var sb = new StringBuilder(value.Length);
+        var lastWasSpace = true; // يبتلع مسافات البداية
+
+        foreach (var raw in Normalize(value))
+        {
+            var c = raw;
+
+            // الحركات والتطويل: زينةٌ في الكتابة لا معنى لها في المطابقة.
+            if (c == 'ـ') continue;                       // تطويل
+            if (c >= 'ً' && c <= 'ْ') continue;      // فتحة..سكون
+            if (c == 'ٰ' || c == 'ٓ' || c == 'ٔ' || c == 'ٕ') continue;
+
+            c = c switch
+            {
+                'أ' or 'إ' or 'آ' or 'ٱ' => 'ا', // أ إ آ ٱ => ا
+                'ة' => 'ه',                                     // ة => ه
+                'ى' => 'ي',                                     // ى => ي
+                'ؤ' => 'و',                                     // ؤ => و
+                'ئ' => 'ي',                                     // ئ => ي
+                _ => c,
+            };
+
+            if (c >= '٠' && c <= '٩') c = (char)(c - '٠' + '0'); // ٠-٩
+            else if (c >= '۰' && c <= '۹') c = (char)(c - '۰' + '0'); // ۰-۹
+
+            // المسافة غير الفاصلة تأتي من النسخ عن الويب ولا تُرى بالعين.
+            if (char.IsWhiteSpace(c) || c == ' ')
+            {
+                if (!lastWasSpace) { sb.Append(' '); lastWasSpace = true; }
+                continue;
+            }
+
+            sb.Append(char.ToLowerInvariant(c));
+            lastWasSpace = false;
+        }
+
+        return sb.ToString().TrimEnd();
+    }
+
+    /// <summary>
+    /// مقارِن مفاتيح الأعمدة: يطوي العربية قبل المقارنة — راجع [Fold].
+    /// وهو مقارِن القاموس نفسه لا فحصٌ إضافي، فتستفيد منه كل عمليات
+    /// الاستيراد بلا أن تعرف به.
+    /// </summary>
+    public sealed class HeaderComparer : IEqualityComparer<string>
+    {
+        public static readonly HeaderComparer Instance = new();
+        public bool Equals(string? x, string? y) => Fold(x) == Fold(y);
+        public int GetHashCode(string obj) => Fold(obj).GetHashCode();
+    }
+
     /// <summary>البادئة التي تُعلَّم بها صفوف المثال في كل القوالب.</summary>
     public const string ExamplePrefix = "مثال:";
 
@@ -206,12 +275,20 @@ public static class SpreadsheetReader
         }
 
         var cleaned = sb.ToString();
-        // فواصل آلاف متعددة: 1.234.567 => 1234567
+        // فواصل الآلاف: لا عدد فيه فاصلتان عشريّتان، فتعدّدها يعني تجميعاً
+        // لا كسراً. والمجموعة الأخيرة تحسم: ثلاثة أرقام بعد آخر فاصلة
+        // (1.234.567) تجميعٌ كلّه، وغيرها (1.234.567,89) كسرٌ بعد تجميع.
+        //
+        // وكان الحاصل قبلها أن الفاصلة الأخيرة تُعدّ عشرية دائماً، فمرتَّبٌ
+        // كُتب «1.234.567» يُقرأ ألفاً ومئتين — والتعليق يَعِد بغير ما يفعل.
         var dots = cleaned.Count(c => c == '.');
         if (dots > 1)
         {
             var lastDot = cleaned.LastIndexOf('.');
-            cleaned = cleaned[..lastDot].Replace(".", "") + cleaned[lastDot..];
+            var tail = cleaned[(lastDot + 1)..];
+            cleaned = tail.Length == 3
+                ? cleaned.Replace(".", "")
+                : cleaned[..lastDot].Replace(".", "") + cleaned[lastDot..];
         }
 
         return decimal.TryParse(cleaned, System.Globalization.NumberStyles.Any,
