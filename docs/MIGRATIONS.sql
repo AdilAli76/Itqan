@@ -2677,6 +2677,63 @@ END
 GO
 
 -- ----------------------------------------------------------------------------
+--  حسابُ النظام هو ما يُربَط بدور — لا كل حساب مبذور
+--
+--  كان البذر يختم **كل** حسابات الدليل الافتراضي بـ is_system، بحجّة أن
+--  الترحيل الآلي يعتمد عليها. وهو صحيحٌ في الحسابات المربوطة بأدوار
+--  (المبيعات، الصندوق، المخزون، الموردون…) وغيرُ صحيح في البقيّة:
+--  «أثاث ومعدّات» و«إيجارات» و«كهرباء وماء» لا يمسّها ترحيلٌ ولا بيع.
+--
+--  والأثر لم يكن نظرياً: حسابُ النظام لا يُعاد تسميته ولا يُعطَّل ولا
+--  يُغيَّر نوعه ولا يُحذف — فصار الدليل كلّه مقفلاً، ولا تستطيع جهةٌ أن
+--  تُرتّب شجرتها على نشاطها ولا أن تستورد دليل بلدها فوقها.
+--
+--  فيُرفَع الختم عمّا لا دور له. وما له دور يبقى محميّاً.
+-- ----------------------------------------------------------------------------
+--  ⚠ ويمرّ على المنظمات واحدةً واحدة ضابطاً SESSION_CONTEXT: جداول
+--  الحسابات تحت سياسة عزل، وتحديثٌ بلا سياق **لا يمسّ صفّاً واحداً**
+--  ويمرّ ناجحاً — وهو أسوأ من فشلٍ ظاهر. و platform_organizations وحده
+--  المعفى من العزل، فهو المصدر لقائمة المنظمات (نفس نهج المهام الليلية).
+IF EXISTS (SELECT 1 FROM sys.tables WHERE name = 'accounts')
+   AND EXISTS (SELECT 1 FROM sys.tables WHERE name = 'account_mappings')
+BEGIN
+    DECLARE @orgId UNIQUEIDENTIFIER;
+    DECLARE @relaxed INT = 0;
+
+    -- المصدر: سجلّ المنصّة **واتحاده مع** منظمات المستخدمين. كلا الجدولين
+    -- خارج سياسة العزل، وتثبيتٌ على أحدهما وحده يترك منظمةً أُنشئت بغير
+    -- الطريق المعتاد بلا ترحيل — وهو ما وقع في قاعدة اختبار فعلاً.
+    DECLARE org_cursor CURSOR LOCAL FAST_FORWARD FOR
+        SELECT id FROM dbo.platform_organizations
+        UNION
+        SELECT DISTINCT organization_id FROM dbo.app_users;
+
+    OPEN org_cursor;
+    FETCH NEXT FROM org_cursor INTO @orgId;
+
+    WHILE @@FETCH_STATUS = 0
+    BEGIN
+        EXEC sp_set_session_context @key = N'organization_id', @value = @orgId;
+
+        UPDATE a
+        SET is_system = 0
+        FROM dbo.accounts a
+        WHERE a.is_system = 1
+          AND NOT EXISTS (SELECT 1 FROM dbo.account_mappings m WHERE m.account_id = a.id);
+
+        SET @relaxed = @relaxed + @@ROWCOUNT;
+        FETCH NEXT FROM org_cursor INTO @orgId;
+    END
+
+    CLOSE org_cursor;
+    DEALLOCATE org_cursor;
+
+    EXEC sp_set_session_context @key = N'organization_id', @value = NULL;
+    PRINT N'رُفع ختم النظام عن ' + CAST(@relaxed AS NVARCHAR(10)) + N' حساباً لا دور له';
+END
+GO
+
+-- ----------------------------------------------------------------------------
 --  فهارس الأداء — ملف منفصل لأنه يُنفَّذ ويُعاد بلا خطر
 -- ----------------------------------------------------------------------------
 PRINT N'لا تنسَ تنفيذ docs\INDEXES.sql على هذه القاعدة أيضاً.';

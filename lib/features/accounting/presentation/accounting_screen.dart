@@ -12,6 +12,7 @@ import '../../../core/theme/app_text_styles.dart';
 import '../../../shared/widgets/app_surface.dart';
 import '../data/accounting_providers.dart';
 import 'account_statement_dialog.dart';
+import 'import_accounts_dialog.dart';
 import 'accounting_print.dart';
 
 final _money = NumberFormat('#,##0.00', 'en');
@@ -142,6 +143,27 @@ class _ChartTab extends ConsumerWidget {
             padding: const EdgeInsets.all(16),
             children: [
               _PrintBar(onPrint: () => printChartOfAccounts(ref)),
+              // الاستيراد للمدير العام وحده — والخادم يشترط الدور نفسه.
+              // ودليلٌ يدخل من ملف هو ما يجعل النظام صالحاً لأي بلد بلا
+              // انتظار إصدارٍ يضيف قالبه.
+              if (ref.perms.isSuperAdmin)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Align(
+                    alignment: AlignmentDirectional.centerStart,
+                    child: OutlinedButton.icon(
+                      onPressed: () async {
+                        final changed = await showDialog<bool>(
+                          context: context,
+                          builder: (_) => const ImportAccountsDialog(),
+                        );
+                        if (changed == true) ref.invalidate(chartOfAccountsProvider);
+                      },
+                      icon: const Icon(Icons.table_chart_outlined, size: 18),
+                      label: const Text('استيراد/تصدير الدليل'),
+                    ),
+                  ),
+                ),
               for (final root in children[null] ?? const <Map<String, dynamic>>[])
                 _AccountNode(
                   account: root,
