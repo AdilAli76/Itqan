@@ -17,6 +17,26 @@ public record AccountDto(
 
 public record CreateAccountRequest(string Code, string Name, Guid? ParentId);
 
+/// <param name="Code">
+/// رمزٌ جديد. يُقبل تغييره ما دام الحساب بلا قيود: الرمز يُقرأ في كل تقرير
+/// ويُرتَّب به الدليل، وتغييرُه بعد الترحيل يجعل تقرير الشهر الماضي يذكر
+/// رمزاً لا وجود له.
+/// </param>
+public record UpdateAccountRequest(string Code, string Name, bool IsActive);
+
+/// <param name="Balance">الرصيد قبل الفترة — بإشارة طبيعة الحساب.</param>
+public record AccountStatementLine(
+    DateTime Date, string Description, string Source, Guid EntryId,
+    decimal Debit, decimal Credit, decimal Balance);
+
+public record AccountStatementDto(
+    Guid AccountId, string Code, string Name, string Type, bool IsPostable,
+    DateTime From, DateTime To,
+    decimal OpeningBalance, decimal Debit, decimal Credit, decimal ClosingBalance,
+    List<AccountStatementLine> Lines,
+    /// حساباتٌ تحته — يُفتح منها ما يُرحَّل إليه فعلاً.
+    List<AccountDto> Children);
+
 public record JournalLineDto(Guid AccountId, string AccountCode, string AccountName,
     decimal Debit, decimal Credit, string? Note);
 
@@ -250,6 +270,221 @@ public class AccountingController : ControllerBase
 
         return new AccountDto(account.Id, account.Code, account.Name, account.ParentId,
             account.Type, account.IsPostable, account.IsSystem, account.IsActive, 0);
+    }
+
+    /// <summary>
+    /// كشف حساب واحد: رصيدٌ افتتاحي، ثم حركاته سطراً سطراً برصيدٍ متحرّك.
+    ///
+    /// <para><b>العطب الذي يصلحه:</b> الضغط على «الصندوق» في الشجرة كان
+    /// يفتح <b>دفتر اليومية</b> مُرشَّحاً عليه — أي كل القيود التي مسّته
+    /// بسطورها الأخرى (المبيعات، الضريبة، المخزون…). ومن يضغط على الصندوق
+    /// يسأل سؤالاً واحداً: «كم فيه، ومن أين جاء وإلى أين ذهب؟» — والدفتر
+    /// لا يجيبه: لا رصيد فيه ولا تسلسل، وسطور الحسابات الأخرى تُغرق ما
+    /// يبحث عنه.</para>
+    ///
+    /// <para><b>والرصيد المتحرّك هو الفرق كلّه:</b> كشفٌ بلا عمود رصيد
+    /// يُلزم قارئه بجمع عمودين بيده ليعرف كم كان في الصندوق يوم الثلاثاء.
+    /// </para>
+    ///
+    /// <para>والحساب الأب — الذي لا يُرحَّل إليه — يُفتح على أبنائه: لا
+    /// حركة له ليعرضها، وعرضُ فراغٍ لمن ضغط عليه يبدو عطلاً.</para>
+    /// </summary>
+    [HttpGet("accounts/{id:guid}/statement")]
+    public async Task<ActionResult<AccountStatementDto>> GetAccountStatement(
+        Guid id, [FromQuery] DateTime? from, [FromQuery] DateTime? to)
+    {
+        var account = await _db.Accounts.FirstOrDefaultAsync(a => a.Id == id);
+        if (account is null) return NotFound();
+
+        // الافتراضي هذا الشهر: أكثر سؤالٍ يُسأل عن حسابٍ هو «ماذا جرى فيه
+        // هذا الشهر»، وفتحُ العمر كلّه يجعل أوّل عرضٍ آلاف السطور.
+        var org = await _db.Organizations.FirstOrDefaultAsync();
+        var today = OrgClock.Today(org);
+        var start = (from ?? new DateTime(today.Year, today.Month, 1)).Date;
+        var end = (to ?? today).Date.AddDays(1).AddTicks(-1);
+
+        var debitNormal = AccountTypes.IsDebitNormal(account.Type);
+
+        // الافتتاحي من كل ما قبل الفترة — استعلامُ تجميعٍ واحد لا قراءةُ
+        // سطور عمرٍ كامل في الذاكرة.
+        // الانضمام بـ Join لا بخاصية تنقّل: JournalEntryLine بلا مرجع إلى
+        // قيدها في النموذج (راجع Entities.cs)، فالربط يُكتب صراحةً — كما
+        // في BalancesAsync أدناه.
+        var before = await _db.JournalEntryLines
+            .Where(l => l.AccountId == id)
+            .Join(_db.JournalEntries.Where(e => e.EntryDate < start),
+                l => l.JournalEntryId, e => e.Id, (l, e) => l)
+            .GroupBy(l => 1)
+            .Select(g => new { Debit = g.Sum(x => x.Debit), Credit = g.Sum(x => x.Credit) })
+            .FirstOrDefaultAsync();
+
+        var opening = before is null
+            ? 0m
+            : debitNormal ? before.Debit - before.Credit : before.Credit - before.Debit;
+
+        var lines = await _db.JournalEntryLines
+            .Where(l => l.AccountId == id)
+            .Join(_db.JournalEntries.Where(e => e.EntryDate >= start && e.EntryDate <= end),
+                l => l.JournalEntryId, e => e.Id, (l, e) => new
+                {
+                    e.EntryDate,
+                    e.Description,
+                    e.Source,
+                    EntryId = e.Id,
+                    e.CreatedAt,
+                    l.Debit,
+                    l.Credit,
+                    l.Note,
+                })
+            // التاريخ ثم لحظة الإنشاء: قيدان في يوم واحد ترتيبُهما هو
+            // ترتيب حدوثهما، والرصيد المتحرّك بلا ترتيبٍ ثابت يتغيّر عند
+            // كل قراءة.
+            .OrderBy(x => x.EntryDate).ThenBy(x => x.CreatedAt)
+            .ToListAsync();
+
+        var running = opening;
+        var statement = new List<AccountStatementLine>();
+        foreach (var line in lines)
+        {
+            running += debitNormal ? line.Debit - line.Credit : line.Credit - line.Debit;
+            statement.Add(new AccountStatementLine(
+                line.EntryDate,
+                // ملاحظة السطر أدقّ من وصف القيد حين توجد: «إيجار محل
+                // فبراير» تقول أكثر من «مصروف».
+                string.IsNullOrWhiteSpace(line.Note) ? (line.Description ?? "") : line.Note!,
+                line.Source ?? "",
+                line.EntryId,
+                line.Debit, line.Credit, running));
+        }
+
+        var children = await _db.Accounts
+            .Where(a => a.ParentId == id)
+            .OrderBy(a => a.Code)
+            .Select(a => new AccountDto(a.Id, a.Code, a.Name, a.ParentId, a.Type,
+                a.IsPostable, a.IsSystem, a.IsActive, 0))
+            .ToListAsync();
+
+        return new AccountStatementDto(
+            account.Id, account.Code, account.Name, account.Type, account.IsPostable,
+            start, end.Date,
+            opening,
+            statement.Sum(l => l.Debit), statement.Sum(l => l.Credit),
+            running,
+            statement,
+            children);
+    }
+
+    /// <summary>
+    /// تعديل حساب: اسمه، ورمزه، وتفعيله.
+    ///
+    /// <para><b>ولماذا لم يكن موجوداً وهو لازم:</b> الدليل المبذور عامٌّ،
+    /// ونشاطُ كل جهة يختلف — محلُّ ملابس يريد «مصروفات دعاية» ومخبزٌ يريد
+    /// «دقيق وخميرة». وكان النظام يُنشئ ولا يُعدِّل، فاسمٌ كُتب بخطأ يبقى
+    /// في كل تقرير إلى الأبد.</para>
+    ///
+    /// <para><b>والرمز لا يُغيَّر بعد أوّل قيد:</b> يُقرأ في كل تقرير
+    /// ويُرتَّب به الدليل، وتغييرُه بعد الترحيل يجعل تقرير الشهر الماضي
+    /// يذكر رمزاً لا وجود له. وحسابُ النظام لا يُعطَّل إطلاقاً — تعطيل
+    /// «المبيعات» يُوقف كل بيع في المحلّ.</para>
+    /// </summary>
+    [HttpPut("accounts/{id:guid}")]
+    [Authorize(Roles = "super_admin")]
+    public async Task<IActionResult> UpdateAccount(Guid id, UpdateAccountRequest request)
+    {
+        var account = await _db.Accounts.FirstOrDefaultAsync(a => a.Id == id);
+        if (account is null) return NotFound();
+
+        var code = (request.Code ?? "").Trim();
+        var name = (request.Name ?? "").Trim();
+        if (code.Length == 0 || name.Length == 0)
+            return BadRequest(new { message = "الرمز والاسم إلزاميان" });
+
+        var hasEntries = await _db.JournalEntryLines.AnyAsync(l => l.AccountId == id);
+
+        if (code != account.Code)
+        {
+            if (account.IsSystem)
+                return BadRequest(new { message = "لا يُغيَّر رمز حسابٍ يعتمد عليه الترحيل الآلي" });
+            if (hasEntries)
+                return BadRequest(new { message = "لا يُغيَّر الرمز بعد أن رُحّل إلى الحساب — غيّر الاسم وحده" });
+            if (await _db.Accounts.AnyAsync(a => a.Code == code && a.Id != id))
+                return BadRequest(new { message = $"الرمز {code} مستعمل في حساب آخر" });
+        }
+
+        if (!request.IsActive && account.IsSystem)
+            return BadRequest(new { message = "لا يُعطَّل حسابٌ يعتمد عليه الترحيل الآلي" });
+
+        var old = new { account.Code, account.Name, account.IsActive };
+        account.Code = code;
+        account.Name = name;
+        account.IsActive = request.IsActive;
+
+        _db.LogAudit(account.OrganizationId, CurrentUserId(), "account.updated", "accounts", account.Id,
+            oldValues: old, newValues: new { account.Code, account.Name, account.IsActive });
+        await _db.SaveChangesAsync();
+        return NoContent();
+    }
+
+    /// <summary>
+    /// حذف حساب — أو تعطيله إن كان له تاريخ.
+    ///
+    /// <para><b>وحسابٌ رُحّل إليه لا يُحذف أبداً:</b> حذفُه يترك قيوداً
+    /// تشير إلى لا شيء، فينكسر ميزان المراجعة ولا يُعرف من أين. فيُعطَّل:
+    /// يختفي من قوائم الاختيار ويبقى في التقارير التاريخية — وهو ما يريده
+    /// من يقول «احذفه» فعلاً.</para>
+    ///
+    /// <para>وحسابٌ له أبناء لا يُحذف قبلهم: شجرةٌ بأبناءٍ بلا أب لا
+    /// تُرسَم.</para>
+    /// </summary>
+    [HttpDelete("accounts/{id:guid}")]
+    [Authorize(Roles = "super_admin")]
+    public async Task<IActionResult> DeleteAccount(Guid id)
+    {
+        var account = await _db.Accounts.FirstOrDefaultAsync(a => a.Id == id);
+        if (account is null) return NotFound();
+
+        if (account.IsSystem)
+            return BadRequest(new { message = "حساب يعتمد عليه الترحيل الآلي — لا يُحذف" });
+
+        if (await _db.Accounts.AnyAsync(a => a.ParentId == id))
+            return BadRequest(new { message = "احذف الحسابات التي تحته أولاً" });
+
+        if (await _db.JournalEntryLines.AnyAsync(l => l.AccountId == id))
+        {
+            account.IsActive = false;
+            _db.LogAudit(account.OrganizationId, CurrentUserId(), "account.deactivated", "accounts", account.Id,
+                oldValues: new { account.Code, account.Name });
+            await _db.SaveChangesAsync();
+            return Ok(new
+            {
+                deactivated = true,
+                message = "رُحّل إلى هذا الحساب من قبل، فعُطِّل بدل حذفه — يبقى في التقارير القديمة ولا يظهر في قوائم الاختيار",
+            });
+        }
+
+        // بلا قيدٍ ولا ابن: يُحذف فعلاً. وأبوه يعود قابلاً للترحيل إن لم
+        // يبقَ له ابنٌ آخر — وإلا بقي أباً بلا أبناء لا يُرحَّل إليه.
+        var parentId = account.ParentId;
+        _db.Accounts.Remove(account);
+        _db.LogAudit(account.OrganizationId, CurrentUserId(), "account.deleted", "accounts", account.Id,
+            oldValues: new { account.Code, account.Name });
+        await _db.SaveChangesAsync();
+
+        if (parentId is { } pid)
+        {
+            var stillHasChildren = await _db.Accounts.AnyAsync(a => a.ParentId == pid);
+            if (!stillHasChildren)
+            {
+                var parent = await _db.Accounts.FirstOrDefaultAsync(a => a.Id == pid);
+                if (parent is not null && !parent.IsPostable)
+                {
+                    parent.IsPostable = true;
+                    await _db.SaveChangesAsync();
+                }
+            }
+        }
+
+        return Ok(new { deactivated = false });
     }
 
     /// <summary>

@@ -11,6 +11,7 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_text_styles.dart';
 import '../../../shared/widgets/app_surface.dart';
 import '../data/accounting_providers.dart';
+import 'account_statement_dialog.dart';
 import 'accounting_print.dart';
 
 final _money = NumberFormat('#,##0.00', 'en');
@@ -147,6 +148,8 @@ class _ChartTab extends ConsumerWidget {
                   children: children,
                   depth: 0,
                   onOpenJournal: onOpenJournal,
+                  canManage: ref.perms.isSuperAdmin,
+                  onChanged: () => ref.invalidate(chartOfAccountsProvider),
                 ),
             ],
           ),
@@ -162,12 +165,20 @@ class _AccountNode extends StatefulWidget {
     required this.children,
     required this.depth,
     required this.onOpenJournal,
+    required this.canManage,
+    required this.onChanged,
   });
 
   final Map<String, dynamic> account;
   final Map<String?, List<Map<String, dynamic>>> children;
   final int depth;
   final void Function(String accountId) onOpenJournal;
+
+  /// المدير العام وحده يعدّل الدليل — الخادم يشترط الدور نفسه.
+  final bool canManage;
+
+  /// يُستدعى بعد تعديلٍ أو حذف ليُعاد تحميل الشجرة.
+  final VoidCallback onChanged;
 
   @override
   State<_AccountNode> createState() => _AccountNodeState();
@@ -177,6 +188,63 @@ class _AccountNodeState extends State<_AccountNode> {
   // الجذور مفتوحة والباقي مغلق: أربعة أقسام تُرى كلها، وفتحُ الشجرة كاملة
   // يعرض مئة سطر لا يريد أحدهم مئتها.
   late bool _open = widget.depth == 0;
+
+  Future<void> _openStatement(BuildContext context, String id) => showDialog(
+        context: context,
+        builder: (_) => AccountStatementDialog(
+          accountId: id,
+          // فتحُ ابنٍ من كشف الأب يفتح كشفه في حوارٍ جديد بعد إغلاق الأوّل
+          // — لا طبقاتٍ يخرج منها المستخدم بضغطاتٍ بعدد ما دخل.
+          onOpenAccount: (childId) => Future.microtask(
+              () => context.mounted ? _openStatement(context, childId) : null),
+        ),
+      );
+
+  Future<void> _editAccount(BuildContext context, Map<String, dynamic> account) async {
+    final changed = await showDialog<bool>(
+      context: context,
+      builder: (_) => _AccountFormDialog(account: account),
+    );
+    if (changed == true) widget.onChanged();
+  }
+
+  Future<void> _deleteAccount(BuildContext context, Map<String, dynamic> account) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('حذف الحساب'),
+        content: Text(
+          // ما سيحدث فعلاً لا وعدٌ عام: حسابٌ رُحّل إليه يُعطَّل لا يُحذف،
+          // وقولُ ذلك قبل الضغط أصدق من رسالةٍ بعده.
+          'إن كان قد رُحّل إلى «${account['name']}» فسيُعطَّل ويبقى في '
+          'التقارير القديمة. وإن لم يُستعمل قطّ فسيُحذف نهائياً.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('تراجع')),
+          FilledButton(onPressed: () => Navigator.pop(dialogContext, true), child: const Text('متابعة')),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    try {
+      final response =
+          await ApiClient.instance.dio.delete('/accounting/accounts/${account['id']}');
+      final data = response.data;
+      final message = data is Map && data['message'] is String
+          ? data['message'] as String
+          : 'حُذف الحساب';
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+      widget.onChanged();
+    } catch (e) {
+      if (!context.mounted) return;
+      final message = e is DioException && e.response?.data is Map
+          ? (e.response!.data as Map)['message'] as String? ?? 'تعذّر الحذف'
+          : 'تعذّر الحذف';
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -190,7 +258,12 @@ class _AccountNodeState extends State<_AccountNode> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         InkWell(
-          onTap: kids.isEmpty ? () => widget.onOpenJournal(id) : () => setState(() => _open = !_open),
+          // الضغط يفتح **كشف الحساب** لا دفتر اليومية: من يضغط على
+          // «الصندوق» يسأل كم فيه ومن أين جاء، لا يريد كل قيدٍ مسّه بسطوره
+          // الأخرى. والأب يُفتح ويُغلق كما كان — وكشفُه متاح من قائمته.
+          onTap: kids.isEmpty
+              ? () => _openStatement(context, id)
+              : () => setState(() => _open = !_open),
           child: Padding(
             padding: EdgeInsetsDirectional.only(
               start: widget.depth * 20.0, top: 10, bottom: 10, end: 8),
@@ -229,6 +302,25 @@ class _AccountNodeState extends State<_AccountNode> {
                       child: Icon(Icons.folder_outlined, size: 14, color: AppColors.textMuted),
                     ),
                   ),
+                // قائمة الصفّ: الكشف والتعديل والحذف. والتعديل والحذف
+                // للمدير العام وحده — الخادم يشترطه، وزرٌّ يردّه الخادم
+                // بـ403 يُعلّم المستخدم تجاهل الأزرار.
+                PopupMenuButton<String>(
+                  tooltip: 'إجراءات الحساب',
+                  icon: Icon(Icons.more_vert, size: 16, color: AppColors.textMuted),
+                  onSelected: (value) => switch (value) {
+                    'statement' => _openStatement(context, id),
+                    'edit' => _editAccount(context, account),
+                    _ => _deleteAccount(context, account),
+                  },
+                  itemBuilder: (_) => [
+                    const PopupMenuItem(value: 'statement', child: Text('كشف الحساب')),
+                    if (widget.canManage) const PopupMenuItem(value: 'edit', child: Text('تعديل')),
+                    if (widget.canManage &&
+                        !(account['isSystem'] as bool? ?? false))
+                      const PopupMenuItem(value: 'delete', child: Text('حذف')),
+                  ],
+                ),
               ],
             ),
           ),
@@ -240,6 +332,8 @@ class _AccountNodeState extends State<_AccountNode> {
               children: widget.children,
               depth: widget.depth + 1,
               onOpenJournal: widget.onOpenJournal,
+              canManage: widget.canManage,
+              onChanged: widget.onChanged,
             ),
         if (widget.depth == 0) const Divider(height: 1),
       ],
@@ -1520,4 +1614,114 @@ String _errorText(Object e, String fallback) {
     if (e.response == null) return 'لا اتصال بالخادم';
   }
   return fallback;
+}
+
+
+/// نموذج تعديل حساب — الاسم والرمز والتفعيل.
+///
+/// <para><b>سبب وجوده:</b> كان الدليل يُنشأ ولا يُعدَّل: اسمٌ كُتب بخطأ
+/// يبقى في كل تقرير إلى الأبد، وحسابٌ لا يخصّ النشاط يبقى في الشجرة
+/// يُربك من يقرأها. والنشاط يختلف: محلُّ ملابس يريد «مصروفات دعاية»
+/// ومخبزٌ يريد «دقيق وخميرة».</para>
+///
+/// <para>والقيود التي يفرضها الخادم مشروحةٌ هنا قبل المحاولة لا بعدها:
+/// رمزُ حسابٍ رُحّل إليه لا يُغيَّر، وحسابُ النظام لا يُعطَّل.</para>
+class _AccountFormDialog extends StatefulWidget {
+  const _AccountFormDialog({required this.account});
+  final Map<String, dynamic> account;
+
+  @override
+  State<_AccountFormDialog> createState() => _AccountFormDialogState();
+}
+
+class _AccountFormDialogState extends State<_AccountFormDialog> {
+  late final _code = TextEditingController(text: widget.account['code'] as String? ?? '');
+  late final _name = TextEditingController(text: widget.account['name'] as String? ?? '');
+  late bool _active = widget.account['isActive'] as bool? ?? true;
+
+  bool _busy = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _code.dispose();
+    _name.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isSystem = widget.account['isSystem'] as bool? ?? false;
+
+    return AdaptiveDialog(
+      title: 'تعديل الحساب',
+      maxWidth: 420,
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('إلغاء')),
+        FilledButton(onPressed: _busy ? null : _save, child: const Text('حفظ')),
+      ],
+      body: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          TextField(
+            controller: _code,
+            enabled: !isSystem,
+            decoration: InputDecoration(
+              labelText: 'الرمز',
+              helperText: isSystem
+                  ? 'حساب يعتمد عليه الترحيل الآلي — رمزه ثابت'
+                  : 'لا يُغيَّر بعد أوّل قيد: التقارير القديمة تذكره',
+            ),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _name,
+            decoration: const InputDecoration(labelText: 'الاسم'),
+          ),
+          const SizedBox(height: 8),
+          SwitchListTile(
+            value: _active,
+            onChanged: isSystem ? null : (v) => setState(() => _active = v),
+            contentPadding: EdgeInsets.zero,
+            title: const Text('مفعَّل'),
+            subtitle: Text(
+              isSystem
+                  ? 'لا يُعطَّل — تعطيله يُوقف الترحيل الآلي'
+                  : 'المعطَّل يبقى في التقارير القديمة ويختفي من قوائم الاختيار',
+              style: AppTextStyles.labelMd(),
+            ),
+          ),
+          if (_error != null) ...[
+            const SizedBox(height: 8),
+            Text(_error!, style: AppTextStyles.bodyMd(color: AppColors.danger)),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Future<void> _save() async {
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      await ApiClient.instance.dio.put(
+        '/accounting/accounts/${widget.account['id']}',
+        data: {
+          'code': _code.text.trim(),
+          'name': _name.text.trim(),
+          'isActive': _active,
+        },
+      );
+      if (mounted) Navigator.pop(context, true);
+    } catch (e) {
+      setState(() => _error = e is DioException && e.response?.data is Map
+          ? (e.response!.data as Map)['message'] as String? ?? 'تعذّر الحفظ'
+          : 'تعذّر الحفظ');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
 }
