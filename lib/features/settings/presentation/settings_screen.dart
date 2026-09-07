@@ -96,6 +96,10 @@ class _SettingsFormState extends ConsumerState<_SettingsForm> {
       TextEditingController(text: (widget.settings['passwordMinLength'] as num?)?.toString() ?? '6');
   late final _receiptWidthController =
       TextEditingController(text: (widget.settings['receiptWidthMm'] as num?)?.toString() ?? '80');
+
+  /// طريقة تكلفة الصنف — راجع القسم في آخر الشاشة.
+  late String _costingMethod =
+      widget.settings['inventoryCostingMethod'] as String? ?? 'last_purchase';
   late bool _posAllowOpenProduct = widget.settings['posAllowOpenProduct'] as bool? ?? false;
 
   // ── أنماط بطاقة المحفظة ────────────────────────────────────────────────
@@ -423,6 +427,54 @@ class _SettingsFormState extends ConsumerState<_SettingsForm> {
                 ),
               ],
             ),
+            const SizedBox(height: 16),
+            SectionCard(
+              title: 'تكلفة الصنف',
+              icon: Icons.inventory_2_outlined,
+              children: [
+                Text(
+                  // ما لا يفعله الخيار يُقال أوّلاً: أكثر ما يُخشى أن يظنّه
+                  // المدير تغييراً في حساب الأرباح فيتردّد، أو يغيّره ظانّاً
+                  // أنه يُصلح ربحاً — وكلاهما بُني على وهم.
+                  'صنفٌ في مخزنه شحنتان بسعرين، وبطاقتُه تعرض رقماً واحداً: '
+                  'هو ما يقيس عليه الحدّ الأدنى للسعر ويُعرض به الهامش. '
+                  'واختيارُك هنا يضبط ذلك الرقم وحده — أمّا ربح كل فاتورة '
+                  'فمحسوبٌ من تكلفة الشحنة التي خرجت منها بضاعتُها فعلاً، '
+                  'ولا يتغيّر بهذا الإعداد.',
+                  style: AppTextStyles.labelMd(),
+                ),
+                const SizedBox(height: 12),
+                RadioGroup<String>(
+                  groupValue: _costingMethod,
+                  onChanged: widget.canEdit
+                      ? (v) => v == null ? null : setState(() => _costingMethod = v)
+                      : null,
+                  child: Column(
+                    children: [
+                      for (final option in const [
+                        ('last_purchase', 'آخر شراء',
+                            'سعر آخر شحنة وصلت محمَّلةً بمصاريفها — «بكم أشتريه اليوم». '
+                                'وشراءٌ صغير بسعرٍ مرتفع يرفع الرقم لمخزونٍ قديم كلّه.'),
+                        ('weighted_average', 'المتوسط المرجّح',
+                            'قيمة ما في المخزن مقسومةً على كميّته. لمن يبيع بضاعةً '
+                                'متماثلة من شحناتٍ مختلطة — ولا يساوي سعر أي شحنة بعينها.'),
+                        ('batch', 'تكلفة الدفعة',
+                            'تكلفة الشحنة التي ستخرج في البيع التالي — الأقرب إلى '
+                                'الحقيقة، ولمن يتتبّع الصلاحية هو الوحيد الذي لا يكذب.'),
+                      ])
+                        RadioListTile<String>(
+                          value: option.$1,
+                          contentPadding: EdgeInsets.zero,
+                          dense: true,
+                          title: Text(option.$2,
+                              style: AppTextStyles.bodyMd(color: AppColors.textPrimary)),
+                          subtitle: Text(option.$3, style: AppTextStyles.labelMd()),
+                        ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
             // النسخة الاحتياطية بصلاحيتها لا بدور المستخدم: مالك المنظمة
             // قد يمنحها محاسبه ليحفظ النسخ الأسبوعية، وقد لا يمنحها أحداً.
             // و`Can` يقرأ نفس الرمز الذي يفحصه الخادم (backup.manage)، فلا
@@ -507,6 +559,7 @@ class _SettingsFormState extends ConsumerState<_SettingsForm> {
         'taxRate': double.parse(_taxRateController.text),
         'passwordMinLength': int.parse(_passwordMinLengthController.text),
         'receiptWidthMm': double.parse(_receiptWidthController.text),
+        'inventoryCostingMethod': _costingMethod,
         'posAllowOpenProduct': _posAllowOpenProduct,
         'cardModesAllowed': _cardModes.join(','),
         'cardModeDefault': _cardModeDefault,

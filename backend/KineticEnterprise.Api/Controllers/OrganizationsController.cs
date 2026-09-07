@@ -21,8 +21,14 @@ public record BrandingResponse(string DisplayName, string? LogoUrl, string Prima
 public record UpdateBrandingRequest(string DisplayName, string PrimaryColor, string SecondaryColor, string NavLayout);
 public record SetLogoRequest(Guid? AttachmentId);
 
-public record OrganizationSettingsDto(string CurrencyCode, string CurrencySymbol, string Locale, decimal TaxRate, int PasswordMinLength, double ReceiptWidthMm, bool PosAllowOpenProduct, string CardModesAllowed, string CardModeDefault, decimal CardOpenModeDailyCap);
-public record UpdateSettingsRequest(string CurrencyCode, string CurrencySymbol, string Locale, decimal TaxRate, int PasswordMinLength, double ReceiptWidthMm, bool PosAllowOpenProduct, string? CardModesAllowed, string? CardModeDefault, decimal? CardOpenModeDailyCap);
+public record OrganizationSettingsDto(string CurrencyCode, string CurrencySymbol, string Locale, decimal TaxRate, int PasswordMinLength, double ReceiptWidthMm, bool PosAllowOpenProduct, string CardModesAllowed, string CardModeDefault, decimal CardOpenModeDailyCap,
+    /// ما يعنيه «تكلفة الصنف» على بطاقته — راجع [CostingMethods]. ولا يمسّ
+    /// تكلفة البضاعة المباعة: تلك من الدفعة التي خرجت منها.
+    string InventoryCostingMethod);
+public record UpdateSettingsRequest(string CurrencyCode, string CurrencySymbol, string Locale, decimal TaxRate, int PasswordMinLength, double ReceiptWidthMm, bool PosAllowOpenProduct, string? CardModesAllowed, string? CardModeDefault, decimal? CardOpenModeDailyCap,
+    /// NULL = لا تغيير: عميلٌ قديم لا يعرف هذا الحقل يجب ألّا يُرجع المنظمة
+    /// إلى الافتراضي بحفظه شاشة العملة.
+    string? InventoryCostingMethod = null);
 
 /// <summary>
 /// قالب الإيصال.
@@ -150,7 +156,8 @@ public class OrganizationsController : ControllerBase
         if (org is null) return NotFound();
 
         return new OrganizationSettingsDto(org.CurrencyCode, org.CurrencySymbol, org.Locale, org.TaxRate, org.PasswordMinLength, org.ReceiptWidthMm, org.PosAllowOpenProduct,
-            string.Join(",", CardModeGate.AllowedModes(org)), org.CardModeDefault, org.CardOpenModeDailyCap);
+            string.Join(",", CardModeGate.AllowedModes(org)), org.CardModeDefault, org.CardOpenModeDailyCap,
+            org.InventoryCostingMethod);
     }
 
     [HttpPut("me/settings")]
@@ -173,6 +180,11 @@ public class OrganizationsController : ControllerBase
             return BadRequest(new { message = "عرض إيصال الطباعة يجب أن يكون بين 40 و120 ملم" });
         }
 
+        if (request.InventoryCostingMethod is { } costing && !CostingMethods.IsKnown(costing))
+        {
+            return BadRequest(new { message = "طريقة تكلفة غير معروفة" });
+        }
+
         org.CurrencyCode = request.CurrencyCode;
         org.CurrencySymbol = request.CurrencySymbol;
         org.Locale = request.Locale;
@@ -182,6 +194,9 @@ public class OrganizationsController : ControllerBase
         // بيع بقيمة يكتبها الكاشير هو أوسع باب لسحب نقدية بلا بضاعة مقابلة،
         // فتغييره محصور بـ super_admin مثل بقية هذه الشاشة.
         org.PosAllowOpenProduct = request.PosAllowOpenProduct;
+
+        // تُحدَّث فقط إن أُرسلت — كأنماط البطاقة أدناه، ولنفس السبب.
+        if (request.InventoryCostingMethod is { } method) org.InventoryCostingMethod = method;
 
         // أنماط البطاقة — تُحدَّث فقط إن أُرسلت: عميل قديم لا يعرف هذه الحقول
         // يجب ألّا يمحو إعداداً بحفظه شاشة العملة.

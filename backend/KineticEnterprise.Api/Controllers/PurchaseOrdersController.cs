@@ -275,6 +275,10 @@ public class PurchaseOrdersController : ControllerBase
         var chargeShares = SharesOf(order, chargesTotal);
         var capitalizedCharges = 0m;
 
+        // طريقة التكلفة تُقرأ مرّةً لا لكل سطر — راجع [CostingMethods].
+        var costingMethod = (await _db.Organizations.FirstOrDefaultAsync())?.InventoryCostingMethod
+                            ?? CostingMethods.LastPurchase;
+
         foreach (var item in order.Items)
         {
             var product = await _db.Products.FirstOrDefaultAsync(p => p.Id == item.ProductId);
@@ -345,7 +349,13 @@ public class PurchaseOrdersController : ControllerBase
                 // وتكلفة الصنف محمَّلةٌ أيضاً: هي ما يُقاس عليه الحدّ الأدنى
                 // للسعر، وحدٌّ أدنى محسوبٌ على سعر المورّد وحده يسمح بالبيع
                 // تحت التكلفة الحقيقية وهو يظنّ أنه يمنعه.
-                product.CostPrice = landedUnitCost;
+                //
+                // وبالطريقة التي اختارتها المنظمة — راجع [InventoryCosting].
+                // والقيمة تُحسب **بعد** كتابة سطر الإدخال في الدفتر: المتوسط
+                // وتكلفة الدفعة يقرآن الدفتر، وحسابُهما قبله يُهمل الشحنة
+                // التي وصلت للتوّ.
+                product.CostPrice = await InventoryCosting.ReferenceCostAsync(
+                    _db, costingMethod, item.ProductId, landedUnitCost);
                 if (item.SalePrice.HasValue) product.SalePrice = item.SalePrice.Value;
             }
         }

@@ -54,6 +54,10 @@ CREATE TABLE organizations (
     CONSTRAINT df_organizations_receipt_template DEFAULT
     N'{"paper":"roll80","showLogo":true,"showTaxNumber":true,"showCommercialRegistry":false,"showQr":false,"headerText":null,"footerText":"شكراً لتعاملكم معنا"}',
   receipt_width_mm DECIMAL(5,2) NOT NULL DEFAULT 80,    -- ARCHITECTURE.md §2.12
+  -- ما يعنيه «تكلفة الصنف» على بطاقته: last_purchase (الافتراضي) أو
+  -- weighted_average أو batch. لا يمسّ تكلفة البضاعة المباعة — تلك من
+  -- الدفعة التي خرجت منها. راجع Data/InventoryCosting.cs.
+  inventory_costing_method NVARCHAR(30) NOT NULL DEFAULT 'last_purchase',
   -- تخطيط التنقّل: شريط جانبي ثابت أو شريط علوي أفقي — يختاره كل عميل
   -- لمنظمته حسب تفضيله، بلا أي فرق في الوظائف.
   nav_layout NVARCHAR(20) NOT NULL DEFAULT 'sidebar'
