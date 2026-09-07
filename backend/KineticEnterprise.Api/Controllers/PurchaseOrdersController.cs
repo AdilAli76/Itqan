@@ -10,10 +10,15 @@ using KineticEnterprise.Api.Models;
 namespace KineticEnterprise.Api.Controllers;
 
 public record PurchaseOrderLineRequest(Guid ProductId, decimal Quantity, decimal UnitCost, decimal? SalePrice);
+public record PurchaseChargeRequest(string Label, decimal Amount);
+
 public record CreatePurchaseOrderRequest(
     Guid BranchId, Guid? SupplierId, List<PurchaseOrderLineRequest> Lines,
     /// أُنشئ من اقتراح إعادة الطلب لا بيد مستخدم — راجع PurchaseOrder.IsAuto.
-    bool IsAuto = false);
+    bool IsAuto = false,
+    /// مصاريف الشحنة — شحن وتخليص وجمارك. تُوزَّع بالقيمة على السطور،
+    /// راجع [LandedCost]. NULL أو فارغة = بلا مصاريف، وهو الحال الغالب.
+    List<PurchaseChargeRequest>? Charges = null);
 
 public record ReceiveLineRequest(
     Guid ProductId, string? BatchNumber, DateTime? ExpiryDate,
@@ -61,10 +66,22 @@ public record PurchaseOrderListItemDto(
 
 public record PurchaseOrderDetailItemDto(
     Guid ProductId, string ProductName, bool TrackExpiry, decimal Quantity, decimal UnitCost,
-    decimal? SalePrice, decimal LineTotal, decimal ReceivedQuantity, decimal RemainingQuantity);
+    decimal? SalePrice, decimal LineTotal, decimal ReceivedQuantity, decimal RemainingQuantity,
+    /// نصيب الوحدة من مصاريف الشحنة — صفرٌ حين لا مصاريف.
+    decimal ChargeShare,
+    /// سعر المورّد زائد نصيب الوحدة: التكلفة التي يُسعَّر عليها ويُحسب بها
+    /// الربح. راجع [LandedCost].
+    decimal LandedUnitCost);
+
+public record PurchaseChargeDto(Guid Id, string Label, decimal Amount);
+
 public record PurchaseOrderDetailDto(
     Guid Id, Guid BranchId, string BranchName, Guid? SupplierId, string SupplierName,
-    string Status, decimal TotalAmount, DateTime CreatedAt, List<PurchaseOrderDetailItemDto> Items);
+    string Status, decimal TotalAmount, DateTime CreatedAt, List<PurchaseOrderDetailItemDto> Items,
+    /// المصاريف كما أُدخلت — تُعرَض ولا تُجمَع في [TotalAmount]: ذاك ما
+    /// يطالب به المورّد وتُطابَق به فاتورته.
+    List<PurchaseChargeDto> Charges,
+    decimal ChargesTotal);
 
 /// <summary>
 /// موديول المشتريات (أوامر الشراء من الموردين) — كان جدولاه purchase_orders
@@ -134,9 +151,24 @@ public class PurchaseOrdersController : ControllerBase
                 SalePrice = line.SalePrice,
             });
         }
+        // الإجمالي بضاعةٌ وحدها: هو ما سيطالب به المورّد وتُطابَق به
+        // فاتورته. وضمُّ الشحن إليه يجعل كل فاتورة مورّد تبدو ناقصة.
         order.TotalAmount = order.Items.Sum(i => i.Quantity * i.UnitCost);
 
         _db.PurchaseOrders.Add(order);
+
+        foreach (var charge in request.Charges ?? new List<PurchaseChargeRequest>())
+        {
+            if (charge.Amount <= 0) continue;
+            _db.PurchaseOrderCharges.Add(new PurchaseOrderCharge
+            {
+                PurchaseOrderId = order.Id,
+                OrganizationId = order.OrganizationId,
+                Label = string.IsNullOrWhiteSpace(charge.Label) ? "مصاريف شحنة" : charge.Label.Trim(),
+                Amount = charge.Amount,
+            });
+        }
+
         _db.LogAudit(order.OrganizationId, CurrentUserId(), "purchase_order.created", "purchase_orders", order.Id,
             newValues: new { order.BranchId, order.SupplierId, order.TotalAmount, ItemCount = order.Items.Count });
         await _db.SaveChangesAsync();
@@ -232,6 +264,17 @@ public class PurchaseOrdersController : ControllerBase
         // يُغرق السجلّ، وحدثٌ واحد بقائمة الفروق يُقرأ.
         var priceChanges = new List<object>();
 
+        // مصاريف الشحنة موزَّعةً على السطور — راجع [LandedCost].
+        //
+        // تُحسب **قبل** الحلقة على أسعار الأمر كما هي الآن: احتسابُها داخل
+        // الحلقة بعد تعديل سعر سطرٍ يجعل نصيب السطر الأوّل محسوباً على
+        // قيمةٍ وسطور التالي على أخرى، فلا يعود مجموع الأنصبة يساوي
+        // المصاريف. وسعرٌ يتغيّر عند الاستلام يُصحّح نصيب الشحنة التالية
+        // لا التي وصلت.
+        var chargesTotal = (await ChargesOf(order.Id)).Sum(c => c.Amount);
+        var chargeShares = SharesOf(order, chargesTotal);
+        var capitalizedCharges = 0m;
+
         foreach (var item in order.Items)
         {
             var product = await _db.Products.FirstOrDefaultAsync(p => p.Id == item.ProductId);
@@ -265,11 +308,19 @@ public class PurchaseOrdersController : ControllerBase
             // سطر الإدخال في الدفتر يشير إلى **مستند الاستلام** لا إلى أمر
             // الشراء: الأمر قد يصل على ثلاث شحنات، ونسبة البضاعة إليه تجعل
             // «متى وصلت هذه القطعة» بلا جواب. راجع PurchaseReceipt.
+            // التكلفة المحمَّلة لا سعر المورّد: هي التي تدخل الدفعة، ومنها
+            // تُحسب تكلفة البضاعة المباعة لاحقاً. وإدخال سعر المورّد وحده
+            // يُبقي الشحن خارج التكلفة أبداً — فيظهر الربح أعلى ممّا هو
+            // بمقدار الشحن كلّه.
+            var chargeShare = chargeShares.GetValueOrDefault(item.Id);
+            var landedUnitCost = unitCost + chargeShare;
+            capitalizedCharges += chargeShare * receiving;
+
             await StockLedger.ReceiveAsync(
                 _db, order.OrganizationId, order.BranchId, warehouseId: null,
                 productId: item.ProductId,
                 quantity: receiving,
-                unitCost: unitCost,
+                unitCost: landedUnitCost,
                 sourceType: StockSourceTypes.PurchaseReceipt, sourceId: receipt.Id,
                 userId: CurrentUserId(),
                 batchNumber: batchNumber, expiryDate: expiryDate,
@@ -285,12 +336,16 @@ public class PurchaseOrdersController : ControllerBase
                 Quantity = receiving,
                 BatchNumber = batchNumber,
                 ExpiryDate = expiryDate,
-                UnitCost = unitCost,
+                UnitCost = landedUnitCost,
+                SupplierUnitCost = unitCost,
             });
 
             if (product is not null)
             {
-                product.CostPrice = item.UnitCost;
+                // وتكلفة الصنف محمَّلةٌ أيضاً: هي ما يُقاس عليه الحدّ الأدنى
+                // للسعر، وحدٌّ أدنى محسوبٌ على سعر المورّد وحده يسمح بالبيع
+                // تحت التكلفة الحقيقية وهو يظنّ أنه يمنعه.
+                product.CostPrice = landedUnitCost;
                 if (item.SalePrice.HasValue) product.SalePrice = item.SalePrice.Value;
             }
         }
@@ -331,7 +386,7 @@ public class PurchaseOrdersController : ControllerBase
             });
         await _db.SaveChangesAsync();
 
-        await PostReceiptAsync(order, receipt);
+        await PostReceiptAsync(order, receipt, capitalizedCharges);
 
         await transaction.CommitAsync();
         return NoContent();
@@ -370,23 +425,38 @@ public class PurchaseOrdersController : ControllerBase
     /// <para>وبالتكلفة المُثبَّتة على سطر الأمر (<c>item.UnitCost</c>) — وهي
     /// نفسها التي دخل بها الدفتر المخزوني، فلا يفترق الدفتران.</para>
     /// </summary>
-    private async Task PostReceiptAsync(PurchaseOrder order, PurchaseReceipt receipt)
+    /// <param name="capitalizedCharges">
+    /// ما رُسمل من مصاريف الشحنة على البضاعة الواصلة في هذا المستند.
+    /// </param>
+    private async Task PostReceiptAsync(PurchaseOrder order, PurchaseReceipt receipt, decimal capitalizedCharges)
     {
         var org = await _db.Organizations.FirstOrDefaultAsync();
         var license = await _db.Licenses.FirstOrDefaultAsync();
         if (org is null || !Ledger.IsEnabled(org, license)) return;
 
+        // المخزون بالتكلفة المحمَّلة، وذمّة المورّد بسعره وحده.
+        //
+        // <para><b>ولماذا حسابٌ ثالث للفرق:</b> «بضاعة وردت ولم تُفوتَر»
+        // رصيدُ ما سيطالب به المورّد ويُفرَّغ بفاتورته هو. والشحن يطالب به
+        // الناقل بفاتورةٍ أخرى — فضمُّه إلى ذاك الحساب يجعل رصيده لا يطابق
+        // كشف أي مورّد، ويبطل استعماله في المطابقة أصلاً.</para>
         var total = receipt.Items.Sum(i => i.Quantity * i.UnitCost);
         if (total <= 0) return;
+
+        var charges = Math.Round(capitalizedCharges, 2, MidpointRounding.AwayFromZero);
+        var supplierClaim = total - charges;
+
+        var lines = new List<PostingLine>
+        {
+            new(AccountRoles.Inventory, total, 0),
+            new(AccountRoles.GoodsReceivedNotInvoiced, 0, supplierClaim),
+        };
+        if (charges != 0) lines.Add(new PostingLine(AccountRoles.LandedCostAccrual, 0, charges));
 
         await Ledger.PostAsync(_db, order.OrganizationId, order.BranchId,
             JournalSources.PurchaseReceipt, receipt.Id,
             $"استلام بضاعة — إشعار {receipt.SupplierNoteNumber ?? receipt.Id.ToString()[..8]}",
-            new[]
-            {
-                new PostingLine(AccountRoles.Inventory, total, 0),
-                new PostingLine(AccountRoles.GoodsReceivedNotInvoiced, 0, total),
-            },
+            lines,
             CurrentUserId(),
             // بتاريخ الاستلام الفعلي لا تاريخ الإدخال: شحنة وصلت الشهر
             // الماضي وسُجّلت اليوم تنتمي محاسبياً إلى الشهر الماضي.
@@ -472,7 +542,11 @@ public class PurchaseOrdersController : ControllerBase
             resolved.Add((item, line.BatchNumber ?? "", line.Quantity, item.UnitCost));
         }
 
+        // نصيب المصاريف يُستردّ منه شيء: المورّد يأخذ بضاعته ولا يردّ شحنها.
+        var returnShares = SharesOf(order, (await ChargesOf(order.Id)).Sum(c => c.Amount));
+
         decimal total = 0;
+        decimal returnedCharges = 0;
         foreach (var (item, batchNumber, quantity, unitCost) in resolved)
         {
             // الإخراج عبر الدفتر لا على stock_levels: الطريق الوحيد، ومنه
@@ -496,6 +570,7 @@ public class PurchaseOrdersController : ControllerBase
             // بينما نصف بضاعته عادت، فيُقاس أداء المورّد على توريدٍ لم يتمّ.
             item.ReceivedQuantity -= quantity;
             total += quantity * unitCost;
+            returnedCharges += quantity * returnShares.GetValueOrDefault(item.Id);
         }
 
         // الأمر يعود «مُرسَلاً» إن صار فيه ناقص: التوريد لم يكتمل فعلاً.
@@ -514,28 +589,41 @@ public class PurchaseOrdersController : ControllerBase
             });
         await _db.SaveChangesAsync();
 
-        await PostPurchaseReturnAsync(order, total, reason);
+        await PostPurchaseReturnAsync(order, total, returnedCharges, reason);
 
         await transaction.CommitAsync();
         return NoContent();
     }
 
-    /// <summary>قيد مردود الشراء — من ح/ الموردون إلى ح/ المخزون.</summary>
-    private async Task PostPurchaseReturnAsync(PurchaseOrder order, decimal total, string reason)
+    /// <summary>
+    /// قيد مردود الشراء — من ح/ الموردون إلى ح/ المخزون.
+    ///
+    /// <para><b>وشحنُ ما أُعيد خسارةٌ لا يُستردّ:</b> المخزون يخرج بتكلفته
+    /// المحمَّلة، والمورّد لا يُقيَّد عليه إلا سعرُه هو — فالفرق شحنٌ دُفع
+    /// على بضاعةٍ رجعت، وهو مصروفٌ فعليّ. وتحميلُه على المورّد يجعل ذمّته
+    /// عندنا أكبر ممّا يقرّ به، ويظهر الخلاف عند أوّل مطابقة.</para>
+    /// </summary>
+    private async Task PostPurchaseReturnAsync(
+        PurchaseOrder order, decimal total, decimal returnedCharges, string reason)
     {
         var org = await _db.Organizations.FirstOrDefaultAsync();
         var license = await _db.Licenses.FirstOrDefaultAsync();
         if (org is null || !Ledger.IsEnabled(org, license)) return;
         if (total <= 0) return;
 
+        var charges = Math.Round(returnedCharges, 2, MidpointRounding.AwayFromZero);
+
+        var lines = new List<PostingLine>
+        {
+            new(AccountRoles.Payables, total, 0),
+            new(AccountRoles.Inventory, 0, total + charges),
+        };
+        if (charges != 0) lines.Add(new PostingLine(AccountRoles.GeneralExpense, charges, 0));
+
         await Ledger.PostAsync(_db, order.OrganizationId, order.BranchId,
             JournalSources.PurchaseReturn, order.Id,
             $"مردود شراء — {reason}",
-            new[]
-            {
-                new PostingLine(AccountRoles.Payables, total, 0),
-                new PostingLine(AccountRoles.Inventory, 0, total),
-            },
+            lines,
             CurrentUserId());
 
         await _db.SaveChangesAsync();
@@ -618,18 +706,42 @@ public class PurchaseOrdersController : ControllerBase
         var productIds = order.Items.Select(i => i.ProductId).ToList();
         var products = await _db.Products.Where(p => productIds.Contains(p.Id)).ToDictionaryAsync(p => p.Id, p => p);
 
+        var charges = await ChargesOf(order.Id);
+        var shares = SharesOf(order, charges.Sum(c => c.Amount));
+
         return new PurchaseOrderDetailDto(
             order.Id, order.BranchId, branchNames.GetValueOrDefault(order.BranchId, "-"),
             order.SupplierId, supplierName, order.Status, order.TotalAmount, order.CreatedAt,
             order.Items.Select(i =>
             {
                 products.TryGetValue(i.ProductId, out var product);
+                var share = shares.GetValueOrDefault(i.Id);
                 return new PurchaseOrderDetailItemDto(
                     i.ProductId, product?.Name ?? "-", product?.TrackExpiry ?? false,
                     i.Quantity, i.UnitCost, i.SalePrice, i.Quantity * i.UnitCost,
-                    i.ReceivedQuantity, i.RemainingQuantity);
-            }).ToList());
+                    i.ReceivedQuantity, i.RemainingQuantity,
+                    share, i.UnitCost + share);
+            }).ToList(),
+            charges.Select(c => new PurchaseChargeDto(c.Id, c.Label, c.Amount)).ToList(),
+            charges.Sum(c => c.Amount));
     }
+
+    private async Task<List<PurchaseOrderCharge>> ChargesOf(Guid orderId) =>
+        await _db.PurchaseOrderCharges
+            .Where(c => c.PurchaseOrderId == orderId)
+            .OrderBy(c => c.CreatedAt)
+            .ToListAsync();
+
+    /// <summary>
+    /// نصيب الوحدة من المصاريف لكل سطر — راجع [LandedCost].
+    ///
+    /// <para>على الكميّة **المطلوبة** لا المستلَمة: الشحنة قد تصل على
+    /// دفعات، ونصيب الوحدة يجب أن يكون واحداً في الأولى والأخيرة.</para>
+    /// </summary>
+    private static Dictionary<Guid, decimal> SharesOf(PurchaseOrder order, decimal chargesTotal) =>
+        LandedCost.PerUnitShares(
+            order.Items.Select(i => new LandedCost.Line(i.Id, i.Quantity, i.UnitCost)).ToList(),
+            chargesTotal);
 
     private Guid? CurrentUserId()
     {

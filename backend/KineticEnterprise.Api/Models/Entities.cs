@@ -1152,11 +1152,24 @@ public class PurchaseReceiptItem
     public DateTime? ExpiryDate { get; set; }
 
     /// <summary>
-    /// لقطة التكلفة وقت الوصول. تكلفة سطر الأمر قد تُعدَّل لاحقاً، والمستند
-    /// يجب أن يبقى شاهداً على ما وصل بأي سعر — وهو أساس التقييم وتوزيع
-    /// تكلفة الشحنة الواردة حين يُبنيان.
+    /// لقطة التكلفة وقت الوصول — **محمَّلةً** بنصيب الوحدة من مصاريف
+    /// الشحنة (راجع [KineticEnterprise.Api.Data.LandedCost]). وهي التي تدخل
+    /// الدفعة وتُحسب منها تكلفة البضاعة المباعة.
     /// </summary>
     public decimal UnitCost { get; set; }
+
+    /// <summary>
+    /// سعر المورّد وحده كما وصل — بلا نصيب المصاريف.
+    ///
+    /// <para><b>ولماذا يُحفظ الاثنان:</b> مطابقة فاتورة المورّد تقارن بما
+    /// طالب **هو** به، والفرق بينه وبين المحمَّل هو ما رُسمل من شحنٍ يطالب
+    /// به غيره. وبعمودٍ واحد يستحيل التمييز بعد الحفظ: أهذا سعرٌ ارتفع أم
+    /// شحنٌ أُضيف؟</para>
+    ///
+    /// <para>وصفرٌ في مستندات ما قبل هذه الميزة يعني «لا فرق» — فالمحمَّل
+    /// عندها هو سعر المورّد نفسه.</para>
+    /// </summary>
+    public decimal SupplierUnitCost { get; set; }
 }
 
 public class Customer
@@ -2113,12 +2126,28 @@ public static class AccountRoles
     public const string SalesReturns = "sales_returns";
     public const string GeneralExpense = "general_expense";
 
+    /// <summary>
+    /// مصاريف الشحنة الواردة المستحقّة — شحنٌ وتخليصٌ وجماركُ رُسملت على
+    /// المخزون ولم تصل فاتورتها بعد.
+    ///
+    /// <para><b>لماذا حسابٌ مستقلّ لا «بضاعة وردت ولم تُفوتَر»:</b> ذاك
+    /// رصيدُ ما سيطالب به **المورّد**، ويُفرَّغ بفاتورته هو. ومصاريف الشحن
+    /// يطالب بها الناقل أو المخلّص — جهةٌ أخرى وفاتورةٌ أخرى. وخلطُهما
+    /// يجعل رصيد «وردت ولم تُفوتَر» لا يطابق كشف أي مورّد، فيبطل استعماله
+    /// في المطابقة أصلاً.</para>
+    /// </summary>
+    public const string LandedCostAccrual = "landed_cost_accrual";
+
     /// <summary>ما لا يمكن للترحيل أن يعمل بدونه.</summary>
     public static readonly string[] Required =
     {
         Cash, Receivables, Payables, SalesRevenue, SalesTax, Inventory,
         CostOfGoodsSold, CustomerWallet, SalesReturns, PurchaseReturns, GeneralExpense,
         RetainedEarnings, GoodsReceivedNotInvoiced, PurchasePriceVariance,
+        // وهو مطلوب وإن لم تستعمله كل منظمة: وجودُه في القائمة هو ما يجعل
+        // [Ledger.EnsureChartAsync] يُصلح ربط الأدلّة المبذورة قبل إضافته —
+        // وإلا فشل أوّل استلامٍ بمصاريف بـ«لا حساب مربوط بالدور».
+        LandedCostAccrual,
     };
 }
 
@@ -2434,6 +2463,36 @@ public static class ReceiptPapers
     public const string A5 = "a5";
 
     public static readonly string[] All = { Roll80, Roll58, A4, A5 };
+}
+
+/// <summary>
+/// مصروفٌ على شحنة أمر شراء — شحن، تخليص، جمارك، تأمين.
+///
+/// <para><b>سبب وجوده:</b> صنفٌ بعشرة من المورّد وشحنةٌ بمئة وخمسين لا
+/// تكلفته عشرة. وحتى هذا الجدول كان النظام يحفظ سعر المورّد وحده تكلفةً
+/// للصنف، فيُحسب الربح على تكلفةٍ ناقصة — وقد يُباع بخسارة والتقرير يقول
+/// ربحاً. والحدّ الأدنى للسعر لا يحمي لأنه يقارن بالتكلفة الناقصة نفسها.
+/// </para>
+///
+/// <para><b>على الأمر لا على السطر:</b> فاتورة الناقل تأتي بمبلغٍ واحد
+/// للشحنة كلّها، ولا يعرف صاحبها كم منها لهذا الصنف — وهو ما يوزّعه
+/// <see cref="KineticEnterprise.Api.Data.LandedCost"/> بالقيمة.</para>
+///
+/// <para><b>ولا يدخل في إجمالي الأمر:</b> ذاك ما سيطالب به المورّد
+/// وتُطابَق به فاتورته. وضمُّ الشحن إليه يجعل كل فاتورة مورّد تبدو ناقصة.
+/// </para>
+/// </summary>
+public class PurchaseOrderCharge
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid PurchaseOrderId { get; set; }
+    public Guid OrganizationId { get; set; }
+
+    /// <summary>ما هو: «شحن بحري»، «تخليص جمركي»، «نقل داخلي».</summary>
+    public string Label { get; set; } = "";
+
+    public decimal Amount { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }
 
 /// <summary>

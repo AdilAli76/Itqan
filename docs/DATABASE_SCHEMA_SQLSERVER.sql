@@ -640,10 +640,30 @@ CREATE TABLE purchase_receipt_items (
   quantity DECIMAL(14,3) NOT NULL,
   batch_number NVARCHAR(60) NOT NULL DEFAULT '',
   expiry_date DATE NULL,
-  -- لقطة التكلفة وقت الوصول: تكلفة سطر الأمر قد تُعدَّل لاحقاً، والمستند
-  -- يبقى شاهداً على ما وصل بأي سعر — أساس التقييم وتوزيع تكلفة الشحنة.
-  unit_cost DECIMAL(14,2) NOT NULL DEFAULT 0
+  -- لقطة التكلفة وقت الوصول، **محمَّلةً** بنصيب الوحدة من مصاريف الشحنة
+  -- (راجع Data/LandedCost.cs). وهي التي تدخل الدفعة وتُحسب منها تكلفة
+  -- البضاعة المباعة.
+  unit_cost DECIMAL(14,2) NOT NULL DEFAULT 0,
+  -- سعر المورّد وحده: مطابقة فاتورته تقارن بما طالب هو به، والفرق بينهما
+  -- شحنٌ يطالب به غيره. وبعمود واحد يستحيل التمييز بعد الحفظ.
+  supplier_unit_cost DECIMAL(14,2) NOT NULL DEFAULT 0
 );
+GO
+
+-- مصاريف الشحنة الواردة — تُوزَّع بالقيمة على سطور الأمر (LandedCost.cs).
+-- على الأمر لا على السطر: فاتورة الناقل مبلغٌ واحد للشحنة كلّها. ولا تدخل
+-- في إجمالي الأمر: ذاك ما يطالب به المورّد وتُطابَق به فاتورته.
+CREATE TABLE purchase_order_charges (
+  id UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
+  purchase_order_id UNIQUEIDENTIFIER NOT NULL REFERENCES purchase_orders(id) ON DELETE CASCADE,
+  organization_id UNIQUEIDENTIFIER NOT NULL REFERENCES organizations(id),
+  label NVARCHAR(120) NOT NULL DEFAULT '',
+  amount DECIMAL(18,2) NOT NULL DEFAULT 0,
+  created_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
+);
+GO
+
+CREATE INDEX ix_purchase_order_charges_order ON purchase_order_charges(purchase_order_id);
 GO
 
 CREATE TABLE stock_counts (
@@ -1674,6 +1694,12 @@ GO
 CREATE SECURITY POLICY Security.UserPasskeysPolicy
   ADD FILTER PREDICATE Security.fn_OrgOnlyPredicate(organization_id) ON dbo.user_passkeys,
   ADD BLOCK PREDICATE Security.fn_OrgOnlyPredicate(organization_id) ON dbo.user_passkeys AFTER INSERT
+  WITH (STATE = ON);
+GO
+
+CREATE SECURITY POLICY Security.PurchaseOrderChargesPolicy
+  ADD FILTER PREDICATE Security.fn_OrgOnlyPredicate(organization_id) ON dbo.purchase_order_charges,
+  ADD BLOCK PREDICATE Security.fn_OrgOnlyPredicate(organization_id) ON dbo.purchase_order_charges AFTER INSERT
   WITH (STATE = ON);
 GO
 

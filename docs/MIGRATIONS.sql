@@ -2762,6 +2762,62 @@ END
 GO
 
 -- ----------------------------------------------------------------------------
+--  مصاريف الشحنة الواردة — التكلفة المحمَّلة
+--
+--  صنفٌ بعشرة من المورّد وشحنةٌ بمئة وخمسين ليست تكلفته عشرة. وحتى الآن
+--  كان سعر المورّد وحده هو تكلفة الصنف وتكلفة البضاعة المباعة معاً، فالربح
+--  يظهر أعلى ممّا هو بمقدار الشحن كلّه — وقد تُباع البضاعة بخسارة والتقرير
+--  يقول ربحاً.
+--
+--  والمصاريف على الأمر لا على السطر: فاتورة الناقل مبلغٌ واحد للشحنة كلّها.
+--  وتُوزَّع بالقيمة — راجع Data/LandedCost.cs.
+-- ----------------------------------------------------------------------------
+IF OBJECT_ID('dbo.purchase_order_charges', 'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.purchase_order_charges (
+      id UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
+      purchase_order_id UNIQUEIDENTIFIER NOT NULL
+        REFERENCES dbo.purchase_orders(id) ON DELETE CASCADE,
+      organization_id UNIQUEIDENTIFIER NOT NULL REFERENCES dbo.organizations(id),
+      label NVARCHAR(120) NOT NULL DEFAULT N'',
+      amount DECIMAL(18,2) NOT NULL DEFAULT 0,
+      created_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
+    );
+    PRINT N'أُنشئ جدول purchase_order_charges';
+END
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'ix_purchase_order_charges_order')
+   AND OBJECT_ID('dbo.purchase_order_charges', 'U') IS NOT NULL
+BEGIN
+    CREATE INDEX ix_purchase_order_charges_order
+        ON dbo.purchase_order_charges(purchase_order_id);
+    PRINT N'أُنشئ فهرس ix_purchase_order_charges_order';
+END
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.security_policies WHERE name = 'PurchaseOrderChargesPolicy')
+   AND OBJECT_ID('dbo.purchase_order_charges', 'U') IS NOT NULL
+EXEC('
+CREATE SECURITY POLICY Security.PurchaseOrderChargesPolicy
+  ADD FILTER PREDICATE Security.fn_OrgOnlyPredicate(organization_id) ON dbo.purchase_order_charges,
+  ADD BLOCK PREDICATE Security.fn_OrgOnlyPredicate(organization_id) ON dbo.purchase_order_charges AFTER INSERT
+  WITH (STATE = ON);');
+GO
+
+-- سعر المورّد وحده بجوار التكلفة المحمَّلة على مستند الاستلام.
+--
+-- صفرٌ في المستندات القديمة يعني «لا فرق»: كل ما استُلم قبل هذه الميزة
+-- دخل بسعر المورّد نفسه ولا شحن مرسملاً عليه.
+IF NOT EXISTS (SELECT 1 FROM sys.columns
+               WHERE object_id = OBJECT_ID('dbo.purchase_receipt_items') AND name = 'supplier_unit_cost')
+BEGIN
+    ALTER TABLE dbo.purchase_receipt_items ADD supplier_unit_cost DECIMAL(18,2) NOT NULL
+        CONSTRAINT DF_purchase_receipt_items_supplier_unit_cost DEFAULT 0;
+    PRINT N'أُضيف عمود purchase_receipt_items.supplier_unit_cost';
+END
+GO
+
 --  مفاتيح المرور (passkeys) — فتح الجلسة المقفلة بلا كلمة مرور
 --
 --  الشاشة تبقى مفتوحة على حساب المدير بينما يقوم من مكتبه، وقفلُها لا
