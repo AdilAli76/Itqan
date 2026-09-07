@@ -107,7 +107,13 @@ jobs:
           # والفراغ وحدهما، فتشغيلٌ يدويّ على فرع يمرّ باسم الفرع — وقع
           # فعلاً فبُنيت حزمة تُسمّي نفسها «main» وتُعلنها نسخةً للأجهزة.
           NAME="${GITHUB_REF_NAME#v}"
-          case "$NAME" in [0-9]*.[0-9]*) ;; *) NAME="0.0.0" ;; esac
+          # ‏وبناءٌ بلا وسم يأخذ رقم جولته لا صفراً ثابتاً.
+          #
+          # ‏صفرٌ ثابت يعني أن كل بناءات التجربة تُسمّي نفسها 0.0.0،
+          # فلا يعرف المجرِّب أعلى جهازه آخرُها أم بناءُ الأمس، ولا
+          # يرى شريط «تحديث متاح» لأن الرقم لم يزد. ورقم الجولة
+          # يتزايد أبداً ولا يتكرّر.
+          case "$NAME" in [0-9]*.[0-9]*) ;; *) NAME="0.0.$GITHUB_RUN_NUMBER" ;; esac
           echo "الاسم: $NAME   الرقم: $GITHUB_RUN_NUMBER"
           flutter build apk --release --build-name "$NAME" --build-number "$GITHUB_RUN_NUMBER"
           mv build/app/outputs/flutter-apk/app-release.apk "itqan-$NAME.apk"
@@ -182,7 +188,8 @@ jobs:
           # أقدم دائماً فيعرض «تحديث متاح» بلا انقطاع.
           # ‏نفس حارس وظيفة الأندرويد: الشكل لا الاستثناءات — راجعه هناك.
           $name = "${env:GITHUB_REF_NAME}" -replace '^v',''
-          if ($name -notmatch '^[0-9]+\.[0-9]') { $name = '0.0.0' }
+          # ‏نفس حارس وظيفة الأندرويد ونفس اشتقاقه — راجعه هناك.
+          if ($name -notmatch '^[0-9]+\.[0-9]') { $name = "0.0.${env:GITHUB_RUN_NUMBER}" }
           Write-Host "version: $name  build: ${env:GITHUB_RUN_NUMBER}"
           flutter clean
           flutter pub get

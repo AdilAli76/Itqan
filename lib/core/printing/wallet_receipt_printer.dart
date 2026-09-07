@@ -1,7 +1,7 @@
 import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
-import 'package:printing/printing.dart';
+import 'receipt_printer.dart' show printPdfFast;
 import '../pdf/arabic_pdf_theme.dart';
 
 final _currencyFormat = NumberFormat('#,##0.00', 'en');
@@ -74,5 +74,5 @@ Future<void> printWalletDeduction({
     ),
   );
 
-  await Printing.layoutPdf(onLayout: (format) => doc.save());
+  await printPdfFast(doc.save);
 }

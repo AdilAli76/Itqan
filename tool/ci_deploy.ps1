@@ -215,6 +215,25 @@ if ($RunId) {
 
     $apkDir = Get-RunArtifact 'itqan-apk'
     if ($apkDir) { $apkLocal = Get-ChildItem -Path $apkDir -Filter 'itqan-*.apk' -File | Select-Object -First 1 }
+
+    # ‏ورقم النسخة يُشتقّ من رقم الجولة إن لم يُمرَّر.
+    #
+    # ‏وهو ما يجعل بناء التجربة قابلاً للتمييز أصلاً: البناء بلا وسم
+    # يسمّي نفسه 0.0.<رقم الجولة> (راجع سير البناء)، فإعلانه هنا يجعل
+    # شريط «تحديث متاح» يظهر لمن على بناءٍ أقدم. وبلا إعلانٍ كان
+    # المجرِّب ينشر ثم يفتح جهازه فلا يرى جديداً ولا يعرف السبب — لأن
+    # جهازه ما زال على البناء السابق ولا شيء أخبره.
+    #
+    # ‏ولا يُخشى من إعلانه على من هو على إصدارٍ موسوم: المقارنة رقمية،
+    # و0.0.26 أقدم من 1.6.0 — فلا يُدعى أحدٌ إلى الرجوع إلى الوراء.
+    if (-not $Version) {
+        try {
+            $run = Invoke-RestMethod -Headers $auth -Uri "https://api.github.com/repos/$Repo/actions/runs/$RunId"
+            if ($run.run_number) { $Version = "0.0.$($run.run_number)" }
+        } catch {
+            Warn 'تعذّرت قراءة رقم الجولة — تُخطّى نقطة التحديث.'
+        }
+    }
 }
 else {
     $rel = Invoke-RestMethod -Headers $auth -Uri "https://api.github.com/repos/$Repo/releases/tags/$Tag"

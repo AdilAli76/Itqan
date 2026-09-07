@@ -662,7 +662,14 @@ class _PosScreenState extends ConsumerState<PosScreen> {
           SnackBar(
             content: Text('تم إصدار الفاتورة $invoiceNumber بنجاح'),
             action: SnackBarAction(label: 'طباعة الإيصال', onPressed: () => _printReceipt(invoiceId)),
-            duration: const Duration(seconds: 6),
+            // ✕ يُزيلها فوراً، وأربع ثوانٍ بدل ستّ.
+            //
+            // الرسالة تقع أسفل الشاشة حيث لوحة الأرقام وزرّ الدفع، فتحجب
+            // بدء الفاتورة التالية. وستّ ثوانٍ في طابورٍ من عشرين زبوناً
+            // دقيقتان يقفها الناس لأجل رسالة قُرئت في نصف ثانية. ومن أراد
+            // الطباعة يجدها، ومن لم يُردها يُزيلها بضغطة.
+            showCloseIcon: true,
+            duration: const Duration(seconds: 4),
           ),
         );
       }

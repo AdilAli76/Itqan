@@ -38,7 +38,37 @@ Future<void> printInvoiceReceipt({
     template: template,
     logoBytes: logoBytes,
   ));
-  await Printing.layoutPdf(onLayout: (format) async => doc.save());
+  await printPdfFast(doc.save);
+}
+
+/// يطبع بلا نافذة معاينة إن وُجدت طابعةٌ افتراضية على الجهاز.
+///
+/// <para><b>سبب وجودها:</b> `Printing.layoutPdf` تفتح معاينة النظام —
+/// نافذةً تملأ الشاشة ولا تُغلَق إلا بضغطةٍ يبحث عنها الكاشير. وهي مقبولة
+/// لتقريرٍ يُطبع مرّةً في الشهر، وثقيلة على إيصالٍ يُطبع مئتي مرّة في
+/// اليوم: الزبون التالي واقفٌ، والكاشير يبحث عن زرّ إغلاق.</para>
+///
+/// <para>ومن ضغط «طباعة الإيصال» قد أعلن أنه يريد الطباعة — فلا معنى
+/// لأن يُسأل ثانيةً «على أي طابعة؟» وهو يعرف أن عنده واحدة.</para>
+///
+/// <para><b>وتسقط إلى المعاينة عند أوّل شكّ:</b> لا طابعة افتراضية، أو
+/// المنصّة لا تُعدّد الطابعات (الويب)، أو فشل التعداد. فالمعاينة تُبطئ،
+/// وغيابُ الطباعة أصلاً يُفقد الزبون إيصاله.</para>
+Future<void> printPdfFast(Future<Uint8List> Function() build) async {
+  try {
+    final printers = await Printing.listPrinters();
+    final byDefault = printers.where((p) => p.isDefault && p.isAvailable);
+    if (byDefault.isNotEmpty) {
+      final ok = await Printing.directPrintPdf(
+        printer: byDefault.first,
+        onLayout: (format) async => build(),
+      );
+      if (ok) return;
+    }
+  } catch (_) {
+    // منصّةٌ لا تدعم التعداد، أو طابعةٌ رفضت المهمّة — تُفتح المعاينة.
+  }
+  await Printing.layoutPdf(onLayout: (format) async => build());
 }
 
 /// صفحة الإيصال — مفصولةً عن الطباعة **كي تستعملها المعاينة نفسها**.
