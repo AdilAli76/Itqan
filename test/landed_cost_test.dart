@@ -116,7 +116,11 @@ void main() {
       // وهو بيت الداء: سعر المورّد في الدفعة يعني تكلفة بضاعةٍ مباعة ناقصة
       // أبداً — والربح أعلى ممّا هو بمقدار الشحن كلّه.
       expect(controller, contains('unitCost: landedUnitCost'));
-      expect(controller, contains('product.CostPrice = landedUnitCost;'));
+      // وتكلفة الصنف المرجعية تُشتقّ من التكلفة المحمَّلة كذلك — مهما كانت
+      // طريقة التكلفة التي اختارتها المنظمة، فالمدخل إليها هو `landedUnitCost`
+      // لا سعر المورّد.
+      expect(controller, contains('product.CostPrice = await InventoryCosting.ReferenceCostAsync('));
+      expect(controller, contains('costingMethod, item.ProductId, landedUnitCost);'));
     });
 
     test('ونصيب الوحدة يُحسب على الكميّة المطلوبة قبل الحلقة', () {
