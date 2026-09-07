@@ -24,6 +24,7 @@ namespace KineticEnterprise.Api.Controllers;
 /// </param>
 public record LoginRequest(string EmailOrUsername, string Password, bool RememberMe = false);
 public record ChangePasswordRequest(string CurrentPassword, string NewPassword);
+public record VerifyPasswordRequest(string Password);
 public record LoginResponse(
     string Token, string Role, Guid OrganizationId, Guid? BranchId, string FullName,
     /// لوح خلفية فرع المستخدم — راجع Branch.ThemePalette.
@@ -169,6 +170,52 @@ public class AuthController : ControllerBase
 
         await _db.SaveChangesAsync();
         return NoContent();
+    }
+
+    /// <summary>
+    /// تحقّقٌ من كلمة مرور صاحب الجلسة — لفتح شاشةٍ مقفلة لا للدخول.
+    ///
+    /// <para><b>سبب وجودها:</b> القفل السريع يُفتح بمفتاح مرور، ولا بدّ له
+    /// من طريقٍ ثانٍ: جهازٌ بلا قارئ بصمة، أو مفتاحٌ لم يُسجَّل بعد، أو
+    /// متصفّحٌ لا يدعم المفاتيح. والطريق الثاني كلمةُ المرور — ولا سبيل
+    /// لفحصها إلا نقطةٌ تفحصها.</para>
+    ///
+    /// <para><b>ولا يُعاد استعمال <c>login</c> لهذا:</b> تلك تأخذ بريداً
+    /// وكلمة، فيلزم أن تحفظ الواجهة بريد المستخدم لتفتح به قفلاً — والتوكن
+    /// لا يحمله أصلاً. وهذه لا تأخذ إلا الكلمة، والحسابُ من التوكن الذي لا
+    /// يُزوَّر، فلا تصلح لتخمين حسابٍ آخر أصلاً.</para>
+    ///
+    /// <para><b>ولا تُصدِر توكناً ولا تمدّ جلسة:</b> ردُّها نعم أو لا. فمن
+    /// سرق كلمة المرور لا ينال بها هنا شيئاً لا يناله من شاشة الدخول،
+    /// والمحاولة تُسجَّل في سجلّ الدخول كما تُسجَّل هناك.</para>
+    /// </summary>
+    [Microsoft.AspNetCore.Authorization.Authorize]
+    [HttpPost("verify-password")]
+    public async Task<IActionResult> VerifyPassword(VerifyPasswordRequest request)
+    {
+        var raw = User.FindFirstValue(JwtRegisteredClaimNames.Sub)
+                  ?? User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (!Guid.TryParse(raw, out var userId)) return Unauthorized();
+
+        var user = await _db.AppUsers.FirstOrDefaultAsync(u => u.Id == userId);
+        if (user is null) return Unauthorized();
+
+        var ok = BCrypt.Net.BCrypt.Verify(request.Password ?? "", user.PasswordHash);
+
+        // تُسجَّل كما تُسجَّل محاولة الدخول: من يفكّ قفل جهازٍ متروك يفعل
+        // ما يفعله الداخل من الشاشة الأولى، وسجلٌّ يرى الأولى ولا يرى هذه
+        // يُظهر جهازاً لم يدخله أحد وقد دخله من ليس صاحبه.
+        _db.LoginHistories.Add(new LoginHistory
+        {
+            UserId = user.Id,
+            OrganizationId = user.OrganizationId,
+            IpAddress = HttpContext.Connection.RemoteIpAddress?.ToString(),
+            DeviceInfo = Request.Headers.UserAgent.ToString(),
+            Success = ok,
+        });
+        await _db.SaveChangesAsync();
+
+        return ok ? NoContent() : BadRequest(new { message = "كلمة المرور غير صحيحة" });
     }
 
     /// <summary>مدّة الجلسة — رقمٌ واحد يقرؤه الإصدار والتجديد معاً.</summary>

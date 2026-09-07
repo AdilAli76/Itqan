@@ -3,6 +3,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../auth/current_user.dart';
+import '../auth/lock_screen.dart';
+import '../auth/session_lock.dart';
 import '../auth/session_expiry_watch.dart';
 import '../network/api_client.dart';
 import '../network/realtime_listener.dart';
@@ -142,6 +144,9 @@ class _AppShellState extends ConsumerState<AppShell> {
     CommandPalette.show(context, isPlatformAdmin: _isPlatformAdmin);
   }
 
+  /// يقفل الشاشة بلا إنهاء الجلسة — راجع [sessionLockProvider].
+  void _lock() => ref.read(sessionLockProvider.notifier).lock();
+
   Future<void> _logout() async {
     // إغلاق الاتصال اللحظي قبل مسح التوكن — تركه مفتوحاً يعني بقاء قناة
     // مصرَّح لها بعد خروج المستخدم حتى تنتهي مهلة الخادم.
@@ -184,13 +189,23 @@ class _AppShellState extends ConsumerState<AppShell> {
         const SingleActivator(LogicalKeyboardKey.keyK, control: true): _openPalette,
         // Cmd+K على macOS — نفس الاختصار الذي اعتاده المستخدم هناك.
         const SingleActivator(LogicalKeyboardKey.keyK, meta: true): _openPalette,
+        // Ctrl+L يقفل الشاشة. اختصارٌ لا زرّ على سطح المكتب: الشريط العلوي
+        // مشترَكٌ مع كل شاشة ولقطاتها، وزرٌّ فيه يعني تسعاً وتسعين لقطة
+        // تتغيّر لأجل زرّ. والزرّ موجود على الهاتف حيث لا اختصارات، وفي
+        // شاشة الأمان حيث تُدار المفاتيح.
+        const SingleActivator(LogicalKeyboardKey.keyL, control: true): _lock,
+        const SingleActivator(LogicalKeyboardKey.keyL, meta: true): _lock,
       },
       child: Focus(
         autofocus: true,
         // RealtimeListener هنا لا داخل كل شاشة: التبويب الخلفي يجب أن يتحدّث
         // أيضاً، وإلا عاد المستخدم إليه ليجد بيانات قديمة بلا أي إشارة.
         child: RealtimeListener(
-          child: _buildScaffold(context, tabsState, isDesktop, useSidebar, useNavbar, tabBar, content),
+          // الغطاء فوق القشرة كلّها: التبويبات المفتوحة تبقى كما هي تحته،
+          // فقفلُ الشاشة لا يُضيّع فاتورةً نصف مكتوبة — راجع [SessionLockGate].
+          child: SessionLockGate(
+            child: _buildScaffold(context, tabsState, isDesktop, useSidebar, useNavbar, tabBar, content),
+          ),
         ),
       ),
     );
@@ -224,6 +239,11 @@ class _AppShellState extends ConsumerState<AppShell> {
                   onPressed: () => context.go('/change-password'),
                   icon: const Icon(Icons.password_outlined),
                   tooltip: 'تغيير كلمة المرور',
+                ),
+                IconButton(
+                  onPressed: _lock,
+                  icon: const Icon(Icons.lock_outline),
+                  tooltip: 'اقفل الشاشة',
                 ),
                 IconButton(onPressed: _logout, icon: const Icon(Icons.logout), tooltip: 'تسجيل الخروج'),
               ],
