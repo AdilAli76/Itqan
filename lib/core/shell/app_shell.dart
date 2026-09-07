@@ -3,6 +3,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../auth/current_user.dart';
+import '../auth/lock_screen.dart';
+import '../auth/session_lock.dart';
 import '../auth/session_expiry_watch.dart';
 import '../network/api_client.dart';
 import '../network/realtime_listener.dart';
@@ -142,6 +144,15 @@ class _AppShellState extends ConsumerState<AppShell> {
     CommandPalette.show(context, isPlatformAdmin: _isPlatformAdmin);
   }
 
+  /// مهلة الضغطتين — ومدّة الرسالة نفسها، فلا تختفي قبل أن تنتهي فرصتها.
+  static const _exitWindow = Duration(seconds: 2);
+
+  /// وقت آخر ضغطة رجوع بلا ما يُرجع إليه.
+  DateTime? _lastBackAt;
+
+  /// يقفل الشاشة بلا إنهاء الجلسة — راجع [sessionLockProvider].
+  void _lock() => ref.read(sessionLockProvider.notifier).lock();
+
   Future<void> _logout() async {
     // إغلاق الاتصال اللحظي قبل مسح التوكن — تركه مفتوحاً يعني بقاء قناة
     // مصرَّح لها بعد خروج المستخدم حتى تنتهي مهلة الخادم.
@@ -179,21 +190,83 @@ class _AppShellState extends ConsumerState<AppShell> {
     // المشترك لكل التبويبات، فيلتقط Ctrl+K أياً كانت الشاشة النشطة —
     // بشرط ألّا يكون الفوكس داخل حقل نصّي يستهلك الضغطة أولاً، وهو ما
     // يضمنه Shortcuts تلقائياً.
-    return CallbackShortcuts(
-      bindings: {
-        const SingleActivator(LogicalKeyboardKey.keyK, control: true): _openPalette,
-        // Cmd+K على macOS — نفس الاختصار الذي اعتاده المستخدم هناك.
-        const SingleActivator(LogicalKeyboardKey.keyK, meta: true): _openPalette,
+    // <summary>
+    // زرّ الرجوع في الهاتف كان يُغلق التطبيق من أوّل ضغطة — شكوى زبون.
+    //
+    // <para><b>السبب:</b> بعد الدخول لا مسار في الموجّه إلا <c>/app</c>
+    // وحده؛ التنقّل كلّه بين تبويبات في الذاكرة (راجع [openTabsProvider]).
+    // فلا يجد النظام ما يرجع إليه، فيُسلّم الضغطة إلى أندرويد — وأندرويد
+    // يفهمها «اخرج».</para>
+    //
+    // <para><b>والخروج لا يكون بضغطةٍ واحدة أبداً:</b> ولو لم يبقَ ما
+    // يُرجع إليه. كاشيرٌ يضغط رجوع بالخطأ في منتصف فاتورة كان يفقدها.</para>
+    // </summary>
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) return;
+        _handleBack();
       },
-      child: Focus(
-        autofocus: true,
-        // RealtimeListener هنا لا داخل كل شاشة: التبويب الخلفي يجب أن يتحدّث
-        // أيضاً، وإلا عاد المستخدم إليه ليجد بيانات قديمة بلا أي إشارة.
-        child: RealtimeListener(
-          child: _buildScaffold(context, tabsState, isDesktop, useSidebar, useNavbar, tabBar, content),
+      child: CallbackShortcuts(
+        bindings: {
+          const SingleActivator(LogicalKeyboardKey.keyK, control: true): _openPalette,
+          // Cmd+K على macOS — نفس الاختصار الذي اعتاده المستخدم هناك.
+          const SingleActivator(LogicalKeyboardKey.keyK, meta: true): _openPalette,
+          // Ctrl+L يقفل الشاشة. اختصارٌ لا زرّ على سطح المكتب: الشريط العلوي
+          // مشترَكٌ مع كل شاشة ولقطاتها، وزرٌّ فيه يعني تسعاً وتسعين لقطة
+          // تتغيّر لأجل زرّ. والزرّ موجود على الهاتف حيث لا اختصارات، وفي
+          // شاشة الأمان حيث تُدار المفاتيح.
+          const SingleActivator(LogicalKeyboardKey.keyL, control: true): _lock,
+          const SingleActivator(LogicalKeyboardKey.keyL, meta: true): _lock,
+        },
+        child: Focus(
+          autofocus: true,
+          // RealtimeListener هنا لا داخل كل شاشة: التبويب الخلفي يجب أن
+          // يتحدّث أيضاً، وإلا عاد المستخدم إليه ليجد بيانات قديمة بلا إشارة.
+          child: RealtimeListener(
+            // الغطاء فوق القشرة كلّها: التبويبات المفتوحة تبقى كما هي تحته،
+            // فقفلُ الشاشة لا يُضيّع فاتورةً نصف مكتوبة — راجع [SessionLockGate].
+            child: SessionLockGate(
+              child: _buildScaffold(context, tabsState, isDesktop, useSidebar, useNavbar, tabBar, content),
+            ),
+          ),
         ),
       ),
     );
+  }
+
+  /// <summary>
+  /// ما تفعله ضغطة الرجوع: التبويب السابق، ثم الأوّل، ثم تأكيد الخروج.
+  ///
+  /// <para>والتأكيد ليس حوار «هل أنت متأكد؟» بل ضغطتان متتاليتان — أسرع
+  /// لمن يريد الخروج فعلاً، ويكفي لمن لم يُرده.</para>
+  /// </summary>
+  void _handleBack() {
+    // والشاشة المقفولة لا يخترقها زرّ الرجوع: تبديل التبويب تحت الغطاء
+    // يعني أن من وجد الجهاز متروكاً يقلّب شاشاته وإن لم يفتحه.
+    if (ref.read(sessionLockProvider)) return;
+
+    if (ref.read(openTabsProvider.notifier).back()) return;
+
+    final tabsState = ref.read(openTabsProvider);
+    final first = tabsState.tabs.isEmpty ? null : tabsState.tabs.first.route;
+    if (first != null && tabsState.activeRoute != first) {
+      ref.read(openTabsProvider.notifier).activate(first);
+      return;
+    }
+
+    final now = DateTime.now();
+    final last = _lastBackAt;
+    if (last != null && now.difference(last) < _exitWindow) {
+      SystemNavigator.pop();
+      return;
+    }
+
+    _lastBackAt = now;
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+      content: Text('اضغط رجوع مرّةً أخرى للخروج'),
+      duration: _exitWindow,
+    ));
   }
 
   Widget _buildScaffold(
@@ -224,6 +297,11 @@ class _AppShellState extends ConsumerState<AppShell> {
                   onPressed: () => context.go('/change-password'),
                   icon: const Icon(Icons.password_outlined),
                   tooltip: 'تغيير كلمة المرور',
+                ),
+                IconButton(
+                  onPressed: _lock,
+                  icon: const Icon(Icons.lock_outline),
+                  tooltip: 'اقفل الشاشة',
                 ),
                 IconButton(onPressed: _logout, icon: const Icon(Icons.logout), tooltip: 'تسجيل الخروج'),
               ],

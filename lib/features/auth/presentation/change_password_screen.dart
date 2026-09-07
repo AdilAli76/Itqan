@@ -7,6 +7,7 @@ import '../../../core/network/api_client.dart';
 import '../../../core/responsive/breakpoints.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_text_styles.dart';
+import 'passkeys_section.dart';
 
 /// تغيير المستخدم كلمة مروره هو.
 ///
@@ -145,6 +146,10 @@ class _ChangePasswordScreenState extends ConsumerState<ChangePasswordScreen> {
               child: const Text('إلغاء'),
             ),
           ],
+          // ولا تُعرض المفاتيح في الحالة الإجبارية: من دخل بكلمةٍ مؤقّتة
+          // يجب أن يخرج من هنا بكلمةٍ جديدة لا بمفتاحٍ يعلّق الكلمة المؤقّتة
+          // على جهازه — والخادم يرفض كل شيء آخر حتى تُغيَّر أصلاً.
+          if (!widget.forced) const PasskeysSection(),
         ],
       ),
     );

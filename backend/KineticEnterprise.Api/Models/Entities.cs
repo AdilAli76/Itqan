@@ -52,7 +52,7 @@ public static class Editions
         Wallet => new[] { "pos", "customers", "reports" },
         // المحفظة ومعها المحاسبة — ولا مخزون: لا بضاعة تُقاس ولا مستودع
         // يُدار. والمصروفات تأتي مع accounting لا وحدةً مستقلّة.
-        WalletPlus => new[] { "pos", "customers", "reports", "accounting" },
+        WalletPlus => new[] { "pos", "customers", "reports", "accounting", "wallet" },
         // وحدة pharmacy فوق وحدات الإصدار القياسي لا بدلاً منها: الصيدلية
         // متجر تجزئة كامل قبل أن تكون صيدلية — لها مخزون ومشتريات وموردون.
         Pharmacy => new[] { "inventory", "pos", "customers", "reports", "pharmacy" },
@@ -87,6 +87,19 @@ public static class Editions
     public static readonly string[] AllModules =
     {
         "pos", "customers", "reports", "inventory",
+        // «wallet» — بطاقاتٌ جماعية ومرتَّباتٌ للمنتسبين.
+        //
+        // <para><b>سبب فصلها عن الإصدار:</b> كان الإصدار الجماعي محصوراً في
+        // «المحفظة بالمحاسبة»، وهو إصدارٌ **بلا بضاعة**. فجهةٌ لها بضاعة
+        // ومنتسبون معاً — محلٌّ عسكري بفروعه الغذائية، جمعيةٌ تصرف على
+        // أعضائها، شركةٌ لموظّفيها — تقع على الجانب الخطأ من الخطّ: تشتري
+        // النسخة الكاملة فتستطيع كل شيء إلا إصدار ألف بطاقة دفعةً واحدة،
+        // فتُصدرها فرادى ألف مرّة.</para>
+        //
+        // <para>ووحدةً تُباع فوق أي إصدار: هي نفسها ما تحتاجه تلك الجهات
+        // كلّها، ولا معنى لإصدارٍ رابع يجمع المحفظة والبضاعة ثم خامسٍ
+        // يجمعها بالصيدلية.</para>
+        "wallet",
         "warehouses", "valuation", "procurement", "accounting", "pharmacy",
     };
 
@@ -2490,6 +2503,51 @@ public class PurchaseOrderCharge
 
     public decimal Amount { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+}
+
+/// <summary>
+/// مفتاح مرور (passkey) مسجَّل لموظف — يفتح به جلسته المقفلة.
+///
+/// <para><b>سبب وجوده:</b> الشاشة تبقى مفتوحةً على حساب المدير بينما يقوم
+/// من مكتبه، وقفلُها لا يُستعمل ما دام فتحها يعني كتابة كلمة مرورٍ طويلة
+/// عشرين مرّةً في اليوم — فتُترك مفتوحة، أو تُكتب كلمة المرور على ورقةٍ
+/// تحت لوحة المفاتيح. والمفتاح يفتحها ببصمةٍ أو بنمط الجهاز في ثانية.</para>
+///
+/// <para><b>ولا يُصدِر جلسةً من العدم:</b> الدخول الأوّل يبقى بكلمة المرور
+/// وحدها. فمفتاحٌ مسروقٌ مع الجهاز يفتح ما هو مفتوح أصلاً على ذلك الجهاز،
+/// ولا يفتح النظام على جهازٍ آخر — وهذا حدٌّ مقصود، وتوسيعه قرارُ إدارة
+/// لا إعداد.</para>
+///
+/// <para><b>والمفتاح الخاصّ ليس هنا ولا يمكن أن يكون:</b> لا يغادر الجهاز
+/// أصلاً. المخزَّن هو العامّ وحده، وتسريب هذا الجدول كلّه لا يمكّن أحداً من
+/// انتحال أحد — بخلاف بصمات كلمات المرور.</para>
+/// </summary>
+public class UserPasskey
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid OrganizationId { get; set; }
+    public Guid UserId { get; set; }
+
+    /// <summary>معرّف الاعتماد كما أصدره المُصادِق، بترميز base64url.</summary>
+    public string CredentialId { get; set; } = "";
+
+    /// <summary>المفتاح العامّ بترميز COSE — بايتاتٌ تُقرأ عند كل تحقّق.</summary>
+    public byte[] PublicKey { get; set; } = Array.Empty<byte>();
+
+    /// <summary>
+    /// عدّاد التوقيع الأخير — حارس الاستنساخ.
+    ///
+    /// <para>يزيده المُصادِق عند كل استعمال، فعودتُه إلى الوراء تعني نسخةً
+    /// ثانية من المفتاح. وكثيرٌ من مفاتيح المرور المزامَنة تُبقيه صفراً
+    /// دائماً، فلا يُفحص إلا إذا كان المخزَّن والوارد غير صفرين.</para>
+    /// </summary>
+    public long SignCount { get; set; }
+
+    /// <summary>اسمٌ يعرّف الجهاز لصاحبه — «حاسوب المكتب»، «هاتفي».</summary>
+    public string Label { get; set; } = "";
+
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime? LastUsedAt { get; set; }
 }
 
 /// <summary>

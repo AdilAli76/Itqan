@@ -80,7 +80,7 @@ class OrganizationBranding {
 /// وهذا سبب كون هذه القائمة احتياطاً لا حساباً يُعتمد عليه.
 Set<String> modulesOfEdition(String edition) => switch (edition) {
       'wallet' => const {'pos', 'customers', 'reports'},
-      'wallet_plus' => const {'pos', 'customers', 'reports', 'accounting'},
+      'wallet_plus' => const {'pos', 'customers', 'reports', 'accounting', 'wallet'},
       'pharmacy' => const {'inventory', 'pos', 'customers', 'reports', 'pharmacy'},
       'enterprise' => const {
           'inventory', 'pos', 'customers', 'reports',

@@ -8,6 +8,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../../../core/network/api_client.dart';
 import '../../../core/printing/card_printer.dart';
+import '../../../core/printing/card_slip_printer.dart';
+import '../../../shared/widgets/printer_picker.dart';
 import '../../../core/responsive/adaptive_scaffold.dart';
 import '../../../core/theme/branding_provider.dart';
 import '../../../core/theme/app_colors.dart';
@@ -332,6 +334,14 @@ class _CardDetailDialogState extends ConsumerState<_CardDetailDialog> {
                     icon: const Icon(Icons.print_outlined, size: 18),
                     label: const Text('طباعة البطاقة (وجهان)'),
                   ),
+                  // والقسيمة الحرارية بجوارها لا بدلاً منها: البطاقة بوجهين
+                  // تُقصّ وتُلصق وتُغلَّف — ربع ساعة لا تُبذل لعشرين منتسباً
+                  // في صباح واحد، فيخرجون بلا شيء يُمسح.
+                  OutlinedButton.icon(
+                    onPressed: _working ? null : _printSlip,
+                    icon: const Icon(Icons.receipt_long_outlined, size: 18),
+                    label: const Text('قسيمة حرارية'),
+                  ),
                 ],
               ),
             ],
@@ -399,6 +409,33 @@ class _CardDetailDialogState extends ConsumerState<_CardDetailDialog> {
       // تُرمى — ومن يجدها لا يعرف إلى من يعيدها.
       supportPhone: await _issuerPhone(),
       holderPhone: widget.card['customerPhone'] as String?,
+    );
+  }
+
+  /// <summary>
+  /// قسيمة الباركود على اللفّة الحرارية — راجع [printCardSlip].
+  ///
+  /// <para>وتُسأل الطابعة أولاً: مقاس الباركود يُحسب من عرض ما تطبعه الرأس،
+  /// وطباعتُه بمقاس ٨٠ على طابعة ٥٨ تُخرج رمزاً مقصوص الطرفين لا يقرؤه
+  /// شيء — والخطأ لا يظهر إلا حين يقف صاحب البطاقة أمام الكاشير.</para>
+  /// </summary>
+  Future<void> _printSlip() async {
+    final printer = await PrinterPickerDialog.show(context, codeLength: _code.length);
+    if (printer == null || !mounted) return;
+
+    final expiryRaw = widget.card['expiryDate'] as String?;
+    final branding = ref.read(brandingProvider).valueOrNull ?? OrganizationBranding.fallback;
+
+    await printCardSlip(
+      cardCode: _code,
+      holderName: (widget.card['holderName'] as String?)?.trim().isNotEmpty == true
+          ? widget.card['holderName'] as String
+          : widget.card['customerName'] as String? ?? '',
+      orgName: branding.displayName,
+      printer: printer,
+      branchName: widget.card['branchName'] as String?,
+      supportPhone: await _issuerPhone(),
+      expiryDate: expiryRaw == null ? null : DateTime.tryParse(expiryRaw),
     );
   }
 
