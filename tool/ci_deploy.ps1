@@ -15,6 +15,14 @@
 .PARAMETER Tag
     وسم الإصدار الذي تُؤخذ منه الحزمة. مثال: v1.0.0
 
+.PARAMETER RunId
+    بديلٌ عن الوسم: رقم سير «بناء حزمة النشر» تُؤخذ حزمته من أثره
+    مباشرةً. للتجربة وحدها — راجع الشرح عند الحصول على الحزمة أدناه.
+
+.PARAMETER Version
+    رقم النسخة المُعلَن لنقطة التحديث في وضع RunId. بلاه تُنشَر الحزمة
+    ولا يُخبَر جهازٌ بتحديث — وهو الافتراض المقصود.
+
 .PARAMETER Target
     staging أو production.
 
@@ -24,7 +32,14 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)] [string]$Repo,
-    [Parameter(Mandatory = $true)] [string]$Tag,
+
+    # ‏الوسم ورقم السير كلاهما نصّ وكلاهما اختياري في التوقيع، والتحقّق
+    # أدناه لا في السمات: سير النشر يمرّر الوسيطين دائماً، وأحدهما فارغ.
+    # ومجموعات الوسائط ترى النصّ الفارغ **قيمةً مُمرَّرة** فتلتبس عليها
+    # المجموعة، فتسقط برسالةٍ عن «مجموعة غير محدَّدة» لا يفهمها أحد.
+    [string]$Tag,
+    [string]$RunId,
+    [string]$Version,
     [Parameter(Mandatory = $true)] [ValidateSet('staging', 'production')] [string]$Target,
     [Parameter(Mandatory = $true)] [string]$Token,
     [switch]$SkipDb,
@@ -47,49 +62,152 @@ function Warn($t) { Write-Host "    $t" -ForegroundColor Yellow }
 $auth = @{ Authorization = "Bearer $Token"; 'User-Agent' = 'kinetic-deploy' }
 $bin  = @{ Authorization = "Bearer $Token"; 'User-Agent' = 'kinetic-deploy'; Accept = 'application/octet-stream' }
 
-# ── 1. تنزيل الحزمة ─────────────────────────────────────────────────────
-Step 1 "تنزيل حزمة $Tag"
-
-$rel = Invoke-RestMethod -Headers $auth -Uri "https://api.github.com/repos/$Repo/releases/tags/$Tag"
-$packages = @($rel.assets | Where-Object { $_.name -like 'kinetic_pkg_*.zip' })
-if ($packages.Count -eq 0) { throw "لا حزمة مرفقة بالإصدار $Tag — راجع سير «بناء حزمة النشر»." }
-
-# حزمتان على إصدارٍ واحد = خطأ يُوقف، لا اختيارٌ عشوائي.
+# ── 0. مصدر الحزمة ──────────────────────────────────────────────────────
 #
-# يقع فعلاً: خطوة الإرفاق تفشل بعطبٍ عابر في واجهة GitHub بعد نجاح البناء
-# (HttpError: other side closed)، فيُعاد تشغيل الوظيفة — والاسم مؤرَّخ
-# بالدقيقة فتُرفَق حزمةٌ ثانية بجوار الأولى.
+# ‏مصدران لا ثالث: **إصدارٌ موسوم** وهو الأصل، أو **أثر سير بناء** وهو
+# طريقٌ للتجربة وحدها.
 #
-# وأخذُ الأولى صامتاً كان ينشر **بناءً غير الذي جُرِّب**، ولا شيء في
-# السجلّ يدلّ عليه: رقم الوسم واحد، والبصمة تُطبع ولا يقارنها أحد بذاكرته.
-# وهو نفس ما تمنعه بوّابة الإنتاج أدناه — فيُمنع هنا أيضاً لا يُترك لها.
-if ($packages.Count -gt 1) {
-    $names = ($packages | ForEach-Object { $_.name }) -join '، '
-    throw "الإصدار $Tag يحمل $($packages.Count) حزمة: $names. احذف القديمة من صفحة الإصدار وأبقِ واحدة."
+# ‏والثاني أُضيف لأن الأوّل يحتاج وسماً، والوسم قرارٌ لا يُتخذ لتجربة شاشةٍ
+# على خادم التجربة: يبقى في تاريخ المستودع، ويُعلن نسخةً للناس. فكان من
+# يريد التجربة إمّا أن يوسم إصداراً لا ينوي إصداره، أو يرفع الحزمة بيده
+# ويفقد كل ما يحرسه هذا السكربت.
+#
+# ‏ولا يبلغ الإنتاجَ أثرٌ أبداً: الأثر يُمحى بعد ثلاثين يوماً، ورقم السير
+# لا يقول ما فيه — فلا يبقى بعد شهرين ما يُراجَع به ما يعمل على الخادم.
+# والإنتاج يبقى على عقده: إصدارٌ موسوم، جُرِّب بعينه، محفوظٌ إلى الأبد.
+if ($Tag -and $RunId) {
+    throw 'مُرِّر الوسم أو رقم السير — لا كليهما. الوسم للإصدار، ورقم السير لتجربة بناءٍ لم يُوسم.'
 }
-$asset = $packages[0]
+if (-not $Tag -and -not $RunId) {
+    throw 'لا وسم ولا رقم سير. مرّر -Tag v1.2.3 لنشر إصدار، أو -RunId 12345 لنشر أثر سير بناء على التجربة.'
+}
+if ($RunId -and $RunId -notmatch '^[0-9]+$') {
+    throw "رقم السير غير رقمي: $RunId. هو الرقم في آخر رابط صفحة السير (…/actions/runs/<الرقم>)."
+}
+if ($RunId -and $Target -eq 'production') {
+    throw 'أثر السير لا يُنشر على الإنتاج. أنشئ وسماً من نفس الشيفرة وانشر إصداره — راجع الشرح أعلاه.'
+}
+if ($Tag -and $Version) {
+    throw 'رقم النسخة يُشتقّ من الوسم — لا يُمرَّر معه. و-Version لوضع RunId وحده.'
+}
+
+$source = if ($RunId) { "أثر السير #$RunId" } else { $Tag }
 
 $dir = Join-Path $env:RUNNER_TEMP 'kinetic-pkg'
 if (Test-Path $dir) { Remove-Item $dir -Recurse -Force }
 New-Item -ItemType Directory -Force -Path $dir | Out-Null
 
-$pkg = Join-Path $dir $asset.name
-Invoke-WebRequest -Headers $bin -Uri $asset.url -OutFile $pkg -UseBasicParsing
+# ‏روابط تنزيل الآثار تُحوَّل إلى مخزن كائناتٍ يوقّع الإذن في الرابط نفسه،
+# ويردّ 400 على طلبٍ يحمل ترويسة Authorization فوق ذلك. فيُقرأ التحويل
+# ثمّ يُنزَّل الهدف عارياً من الترويسة.
+function Get-ArtifactZip($url, $outFile) {
+    $location = $null
+    try {
+        Invoke-WebRequest -Headers $auth -Uri $url -MaximumRedirection 0 -UseBasicParsing -OutFile $outFile
+    } catch {
+        $resp = $_.Exception.Response
+        if (-not $resp) { throw }
+        $code = [int]$resp.StatusCode
+        if ($code -lt 300 -or $code -ge 400) { throw }
+
+        # ‏ترويسات الردّ صنفان بحسب مُحرّك الطلب: WebHeaderCollection في
+        # ويندوز باورشيل (فهرسٌ بالاسم)، وHttpResponseHeaders في السابع
+        # (خاصيّة Location). وقراءةُ أحدهما بأسلوب الآخر تُعطي $null صامتاً
+        # فيُكتب ملفٌ فارغ مكان الحزمة.
+        $location = $null
+        if ($resp.Headers.Location) { $location = [string]$resp.Headers.Location }
+        else { try { $location = @($resp.Headers['Location'])[0] } catch { } }
+        if (-not $location) { throw "تحويلٌ بلا عنوان ($code) عند تنزيل الأثر." }
+    }
+    if ($location) {
+        Invoke-WebRequest -Uri $location -OutFile $outFile -UseBasicParsing
+    }
+}
+
+function Get-RunArtifact($name) {
+    $list = Invoke-RestMethod -Headers $auth -Uri "https://api.github.com/repos/$Repo/actions/runs/$RunId/artifacts?per_page=100"
+    $hit = $list.artifacts | Where-Object { $_.name -eq $name } | Select-Object -First 1
+    if (-not $hit) { return $null }
+    if ($hit.expired) { throw "أثر «$name» في السير #$RunId انتهت مدّته (ثلاثون يوماً) — أعد البناء أو انشر إصداراً موسوماً." }
+
+    $zip = Join-Path $dir "$name.zip"
+    Get-ArtifactZip $hit.archive_download_url $zip
+    $into = Join-Path $dir $name
+    Expand-Archive -LiteralPath $zip -DestinationPath $into -Force
+    return $into
+}
+
+# ── 1. الحصول على الحزمة ────────────────────────────────────────────────
+Step 1 "تنزيل حزمة $source"
+
+$rel = $null
+$apkAsset = $null      # مرفَق الإصدار (وضع الوسم)
+$apkLocal = $null      # ملفٌّ على القرص (وضع الأثر)
+$wantSha = $null       # البصمة المكتوبة وقت البناء
+
+if ($RunId) {
+    $pkgDir = Get-RunArtifact 'kinetic_pkg'
+    if (-not $pkgDir) { throw "لا أثر باسم kinetic_pkg في السير #$RunId — أهو سير «بناء حزمة النشر»؟" }
+
+    # نفس قاعدة الإصدار: حزمتان = وقوف لا اختيارٌ عشوائي.
+    $found = @(Get-ChildItem -Path $pkgDir -Filter 'kinetic_pkg_*.zip' -File)
+    if ($found.Count -eq 0) { throw "أثر kinetic_pkg في السير #$RunId لا يحوي حزمة." }
+    if ($found.Count -gt 1) {
+        throw "أثر السير #$RunId يحمل $($found.Count) حزمة: $((($found | ForEach-Object { $_.Name }) -join '، '))."
+    }
+
+    $pkgName = $found[0].Name
+    $pkg = $found[0].FullName
+    $sigFile = Get-ChildItem -Path $pkgDir -Filter '*.sha256' -File | Select-Object -First 1
+    if ($sigFile) { $wantSha = (Get-Content -LiteralPath $sigFile.FullName -Raw) -replace '[^0-9A-Fa-f]', '' }
+
+    $apkDir = Get-RunArtifact 'itqan-apk'
+    if ($apkDir) { $apkLocal = Get-ChildItem -Path $apkDir -Filter 'itqan-*.apk' -File | Select-Object -First 1 }
+}
+else {
+    $rel = Invoke-RestMethod -Headers $auth -Uri "https://api.github.com/repos/$Repo/releases/tags/$Tag"
+    $packages = @($rel.assets | Where-Object { $_.name -like 'kinetic_pkg_*.zip' })
+    if ($packages.Count -eq 0) { throw "لا حزمة مرفقة بالإصدار $Tag — راجع سير «بناء حزمة النشر»." }
+
+    # حزمتان على إصدارٍ واحد = خطأ يُوقف، لا اختيارٌ عشوائي.
+    #
+    # يقع فعلاً: خطوة الإرفاق تفشل بعطبٍ عابر في واجهة GitHub بعد نجاح البناء
+    # (HttpError: other side closed)، فيُعاد تشغيل الوظيفة — والاسم مؤرَّخ
+    # بالدقيقة فتُرفَق حزمةٌ ثانية بجوار الأولى.
+    #
+    # وأخذُ الأولى صامتاً كان ينشر **بناءً غير الذي جُرِّب**، ولا شيء في
+    # السجلّ يدلّ عليه: رقم الوسم واحد، والبصمة تُطبع ولا يقارنها أحد بذاكرته.
+    # وهو نفس ما تمنعه بوّابة الإنتاج أدناه — فيُمنع هنا أيضاً لا يُترك لها.
+    if ($packages.Count -gt 1) {
+        $names = ($packages | ForEach-Object { $_.name }) -join '، '
+        throw "الإصدار $Tag يحمل $($packages.Count) حزمة: $names. احذف القديمة من صفحة الإصدار وأبقِ واحدة."
+    }
+    $asset = $packages[0]
+    $pkgName = $asset.name
+    $pkg = Join-Path $dir $pkgName
+    Invoke-WebRequest -Headers $bin -Uri $asset.url -OutFile $pkg -UseBasicParsing
+
+    $sig = $rel.assets | Where-Object { $_.name -like '*.sha256' } | Select-Object -First 1
+    if ($sig) {
+        $sigFile = Join-Path $dir 'pkg.sha256'
+        Invoke-WebRequest -Headers $bin -Uri $sig.url -OutFile $sigFile -UseBasicParsing
+        $wantSha = (Get-Content -LiteralPath $sigFile -Raw) -replace '[^0-9A-Fa-f]', ''
+    }
+
+    $apkAsset = $rel.assets | Where-Object { $_.name -like 'itqan-*.apk' } | Select-Object -First 1
+}
+
 $sha = (Get-FileHash -LiteralPath $pkg -Algorithm SHA256).Hash
-Ok "$($asset.name)  ($([math]::Round((Get-Item $pkg).Length / 1MB, 1)) ميغابايت)"
+Ok "$pkgName  ($([math]::Round((Get-Item $pkg).Length / 1MB, 1)) ميغابايت)"
 Ok "البصمة: $sha"
 
-# البصمة تُقارَن بالمرفَق الذي كُتب وقت البناء: تنزيلٌ مبتور يُنتج ملفاً
-# صالح الاسم فاسد المحتوى، ويُفكّ نصفَ حزمة فوق نشرٍ يعمل.
-$sig = $rel.assets | Where-Object { $_.name -like '*.sha256' } | Select-Object -First 1
-if ($sig) {
-    $sigFile = Join-Path $dir 'pkg.sha256'
-    Invoke-WebRequest -Headers $bin -Uri $sig.url -OutFile $sigFile -UseBasicParsing
-    $want = (Get-Content -LiteralPath $sigFile -Raw) -replace '[^0-9A-Fa-f]', ''
-    if ($want.Length -ge 64 -and $want.Substring(0, 64) -ne $sha) {
-        throw 'بصمة الحزمة المُنزَّلة لا تطابق المرفَق — التنزيل مبتور أو الحزمة استُبدلت.'
+# البصمة تُقارَن بالتي كُتبت وقت البناء: نقلٌ مبتور يُنتج ملفاً صالح الاسم
+# فاسد المحتوى، ويُفكّ نصفَ حزمة فوق نشرٍ يعمل.
+if ($wantSha -and $wantSha.Length -ge 64) {
+    if ($wantSha.Substring(0, 64) -ne $sha) {
+        throw 'بصمة الحزمة لا تطابق المكتوبة وقت البناء — النقل مبتور أو الحزمة استُبدلت.'
     }
-    Ok 'البصمة تطابق المرفَق'
+    Ok 'البصمة تطابق المكتوبة وقت البناء'
 }
 
 # ── 2. وجهة النشر ───────────────────────────────────────────────────────
@@ -238,7 +356,11 @@ Step 5 'نسخ الأجهزة ونقطة التحديث'
 # ويُوضع في موضعين لغرضين مختلفين:
 #   $root\desktop        — نسخةٌ على الخادم تُنسخ إلى أجهزة المحلّ بالشبكة.
 #   wwwroot\app\*.zip    — رابط تنزيل من نطاقك، كما يفعل الأندرويد تماماً.
-$deskVersion = $Tag -replace '^v', ''
+# ‏رقم النسخة من الوسم، أو من -Version في وضع الأثر. وبلا أيّهما لا
+# نسخة: أثرٌ بُني على فرعٍ لا يحمل رقماً يُعلَن، واختراعُ رقمٍ له يعني
+# أجهزةً تُخبَر بتحديثٍ إلى نسخةٍ لا وجود لها في أي إصدار.
+$version = if ($Tag) { $Tag -replace '^v', '' } else { $Version }
+$deskVersion = if ($version) { $version } else { "run$RunId" }
 $deskZipName = "itqan-desktop-$deskVersion.zip"
 
 # يُهيَّأ صراحةً: يُقرأ في كتلةٍ أخرى بعد عشرات الأسطر، ومتغيّرٌ لم يُعرَّف
@@ -275,12 +397,16 @@ try {
 }
 
 
-$apk = $rel.assets | Where-Object { $_.name -like 'itqan-*.apk' } | Select-Object -First 1
-if (-not $apk) {
-    Warn 'لا حزمة أندرويد في هذا الإصدار — تُخطّى نقطة التحديث.'
+if (-not $version) {
+    # ‏نشرُ أثرٍ بلا رقم نسخة: الخادم يُرقّى وسطح المكتب يُنسخ، ولا يُمسّ
+    # AppVersion. فلا يرى أحدٌ «تحديث متاح» إلى بناءٍ للتجربة.
+    Warn 'لا رقم نسخة (مرّر -Version لإعلانها) — تُخطّى نقطة التحديث.'
+}
+elseif (-not $apkAsset -and -not $apkLocal) {
+    Warn 'لا حزمة أندرويد مع هذه الحزمة — تُخطّى نقطة التحديث.'
 }
 else {
-    $version = $Tag -replace '^v', ''
+    $apkName = if ($apkLocal) { $apkLocal.Name } else { $apkAsset.name }
 
     # الاسم يُشتقّ من ارتباط الموقع لا يُفترَض: التجربة تُعطي رابط التجربة
     # والإنتاج رابط الإنتاج، بلا أن يُكتب أيّهما هنا.
@@ -303,10 +429,11 @@ else {
     else {
         $appDir = Join-Path $root 'backend\wwwroot\app'
         New-Item -ItemType Directory -Force -Path $appDir | Out-Null
-        $apkPath = Join-Path $appDir $apk.name
+        $apkPath = Join-Path $appDir $apkName
 
-        Invoke-WebRequest -Headers $bin -Uri $apk.url -OutFile $apkPath -UseBasicParsing
-        Ok "$($apk.name)  ($([math]::Round((Get-Item $apkPath).Length / 1MB, 1)) ميغابايت)"
+        if ($apkLocal) { Copy-Item $apkLocal.FullName $apkPath -Force }
+        else { Invoke-WebRequest -Headers $bin -Uri $apkAsset.url -OutFile $apkPath -UseBasicParsing }
+        Ok "$apkName  ($([math]::Round((Get-Item $apkPath).Length / 1MB, 1)) ميغابايت)"
 
         # آخر ثلاث نسخ تبقى — كما تفعل publish.ps1 بالحزم. ولا تُحذف كلها:
         # جهازٌ فتح رابط النسخة السابقة ولم يُكمل التنزيل يجدها.
@@ -314,7 +441,7 @@ else {
             Sort-Object LastWriteTime -Descending | Select-Object -Skip 3 |
             ForEach-Object { Remove-Item $_.FullName -Force -ErrorAction SilentlyContinue }
 
-        $downloadUrl = "https://$hostName/app/$($apk.name)"
+        $downloadUrl = "https://$hostName/app/$apkName"
 
         # ── رابط تنزيل سطح المكتب ───────────────────────────────────────
         #
@@ -404,8 +531,8 @@ if ($env:GITHUB_STEP_SUMMARY) {
     $lines = @(
         "## $Target",
         '',
-        "- **الوسم:** $Tag",
-        "- **الحزمة:** $($asset.name)",
+        "- **المصدر:** $source",
+        "- **الحزمة:** $pkgName",
         "- **SHA256:** $sha"
     )
     # بلا BOM: الملخّص يُقرأ UTF-8، وBOM يظهر حرفاً غريباً في أوّل سطر.
@@ -413,4 +540,4 @@ if ($env:GITHUB_STEP_SUMMARY) {
 }
 
 Write-Host ""
-Write-Host "  تمّ النشر على $Target — البصمة $sha" -ForegroundColor Green
+Write-Host "  تمّ النشر على $Target من $source — البصمة $sha" -ForegroundColor Green

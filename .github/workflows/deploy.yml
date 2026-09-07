@@ -17,7 +17,23 @@ on:
     inputs:
       tag:
         description: 'وسم الإصدار المراد نشره (مثال v1.2.0)'
-        required: true
+        required: false
+        type: string
+      # ‏بديلٌ عن الوسم — للتجربة وحدها.
+      #
+      # ‏الوسم قرارٌ لا يُتخذ لتجربة شاشةٍ على خادم التجربة: يبقى في تاريخ
+      # المستودع ويُعلن نسخةً للناس. فمن أراد تجربة بناءٍ لم يُوسم بعدُ كان
+      # أمامه أن يوسم إصداراً لا ينوي إصداره، أو يرفع الحزمة بيده فيفقد كل
+      # ما يحرسه ci_deploy — البصمة، وبوّابة الإنتاج، ونقطة التحديث.
+      #
+      # ‏ولا يبلغ الإنتاجَ أثرٌ أبداً: السكربت يرفضه هناك صراحةً.
+      run_id:
+        description: 'أو رقم سير «بناء حزمة النشر» (للتجربة وحدها)'
+        required: false
+        type: string
+      version:
+        description: 'رقم النسخة المُعلَن مع الأثر — بلاه لا يُخبَر جهازٌ بتحديث'
+        required: false
         type: string
       target:
         description: 'الوجهة'
@@ -43,9 +59,12 @@ concurrency:
 jobs:
   deploy:
     runs-on: [self-hosted, kinetic]
-    # يقرأ مرفَق الإصدار ولا يكتب شيئاً على GitHub.
+    # يقرأ مرفَق الإصدار أو أثر السير، ولا يكتب شيئاً على GitHub.
+    # وactions: read لازمة لقراءة الآثار — وبلاها يردّ 403 على وضع run_id
+    # وحده، فيعمل النشر بالوسم ويسقط بالأثر بلا سببٍ ظاهر.
     permissions:
       contents: read
+      actions: read
     timeout-minutes: 30
     environment: ${{ inputs.target }}
 
@@ -67,6 +86,8 @@ jobs:
           .\tool\ci_deploy.ps1
           -Repo "${{ github.repository }}"
           -Tag "${{ inputs.tag }}"
+          -RunId "${{ inputs.run_id }}"
+          -Version "${{ inputs.version }}"
           -Target "${{ inputs.target }}"
           -Token "${{ github.token }}"
           -SkipDb:$${{ inputs.skip_db }}
