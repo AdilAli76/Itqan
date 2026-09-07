@@ -2818,6 +2818,52 @@ BEGIN
 END
 GO
 
+--  مفاتيح المرور (passkeys) — فتح الجلسة المقفلة بلا كلمة مرور
+--
+--  الشاشة تبقى مفتوحة على حساب المدير بينما يقوم من مكتبه، وقفلُها لا
+--  يُستعمل ما دام فتحه يعني كتابة كلمة مرورٍ طويلة عشرين مرّة في اليوم.
+--  فتُترك مفتوحة، أو تُكتب كلمة المرور على ورقةٍ تحت لوحة المفاتيح.
+--
+--  والمخزَّن هو المفتاح **العامّ** وحده — الخاصّ لا يغادر جهاز صاحبه.
+--  فتسريب هذا الجدول كلّه لا يمكّن أحداً من انتحال أحد.
+-- ----------------------------------------------------------------------------
+IF OBJECT_ID('dbo.user_passkeys', 'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.user_passkeys (
+      id UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
+      organization_id UNIQUEIDENTIFIER NOT NULL REFERENCES dbo.organizations(id) ON DELETE CASCADE,
+      user_id UNIQUEIDENTIFIER NOT NULL REFERENCES dbo.app_users(id),
+      -- معرّف الاعتماد بترميز base64url. 600 حرفاً تسع أطول ما تصدره
+      -- المُصادِقات عملياً مع فسحة — والقصُّ هنا يعني مفتاحاً لا يُطابَق أبداً.
+      credential_id NVARCHAR(600) NOT NULL,
+      public_key VARBINARY(1024) NOT NULL,
+      sign_count BIGINT NOT NULL DEFAULT 0,
+      label NVARCHAR(80) NOT NULL DEFAULT N'',
+      created_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+      last_used_at DATETIME2 NULL,
+      CONSTRAINT uq_user_passkeys_credential UNIQUE (credential_id)
+    );
+    PRINT N'أُنشئ جدول user_passkeys';
+END
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'ix_user_passkeys_user')
+   AND OBJECT_ID('dbo.user_passkeys', 'U') IS NOT NULL
+BEGIN
+    CREATE INDEX ix_user_passkeys_user ON dbo.user_passkeys(user_id);
+    PRINT N'أُنشئ فهرس ix_user_passkeys_user';
+END
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.security_policies WHERE name = 'UserPasskeysPolicy')
+   AND OBJECT_ID('dbo.user_passkeys', 'U') IS NOT NULL
+EXEC('
+CREATE SECURITY POLICY Security.UserPasskeysPolicy
+  ADD FILTER PREDICATE Security.fn_OrgOnlyPredicate(organization_id) ON dbo.user_passkeys,
+  ADD BLOCK PREDICATE Security.fn_OrgOnlyPredicate(organization_id) ON dbo.user_passkeys AFTER INSERT
+  WITH (STATE = ON);');
+GO
+
 -- ----------------------------------------------------------------------------
 --  فهارس الأداء — ملف منفصل لأنه يُنفَّذ ويُعاد بلا خطر
 -- ----------------------------------------------------------------------------
