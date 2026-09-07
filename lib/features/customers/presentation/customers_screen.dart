@@ -63,9 +63,12 @@ class _CustomersScreenState extends ConsumerState<CustomersScreen> {
       actions: [
         // الإخفاء لا التعطيل: من لا يملك صلاحية الإضافة لا يحتاج أن يرى
         // الزر أصلاً — رؤيته تدفعه للنقر ثم لسؤال الدعم عن سبب الرفض.
-        // الإصدار الجماعي لإصدار «المحفظة بالمحاسبة» وحده — والخادم
-        // يفرضه أيضاً: حدٌّ تجاري لا تفرضه إلا الواجهة ليس حدّاً.
-        if (ref.watch(brandingProvider).valueOrNull?.edition == 'wallet_plus')
+        // الإصدار الجماعي لمن يحمل وحدة «wallet» — والخادم يفرضه أيضاً:
+        // حدٌّ تجاري لا تفرضه إلا الواجهة ليس حدّاً.
+        //
+        // وبالوحدة لا بالإصدار: الوحدات تُباع فوق الإصدار، وقياسُها
+        // بالإصدار يُخفي عن العميل ما اشتراه ويفتحه له الخادم.
+        if (ref.watch(brandingProvider).valueOrNull?.modules.contains('wallet') ?? false)
           Can(
             permission: Perm.cardsIssue,
             child: OutlinedButton.icon(

@@ -52,7 +52,7 @@ public static class Editions
         Wallet => new[] { "pos", "customers", "reports" },
         // المحفظة ومعها المحاسبة — ولا مخزون: لا بضاعة تُقاس ولا مستودع
         // يُدار. والمصروفات تأتي مع accounting لا وحدةً مستقلّة.
-        WalletPlus => new[] { "pos", "customers", "reports", "accounting" },
+        WalletPlus => new[] { "pos", "customers", "reports", "accounting", "wallet" },
         // وحدة pharmacy فوق وحدات الإصدار القياسي لا بدلاً منها: الصيدلية
         // متجر تجزئة كامل قبل أن تكون صيدلية — لها مخزون ومشتريات وموردون.
         Pharmacy => new[] { "inventory", "pos", "customers", "reports", "pharmacy" },
@@ -87,6 +87,19 @@ public static class Editions
     public static readonly string[] AllModules =
     {
         "pos", "customers", "reports", "inventory",
+        // «wallet» — بطاقاتٌ جماعية ومرتَّباتٌ للمنتسبين.
+        //
+        // <para><b>سبب فصلها عن الإصدار:</b> كان الإصدار الجماعي محصوراً في
+        // «المحفظة بالمحاسبة»، وهو إصدارٌ **بلا بضاعة**. فجهةٌ لها بضاعة
+        // ومنتسبون معاً — محلٌّ عسكري بفروعه الغذائية، جمعيةٌ تصرف على
+        // أعضائها، شركةٌ لموظّفيها — تقع على الجانب الخطأ من الخطّ: تشتري
+        // النسخة الكاملة فتستطيع كل شيء إلا إصدار ألف بطاقة دفعةً واحدة،
+        // فتُصدرها فرادى ألف مرّة.</para>
+        //
+        // <para>ووحدةً تُباع فوق أي إصدار: هي نفسها ما تحتاجه تلك الجهات
+        // كلّها، ولا معنى لإصدارٍ رابع يجمع المحفظة والبضاعة ثم خامسٍ
+        // يجمعها بالصيدلية.</para>
+        "wallet",
         "warehouses", "valuation", "procurement", "accounting", "pharmacy",
     };
 

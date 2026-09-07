@@ -433,26 +433,22 @@ public class CustomersController : ControllerBase
     /// </summary>
     [HttpPost("bulk-issue-cards")]
     [RequirePermission("cards.issue")]
+    // ── وحدة «wallet» لا إصدارٌ بعينه ───────────────────────────────────
+    //
+    // كان الشرط على إصدار «المحفظة بالمحاسبة» وحده، وذاك إصدارٌ
+    // **بلا بضاعة**. فجهةٌ لها بضاعة ومنتسبون معاً — محلٌّ عسكري بفروعه
+    // الغذائية — تشتري النسخة الكاملة فتستطيع كل شيء إلا إصدار ألف بطاقة
+    // دفعةً واحدة. والوحدة تُباع فوق أي إصدار، و«المحفظة بالمحاسبة» تحملها
+    // أصلاً (راجع [Editions.ModulesOf]) فلا يتغيّر عندها شيء.
+    //
+    // وبالسمة لا بفحصٍ في الجسم: هي التي تقرأ الوحدات المُباعة منفردة
+    // (راجع [LicenseLimits.EffectiveModules]) — وفحصُ الإصدار وحده كان
+    // يجعل بيع الوحدة مستحيلاً مهما كُتب في الترخيص.
+    [RequireModule("wallet")]
     public async Task<ActionResult<BulkIssueCardsResult>> BulkIssueCards(BulkIssueCardsRequest request)
     {
         var org = await OrgAsync();
         if (org is null) return BadRequest(new { message = "تعذّر تحديد المنظمة" });
-
-        // ── إصدار «المحفظة بالمحاسبة» وحده ──────────────────────────────
-        //
-        // فحصٌ بالإصدار لا بوحدة: الإصدار الجماعي ليس وحدةً تُشترى وحدها،
-        // بل ما يُميّز wallet_plus عن المحفظة البسيطة. وحصرُه هنا لا في
-        // الواجهة وحدها: من يتجاوز الشاشة يصل إلى نقطة النهاية مباشرةً،
-        // وحدٌّ تجاري لا تفرضه إلا الواجهة ليس حدّاً.
-        if (org.Edition != Editions.WalletPlus)
-        {
-            return BadRequest(new
-            {
-                message = "الإصدار الجماعي للبطاقات متاحٌ في «المحفظة بالمحاسبة» وحدها — "
-                    + $"إصدار هذه المنظمة «{org.Edition}». أصدر البطاقات فرادى، "
-                    + "أو راجع مزوّد النظام للترقية.",
-            });
-        }
 
         var mode = request.CardMode ?? org.CardModeDefault;
         if (!CardModeGate.AllowedModes(org).Contains(mode))
