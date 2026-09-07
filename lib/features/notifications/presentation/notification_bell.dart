@@ -13,14 +13,14 @@ class NotificationBell extends ConsumerWidget {
     final notificationsAsync = ref.watch(notificationsProvider);
 
     return notificationsAsync.when(
-      loading: () => IconButton(
+      loading: () => const IconButton(
         onPressed: null,
-        icon: const Icon(Icons.notifications_outlined),
+        icon: Icon(Icons.notifications_outlined),
         tooltip: 'جاري تحميل الإشعارات',
       ),
       error: (err, _) => IconButton(
         onPressed: () => context.go('/notifications'),
-        icon: const Icon(Icons.notifications_outlined),
+        icon: Icon(Icons.notifications_outlined),
         tooltip: 'الإشعارات',
       ),
       data: (notifications) {
@@ -31,7 +31,7 @@ class NotificationBell extends ConsumerWidget {
           children: [
             IconButton(
               onPressed: () => context.go('/notifications'),
-              icon: const Icon(Icons.notifications_outlined),
+              icon: Icon(Icons.notifications_outlined),
               tooltip: unreadCount > 0
                   ? 'لديك $unreadCount إشعار جديد'
                   : 'الإشعارات',
