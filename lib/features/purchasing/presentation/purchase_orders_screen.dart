@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../../../core/auth/current_user.dart';
 import '../../../core/network/api_client.dart';
+import '../../../core/purchasing/landed_cost.dart';
 import '../../../core/printing/purchase_order_printer.dart';
 import '../../../core/theme/branding_provider.dart';
 import 'dart:typed_data';
@@ -334,7 +335,8 @@ class _PurchaseOrderDetailDialogState extends ConsumerState<_PurchaseOrderDetail
                         child: Text(item['productName'] as String? ?? '',
                             style: AppTextStyles.bodyMd(color: AppColors.textPrimary))),
                     Text(
-                        '${NumberFormat('#,##0.###', 'en').format((item['quantity'] as num?) ?? 0)} × ${_currencyFormat.format((item['unitCost'] as num?) ?? 0)}'),
+                        '${NumberFormat('#,##0.###', 'en').format((item['quantity'] as num?) ?? 0)} × ${_currencyFormat.format((item['unitCost'] as num?) ?? 0)}'
+                        '${((item['chargeShare'] as num?) ?? 0) > 0 ? ' ← ${_currencyFormat.format((item['landedUnitCost'] as num?) ?? 0)}' : ''}'),
                     const SizedBox(width: 10),
                     SizedBox(
                       width: 80,
@@ -345,14 +347,40 @@ class _PurchaseOrderDetailDialogState extends ConsumerState<_PurchaseOrderDetail
                 ),
               )),
           const Divider(height: 20),
+          // المصاريف تحت البضاعة لا داخلها: الإجمالي هو ما يطالب به المورّد
+          // وتُطابَق به فاتورته، والشحن يطالب به غيره.
+          ...((order['charges'] as List? ?? const []).map((c) {
+            final charge = Map<String, dynamic>.from(c as Map);
+            return Padding(
+              padding: const EdgeInsets.symmetric(vertical: 2),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text('${charge['label']}',
+                      style: AppTextStyles.caption(color: AppColors.textSecondary)),
+                  Text(_currencyFormat.format((charge['amount'] as num?) ?? 0),
+                      style: AppTextStyles.caption(color: AppColors.textSecondary)),
+                ],
+              ),
+            );
+          })),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text('الإجمالي', style: AppTextStyles.labelMd()),
+              Text('الإجمالي (بضاعة)', style: AppTextStyles.labelMd()),
               Text(_currencyFormat.format((order['totalAmount'] as num?) ?? 0),
                   style: AppTextStyles.headlineMd()),
             ],
           ),
+          if (((order['chargesTotal'] as num?) ?? 0) > 0)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(
+                'ومصاريف شحنة ${_currencyFormat.format((order['chargesTotal'] as num?) ?? 0)} '
+                'موزَّعةً بالقيمة — التكلفة المحمَّلة أعلى من سعر المورّد.',
+                style: AppTextStyles.caption(color: AppColors.textSecondary),
+              ),
+            ),
           const Divider(height: 20),
           _PurchaseAttachments(orderId: order['id'] as String),
           if (_error != null) ...[
@@ -716,9 +744,30 @@ class _CreatePurchaseOrderDialog extends ConsumerStatefulWidget {
   ConsumerState<_CreatePurchaseOrderDialog> createState() => _CreatePurchaseOrderDialogState();
 }
 
+/// مصروفٌ على الشحنة كما يُكتب في الحوار — راجع [LandedCost].
+///
+/// بلا معاملات إنشاء: يُضاف فارغاً دائماً ثم يُملأ في الحقلين، ومعاملٌ
+/// اختياري لا يُمرَّر أبداً يُبلّغ عنه التحليل الساكن بحقّ.
+class _POCharge {
+  String label = '';
+  double amount = 0;
+}
+
 class _CreatePurchaseOrderDialogState extends ConsumerState<_CreatePurchaseOrderDialog> {
   final _searchController = TextEditingController();
   final List<_POLine> _lines = [];
+  final List<_POCharge> _charges = [];
+
+  /// آخر هامشٍ سعّر به — يُقترح في المرّة التالية.
+  double _margin = 25;
+
+  double get _chargesTotal => _charges.fold<double>(0, (a, c) => a + c.amount);
+
+  /// نصيب الوحدة من المصاريف لكل سطر، بترتيب [_lines].
+  List<double> get _shares => LandedCost.perUnitShares(
+        lines: _lines.map((l) => (quantity: l.quantity, unitCost: l.unitCost)).toList(),
+        totalCharges: _chargesTotal,
+      );
   String? _branchId;
   String? _supplierId;
   bool _saving = false;
@@ -927,7 +976,11 @@ class _CreatePurchaseOrderDialogState extends ConsumerState<_CreatePurchaseOrder
                                     keyboardType: const TextInputType.numberWithOptions(decimal: true),
                                     decoration: const InputDecoration(labelText: 'الكمية', isDense: true),
                                     validator: _validateQuantity,
-                                    onChanged: (v) => line.quantity = double.tryParse(v) ?? line.quantity,
+                                    // setState لأن التكلفة المحمَّلة تُعاد
+                                    // قسمتها بالقيمة عند كل تغيّر — ورقمٌ
+                                    // معروضٌ قديم أسوأ من لا رقم.
+                                    onChanged: (v) => setState(
+                                        () => line.quantity = double.tryParse(v) ?? line.quantity),
                                   ),
                                 ),
                                 const SizedBox(width: 8),
@@ -938,12 +991,14 @@ class _CreatePurchaseOrderDialogState extends ConsumerState<_CreatePurchaseOrder
                                     decoration:
                                         const InputDecoration(labelText: 'تكلفة الوحدة', isDense: true),
                                     validator: _validateMoney,
-                                    onChanged: (v) => line.unitCost = double.tryParse(v) ?? line.unitCost,
+                                    onChanged: (v) => setState(
+                                        () => line.unitCost = double.tryParse(v) ?? line.unitCost),
                                   ),
                                 ),
                                 const SizedBox(width: 8),
                                 Expanded(
                                   child: TextFormField(
+                                    key: ValueKey('sale-${line.productId}-${line.salePrice}'),
                                     initialValue: line.salePrice.toStringAsFixed(2),
                                     keyboardType: const TextInputType.numberWithOptions(decimal: true),
                                     decoration: const InputDecoration(labelText: 'سعر البيع', isDense: true),
@@ -953,9 +1008,23 @@ class _CreatePurchaseOrderDialogState extends ConsumerState<_CreatePurchaseOrder
                                 ),
                               ],
                             ),
+                            // التكلفة المحمَّلة تحت السطر مباشرةً: الرقم الذي
+                            // يُسعَّر عليه يجب أن يكون أمام عين من يسعّر، لا
+                            // في شاشةٍ أخرى بعد الحفظ.
+                            if (_chargesTotal > 0)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 4),
+                                child: Text(
+                                  'التكلفة المحمَّلة: '
+                                  '${(line.unitCost + _shareOf(line)).toStringAsFixed(2)}'
+                                  ' (شحن ${_shareOf(line).toStringAsFixed(2)} للوحدة)',
+                                  style: AppTextStyles.caption(color: AppColors.textSecondary),
+                                ),
+                              ),
                           ],
                         ),
                       )),
+                if (_lines.isNotEmpty) _chargesSection(),
                 if (_error != null) ...[
                   const SizedBox(height: 8),
                   Text(_error!, style: AppTextStyles.bodyMd(color: AppColors.danger)),
@@ -998,6 +1067,121 @@ class _CreatePurchaseOrderDialogState extends ConsumerState<_CreatePurchaseOrder
     return null;
   }
 
+  double _shareOf(_POLine line) {
+    final index = _lines.indexOf(line);
+    final shares = _shares;
+    return index < 0 || index >= shares.length ? 0 : shares[index];
+  }
+
+  /// <summary>
+  /// مصاريف الشحنة والتسعير منها.
+  ///
+  /// <para><b>سبب وجودها في هذا الحوار:</b> هنا يُكتب عرض المورّد، وهنا
+  /// يُسعَّر. وسؤالُ «كم الشحن؟» في شاشةٍ أخرى بعد الحفظ يعني أن التسعير
+  /// وقع على سعر المورّد وحده — وهو الخطأ الذي بُنيت له.</para>
+  /// </summary>
+  Widget _chargesSection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const Divider(height: 28),
+        Row(
+          children: [
+            Expanded(
+              child: Text('مصاريف الشحنة', style: AppTextStyles.bodyMd()),
+            ),
+            TextButton.icon(
+              onPressed: () => setState(() => _charges.add(_POCharge())),
+              icon: const Icon(Icons.add, size: 18),
+              label: const Text('أضف مصروفاً'),
+            ),
+          ],
+        ),
+        Text(
+          // ما تفعله ولا تفعله يُقال مرّة: من يظنّها تُضاف إلى ما يطالب به
+          // المورّد يبحث عن الفرق في كل فاتورة.
+          'تُوزَّع بالقيمة على الأصناف فتصير تكلفتها المحمَّلة. ولا تدخل في '
+          'إجمالي الأمر — ذاك ما يطالب به المورّد وتُطابَق به فاتورته.',
+          style: AppTextStyles.caption(color: AppColors.textSecondary),
+        ),
+        for (final charge in _charges) ...[
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                flex: 2,
+                child: TextFormField(
+                  initialValue: charge.label,
+                  decoration: const InputDecoration(
+                      labelText: 'البيان', hintText: 'شحن، تخليص، جمارك', isDense: true),
+                  onChanged: (v) => charge.label = v,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: TextFormField(
+                  initialValue: charge.amount == 0 ? '' : charge.amount.toStringAsFixed(2),
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  decoration: const InputDecoration(labelText: 'المبلغ', isDense: true),
+                  onChanged: (v) => setState(() => charge.amount = double.tryParse(v) ?? 0),
+                ),
+              ),
+              IconButton(
+                onPressed: () => setState(() => _charges.remove(charge)),
+                icon: const Icon(Icons.close, size: 18),
+                tooltip: 'احذف المصروف',
+              ),
+            ],
+          ),
+        ],
+        if (_chargesTotal > 0) ...[
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: Text('مجموع المصاريف: ${_chargesTotal.toStringAsFixed(2)}',
+                    style: AppTextStyles.bodyMd()),
+              ),
+              SizedBox(
+                width: 96,
+                child: TextFormField(
+                  initialValue: _margin.toStringAsFixed(0),
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  decoration: const InputDecoration(labelText: 'هامش ٪', isDense: true),
+                  onChanged: (v) => _margin = double.tryParse(v) ?? _margin,
+                ),
+              ),
+              const SizedBox(width: 8),
+              OutlinedButton(
+                onPressed: _priceByMargin,
+                child: const Text('سعّر'),
+              ),
+            ],
+          ),
+        ],
+      ],
+    );
+  }
+
+  /// <summary>
+  /// تسعير كل السطور بهامشٍ **من التكلفة المحمَّلة**.
+  ///
+  /// <para>وهذا هو بيت القصيد: هامش ٢٥٪ على سعر مورّدٍ عشرة يُخرج ١٢٫٥٠،
+  /// والتكلفة الحقيقية ١١٫٥٠ — فالربح دينارٌ لا اثنان ونصف، وقد يصير خسارة
+  /// مع أول خصم. والتسعير من المحمَّلة يُخرج ١٤٫٣٨.</para>
+  ///
+  /// <para>ويبقى كل سعرٍ قابلاً للتعديل بعده: الهامش نقطة بداية لا حكم.</para>
+  /// </summary>
+  void _priceByMargin() {
+    final shares = _shares;
+    setState(() {
+      for (var i = 0; i < _lines.length; i++) {
+        final landed = _lines[i].unitCost + (i < shares.length ? shares[i] : 0);
+        _lines[i].salePrice = double.parse((landed * (1 + _margin / 100)).toStringAsFixed(2));
+      }
+    });
+  }
+
   Future<void> _submit() async {
     // التحقّق أولاً: التحقّقات اليدوية أدناه تفحص الفرع والأسطر، لكنها لا
     // تفحص محتوى الحقول نفسها.
@@ -1028,6 +1212,10 @@ class _CreatePurchaseOrderDialogState extends ConsumerState<_CreatePurchaseOrder
                   'unitCost': l.unitCost,
                   'salePrice': l.salePrice
                 })
+            .toList(),
+        'charges': _charges
+            .where((c) => c.amount > 0)
+            .map((c) => {'label': c.label, 'amount': c.amount})
             .toList(),
       });
       if (mounted) Navigator.pop(context, true);
