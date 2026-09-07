@@ -57,6 +57,7 @@ public class AppDbContext : DbContext
     public DbSet<RolePermission> RolePermissions => Set<RolePermission>();
     public DbSet<PurchaseOrder> PurchaseOrders => Set<PurchaseOrder>();
     public DbSet<PurchaseOrderItem> PurchaseOrderItems => Set<PurchaseOrderItem>();
+    public DbSet<PurchaseOrderCharge> PurchaseOrderCharges => Set<PurchaseOrderCharge>();
     public DbSet<PurchaseReceipt> PurchaseReceipts => Set<PurchaseReceipt>();
     public DbSet<PurchaseReceiptItem> PurchaseReceiptItems => Set<PurchaseReceiptItem>();
     public DbSet<PlatformOrganizationRecord> PlatformOrganizations => Set<PlatformOrganizationRecord>();
@@ -130,6 +131,7 @@ public class AppDbContext : DbContext
             .HasKey(rp => new { rp.OrganizationId, rp.Role, rp.PermissionCode });
         modelBuilder.Entity<PurchaseOrder>().ToTable("purchase_orders");
         modelBuilder.Entity<PurchaseOrderItem>().ToTable("purchase_order_items");
+        modelBuilder.Entity<PurchaseOrderCharge>().ToTable("purchase_order_charges");
         modelBuilder.Entity<PurchaseReceipt>().ToTable("purchase_receipts");
         modelBuilder.Entity<PurchaseReceiptItem>().ToTable("purchase_receipt_items");
         modelBuilder.Entity<PlatformOrganizationRecord>().ToTable("platform_organizations");
