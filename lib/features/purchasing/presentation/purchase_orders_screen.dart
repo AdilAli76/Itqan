@@ -745,10 +745,12 @@ class _CreatePurchaseOrderDialog extends ConsumerStatefulWidget {
 }
 
 /// مصروفٌ على الشحنة كما يُكتب في الحوار — راجع [LandedCost].
+///
+/// بلا معاملات إنشاء: يُضاف فارغاً دائماً ثم يُملأ في الحقلين، ومعاملٌ
+/// اختياري لا يُمرَّر أبداً يُبلّغ عنه التحليل الساكن بحقّ.
 class _POCharge {
-  _POCharge({this.label = '', this.amount = 0});
-  String label;
-  double amount;
+  String label = '';
+  double amount = 0;
 }
 
 class _CreatePurchaseOrderDialogState extends ConsumerState<_CreatePurchaseOrderDialog> {
