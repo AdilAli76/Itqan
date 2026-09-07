@@ -186,6 +186,35 @@ public class SponsorsController : ControllerBase
         return NoContent();
     }
 
+    /// <summary>
+    /// يُعيد جهةً راعيةً محذوفة إلى القوائم.
+    ///
+    /// <para><b>سبب وجودها:</b> الحذف ناعمٌ والصفّ باقٍ، ولم يكن ما يقلب
+    /// الراية. وإنشاءُ جهةٍ جديدة باسمها ليس بديلاً: مرتَّبات المنتسبين
+    /// وكشوف الصرف تُنسب إلى معرّف الجهة لا إلى اسمها، فيبقى تاريخ الصرف
+    /// معلَّقاً بجهةٍ لا تظهر في شاشة.</para>
+    ///
+    /// <para><b>ولا يُشترط أن تكون فارغة كما اشتُرط عند الحذف:</b> ذاك
+    /// حارسٌ يمنع تعليق عملاء بمرجعٍ لا يظهر، والاسترجاع يفعل عكسه — يُظهر
+    /// المرجع الذي يشيرون إليه.</para>
+    /// </summary>
+    [HttpPost("{id:guid}/restore")]
+    [RequirePermission("customers.delete")]
+    public async Task<IActionResult> Restore(Guid id)
+    {
+        var sponsor = await _db.Sponsors.FindAsync(id);
+        if (sponsor is null) return NotFound();
+
+        if (!sponsor.IsDeleted)
+            return BadRequest(new { message = "الجهة غير محذوفة أصلاً" });
+
+        sponsor.IsDeleted = false;
+        _db.LogAudit(sponsor.OrganizationId, CurrentUserId(), "sponsor.restored", "sponsors", sponsor.Id,
+            newValues: new { sponsor.Name });
+        await _db.SaveChangesAsync();
+        return NoContent();
+    }
+
     private Guid? CurrentUserId()
     {
         var raw = User.FindFirstValue(JwtRegisteredClaimNames.Sub) ?? User.FindFirstValue(ClaimTypes.NameIdentifier);

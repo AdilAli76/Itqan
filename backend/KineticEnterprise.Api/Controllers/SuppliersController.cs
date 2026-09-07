@@ -230,6 +230,40 @@ public class SuppliersController : ControllerBase
         return NoContent();
     }
 
+    /// <summary>
+    /// يُعيد مورّداً محذوفاً إلى القوائم.
+    ///
+    /// <para><b>سبب وجودها:</b> الحذف هنا ناعمٌ منذ اليوم الأوّل — الصفّ
+    /// باقٍ بكل حركاته وأوامر شرائه، ولا تُرفع عنه الراية إلا برايةٍ
+    /// تُقلَب. ومع ذلك لم يكن في النظام ما يقلبها: لا نقطة ولا زرّ. فمن
+    /// حذف مورّداً بالخطأ كان أمامه أن يُنشئ غيرَه باسمٍ مطابق — فينفصل
+    /// تاريخ المشتريات كلّه عن المورّد الذي يُشترى منه اليوم، ويصير رصيد
+    /// الذمّة على صفّين لا يُجمعان.</para>
+    ///
+    /// <para><b>ولا حارس هنا بخلاف العميل والصنف:</b> لا هاتف ولا باركود
+    /// يُنازعه غيرُه — لا قيد تفرّد على اسم المورّد ولا على هاتفه، فليس
+    /// ثمّة ما يُصطدَم به.</para>
+    ///
+    /// <para><b>وبنفس صلاحية الحذف</b> — من يملك أن يُخفي يملك أن يُظهر.</para>
+    /// </summary>
+    [HttpPost("{id:guid}/restore")]
+    [RequirePermission("suppliers.delete")]
+    public async Task<IActionResult> Restore(Guid id)
+    {
+        var supplier = await _db.Suppliers.FindAsync(id);
+        if (supplier is null) return NotFound();
+
+        // ليس خطأً بل حالةٌ تُقال: اثنان على نفس السجلّ، أو ضغطةٌ ثانية.
+        if (!supplier.IsDeleted)
+            return BadRequest(new { message = "المورّد غير محذوف أصلاً" });
+
+        supplier.IsDeleted = false;
+        _db.LogAudit(supplier.OrganizationId, CurrentUserId(), "supplier.restored", "suppliers", supplier.Id,
+            newValues: new { supplier.Name });
+        await _db.SaveChangesAsync();
+        return NoContent();
+    }
+
     private Guid? CurrentUserId()
     {
         var raw = User.FindFirstValue(JwtRegisteredClaimNames.Sub) ?? User.FindFirstValue(ClaimTypes.NameIdentifier);
