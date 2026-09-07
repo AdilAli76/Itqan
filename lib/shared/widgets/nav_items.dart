@@ -24,7 +24,6 @@ class NavGroup {
 }
 
 const _dashboard = NavItem(Icons.dashboard_outlined, 'لوحة التحكم', '/dashboard');
-const _notifications = NavItem(Icons.notifications_outlined, 'الإشعارات', '/notifications');
 
 // يظهر فقط لمالك المنصة (is_platform_admin في التوكن) — تزويد عملاء جدد
 // على نفس السيرفر ليس جزءاً من صلاحيات أي عميل عادي مهما كان دوره.
@@ -202,7 +201,6 @@ List<NavGroup> navGroupsFor({
           items: [NavItem(Icons.payments_outlined, 'المصروفات', '/expenses')],
         ),
       _reportsGroup,
-      NavGroup(icon: _notifications.icon, label: _notifications.label, items: const [_notifications]),
       _adminGroup,
       NavGroup(
         icon: _systemGroup.icon,

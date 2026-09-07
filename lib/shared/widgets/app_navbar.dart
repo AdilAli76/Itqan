@@ -6,6 +6,7 @@ import '../../core/theme/app_text_styles.dart';
 import 'nav_items.dart';
 import '../../core/auth/permissions.dart';
 import '../../core/theme/branding_provider.dart';
+import '../../features/notifications/presentation/notification_bell.dart';
 
 /// بديل أفقي عن AppSidebar لمن يفضّل شريطاً علوياً بدل شريط جانبي ثابت —
 /// نفس مجموعات nav_items.dart بالضبط، فقط بتخطيط مختلف. راجع AppShell
@@ -57,62 +58,73 @@ class _AppNavbarState extends ConsumerState<AppNavbar> {
         color: AppColors.surface,
         border: Border(bottom: BorderSide(color: AppColors.border)),
       ),
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 8),
-        child: Row(
-          children: groups.map((group) {
-            final active = group.containsRoute(widget.activeRoute);
+      child: Row(
+        children: [
+          Expanded(
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: groups.map((group) {
+                  final active = group.containsRoute(widget.activeRoute);
 
-            if (group.isSingle) {
-              return Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 6),
-                child: _NavButton(
-                  icon: group.single.icon,
-                  label: group.single.label,
-                  active: active,
-                  onTap: () => _open(group.single),
-                ),
-              );
-            }
+                  if (group.isSingle) {
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 6),
+                      child: _NavButton(
+                        icon: group.single.icon,
+                        label: group.single.label,
+                        active: active,
+                        onTap: () => _open(group.single),
+                      ),
+                    );
+                  }
 
-            return Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 6),
-              child: PopupMenuButton<NavItem>(
-                tooltip: group.label,
-                position: PopupMenuPosition.under,
-                onSelected: _open,
-                itemBuilder: (context) => group.items
-                    .map((item) => PopupMenuItem<NavItem>(
-                          value: item,
-                          child: Row(
-                            children: [
-                              Icon(
-                                item.icon,
-                                size: 18,
-                                color: widget.activeRoute == item.route ? color : AppColors.textSecondary,
-                              ),
-                              const SizedBox(width: 10),
-                              Text(
-                                item.label,
-                                style: AppTextStyles.bodyMd(
-                                  color: widget.activeRoute == item.route ? color : AppColors.textPrimary,
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 6),
+                    child: PopupMenuButton<NavItem>(
+                      tooltip: group.label,
+                      position: PopupMenuPosition.under,
+                      onSelected: _open,
+                      itemBuilder: (context) => group.items
+                          .map((item) => PopupMenuItem<NavItem>(
+                                value: item,
+                                child: Row(
+                                  children: [
+                                    Icon(
+                                      item.icon,
+                                      size: 18,
+                                      color: widget.activeRoute == item.route ? color : AppColors.textSecondary,
+                                    ),
+                                    const SizedBox(width: 10),
+                                    Text(
+                                      item.label,
+                                      style: AppTextStyles.bodyMd(
+                                        color: widget.activeRoute == item.route ? color : AppColors.textPrimary,
+                                      ),
+                                    ),
+                                  ],
                                 ),
-                              ),
-                            ],
-                          ),
-                        ))
-                    .toList(),
-                child: _NavButton(
-                  icon: group.icon,
-                  label: group.label,
-                  active: active,
-                  showChevron: true,
-                ),
+                              ))
+                          .toList(),
+                      child: _NavButton(
+                        icon: group.icon,
+                        label: group.label,
+                        active: active,
+                        showChevron: true,
+                      ),
+                    ),
+                  );
+                }).toList(),
               ),
-            );
-          }).toList(),
-        ),
+            ),
+          ),
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 8),
+            child: NotificationBell(),
+          ),
+        ],
       ),
     );
   }

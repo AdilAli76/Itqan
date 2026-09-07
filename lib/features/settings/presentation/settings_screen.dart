@@ -433,6 +433,54 @@ class _SettingsFormState extends ConsumerState<_SettingsForm> {
             //
             // والمسافة داخل `Can` لا قبله: خارجه تبقى فجوة 16 بكسل معلّقة
             // في قائمة من لا يملك الصلاحية.
+            const SizedBox(height: 16),
+            SectionCard(
+              title: 'المصادقة والأمان',
+              icon: Icons.lock_outlined,
+              children: [
+                Text(
+                  'اختر طرق المصادقة المتاحة للمستخدمين. يمكن تفعيل خيارات متعددة معاً.',
+                  style: AppTextStyles.labelMd(),
+                ),
+                const SizedBox(height: 12),
+                CheckboxListTile(
+                  value: true,
+                  onChanged: null,
+                  contentPadding: EdgeInsets.zero,
+                  controlAffinity: ListTileControlAffinity.leading,
+                  title: Text('كلمة المرور',
+                      style: AppTextStyles.bodyMd(color: AppColors.textPrimary)),
+                  subtitle: Text(
+                    'طريقة المصادقة الأساسية بكلمة مرور قوية',
+                    style: AppTextStyles.labelMd(),
+                  ),
+                ),
+                CheckboxListTile(
+                  value: true,
+                  onChanged: null,
+                  contentPadding: EdgeInsets.zero,
+                  controlAffinity: ListTileControlAffinity.leading,
+                  title: Text('مفتاح المرور (بصمة الوجه/القزحية)',
+                      style: AppTextStyles.bodyMd(color: AppColors.textPrimary)),
+                  subtitle: Text(
+                    'مصادقة حيوية آمنة باستخدام بيانات بيومترية على الجهاز',
+                    style: AppTextStyles.labelMd(),
+                  ),
+                ),
+                CheckboxListTile(
+                  value: true,
+                  onChanged: null,
+                  contentPadding: EdgeInsets.zero,
+                  controlAffinity: ListTileControlAffinity.leading,
+                  title: Text('بصمة الإصبع',
+                      style: AppTextStyles.bodyMd(color: AppColors.textPrimary)),
+                  subtitle: Text(
+                    'مصادقة سريعة وآمنة باستخدام بصمة الإصبع',
+                    style: AppTextStyles.labelMd(),
+                  ),
+                ),
+              ],
+            ),
             const Can(
               permission: Perm.backupManage,
               child: Padding(padding: EdgeInsets.only(top: 16), child: BackupSection()),

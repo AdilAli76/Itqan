@@ -20,6 +20,7 @@ import 'screen_registry.dart';
 import 'shell_scope.dart';
 import '../../shared/widgets/icon_action.dart';
 import '../../shared/widgets/update_banner.dart';
+import '../../features/notifications/presentation/notification_bell.dart';
 
 /// الحاوية الدائمة لكل شاشات النظام بعد تسجيل الدخول — تُبنى مرة واحدة فقط
 /// وتبقى حيّة طوال الجلسة. فتح شاشة جديدة = تبويب جديد في IndexedStack
@@ -212,6 +213,7 @@ class _AppShellState extends ConsumerState<AppShell> {
           : AppBar(
               title: Text(tabsState.tabs.isEmpty ? '' : (tabsState.tabs.firstWhere((t) => t.route == tabsState.activeRoute, orElse: () => tabsState.tabs.first)).title),
               actions: [
+                const NotificationBell(),
                 IconButton(
                   onPressed: _openPalette,
                   icon: const Icon(Icons.search),
