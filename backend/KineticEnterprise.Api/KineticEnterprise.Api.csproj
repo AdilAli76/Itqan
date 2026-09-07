@@ -9,6 +9,9 @@
 
   <ItemGroup>
     <PackageReference Include="ClosedXML" Version="0.105.1" />
+    <!-- قراءة بنى WebAuthn الثنائية (attestationObject ومفاتيح COSE).
+         حزمةٌ مُدارة من المنصّة نفسها بلا اعتمادية أصلية — راجع WebAuthn.cs. -->
+    <PackageReference Include="System.Formats.Cbor" Version="8.0.0" />
     <PackageReference Include="EFCore.NamingConventions" Version="8.0.3" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="8.0.8" />
     <!-- أدوات تصميم فقط (dotnet ef). PrivateAssets تمنع شحنها إلى الإنتاج:
