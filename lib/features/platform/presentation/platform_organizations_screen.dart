@@ -38,6 +38,7 @@ const _moduleLabels = {
   'valuation': 'تقييم المخزون',
   'procurement': 'أوامر الشراء وفواتير الموردين',
   'accounting': 'المحاسبة والدفاتر',
+  'wallet': 'بطاقات ومرتَّبات المنتسبين',
   'pharmacy': 'نشرة الدواء',
 };
 
