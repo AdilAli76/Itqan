@@ -293,6 +293,26 @@ CREATE TABLE login_history (
 );
 GO
 
+-- مفاتيح المرور: تفتح الجلسة المقفلة بلا كلمة مرور. المخزَّن هو المفتاح
+-- **العامّ** وحده — الخاصّ لا يغادر جهاز صاحبه، فتسريب الجدول لا يمكّن من
+-- انتحال أحد. راجع WebAuthn.cs وPasskeysController.cs.
+CREATE TABLE user_passkeys (
+  id UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
+  organization_id UNIQUEIDENTIFIER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  user_id UNIQUEIDENTIFIER NOT NULL REFERENCES app_users(id),
+  credential_id NVARCHAR(600) NOT NULL,
+  public_key VARBINARY(1024) NOT NULL,
+  sign_count BIGINT NOT NULL DEFAULT 0,
+  label NVARCHAR(80) NOT NULL DEFAULT N'',
+  created_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+  last_used_at DATETIME2 NULL,
+  CONSTRAINT uq_user_passkeys_credential UNIQUE (credential_id)
+);
+GO
+
+CREATE INDEX ix_user_passkeys_user ON user_passkeys(user_id);
+GO
+
 -- ----------------------------------------------------------------------------
 -- 4. المخزون والموردون
 -- ----------------------------------------------------------------------------
@@ -1648,6 +1668,12 @@ GO
 -- في هذا الجدول.
 CREATE SECURITY POLICY Security.LoginHistoryPolicy
   ADD FILTER PREDICATE Security.fn_OrgOnlyPredicate(organization_id) ON dbo.login_history
+  WITH (STATE = ON);
+GO
+
+CREATE SECURITY POLICY Security.UserPasskeysPolicy
+  ADD FILTER PREDICATE Security.fn_OrgOnlyPredicate(organization_id) ON dbo.user_passkeys,
+  ADD BLOCK PREDICATE Security.fn_OrgOnlyPredicate(organization_id) ON dbo.user_passkeys AFTER INSERT
   WITH (STATE = ON);
 GO
 

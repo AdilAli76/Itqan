@@ -95,20 +95,27 @@ public class CustomerImportController : ControllerBase
         // الفئة والفرع يُطابَقان بطيّ العربية لا بـ`ToLower` وحده — راجع
         // [SpreadsheetReader.Fold]. من كتب «فئه أ» أو «الفرع الرئيسى» كان
         // يُرفض صفُّه وهو يرى الاسم نفسه أمامه على الشاشة.
+        var categoryList = await _db.CustomerCategories.Where(c => c.IsActive)
+            .OrderBy(c => c.Name).ToListAsync();
         var categories = new Dictionary<string, CustomerCategory>();
-        foreach (var c in await _db.CustomerCategories.Where(c => c.IsActive).ToListAsync())
+        foreach (var c in categoryList)
             categories.TryAdd(SpreadsheetReader.Fold(c.Name), c);
 
+        var branchList = await _db.Branches.OrderBy(b => b.Name).ToListAsync();
         var branches = new Dictionary<string, Guid>();
-        foreach (var b in await _db.Branches.ToListAsync())
+        foreach (var b in branchList)
             branches.TryAdd(SpreadsheetReader.Fold(b.Name), b.Id);
+
+        // وفهرسٌ متساهل يُسقط كلمة الوصف و«ال» التعريف — راجع
+        // [SpreadsheetReader.FoldLoose]. من كتب «الفئة ب» وهي مسجَّلة «ب»
+        // كان يُرفض صفُّه، والطيُّ وحده لا يمسكها: الفرق كلمةٌ لا حرف.
+        var categoriesLoose = LooseIndex(categoryList, c => c.Name);
+        var branchesLoose = LooseIndex(branchList, b => b.Name);
 
         // أسماء العرض كما كُتبت في النظام — تُذكَر في رسالة الخطأ ليقارن
         // المستخدم بما في ملفه بدل أن يخمّن الصيغة المقبولة.
-        var definedCategoryNames = categories.Values.Select(c => c.Name).OrderBy(n => n).ToList();
-        var definedBranchNames = branches.Count == 0
-            ? new List<string>()
-            : await _db.Branches.OrderBy(b => b.Name).Select(b => b.Name).ToListAsync();
+        var definedCategoryNames = categoryList.Select(c => c.Name).ToList();
+        var definedBranchNames = branchList.Select(b => b.Name).ToList();
 
         var unknownCategories = new List<string>();
         var results = new List<CustomerImportRowResult>();
@@ -161,7 +168,13 @@ public class CustomerImportController : ControllerBase
             CustomerCategory? category = null;
             if (!string.IsNullOrWhiteSpace(categoryName))
             {
-                if (!categories.TryGetValue(SpreadsheetReader.Fold(categoryName), out category))
+                if (!categories.TryGetValue(SpreadsheetReader.Fold(categoryName), out category)
+                    && TryFindLoose(categoriesLoose, categoryName, out var looseCategory))
+                {
+                    category = looseCategory;
+                }
+
+                if (category is null)
                 {
                     if (!unknownCategories.Contains(categoryName)) unknownCategories.Add(categoryName);
                     results.Add(new CustomerImportRowResult(
@@ -177,14 +190,21 @@ public class CustomerImportController : ControllerBase
             Guid? branchId = null;
             if (!string.IsNullOrWhiteSpace(branchName))
             {
-                if (!branches.TryGetValue(SpreadsheetReader.Fold(branchName), out var found))
+                if (branches.TryGetValue(SpreadsheetReader.Fold(branchName), out var found))
+                {
+                    branchId = found;
+                }
+                else if (TryFindLoose(branchesLoose, branchName, out var looseBranch))
+                {
+                    branchId = looseBranch.Id;
+                }
+                else
                 {
                     results.Add(new CustomerImportRowResult(
                         rowNumber, name, phone, categoryName, "خطأ",
                         $"الفرع «{branchName}» غير موجود — الفروع المعرَّفة: {string.Join("، ", definedBranchNames)}"));
                     continue;
                 }
-                branchId = found;
             }
 
             decimal? entitlementOverride = null;
@@ -330,6 +350,39 @@ public class CustomerImportController : ControllerBase
             textColumns: new[] { 1 });
 
         return File(bytes, SpreadsheetTemplate.ContentType, "قالب-استيراد-العملاء.xlsx");
+    }
+
+    /// <summary>
+    /// فهرسٌ بالطيّ المتساهل — راجع [SpreadsheetReader.FoldLoose]. والقيمة
+    /// قائمةٌ لا عنصراً واحداً كي يُعرَف الاسم الذي يحتمل اثنين فلا يُخمَّن.
+    /// </summary>
+    static Dictionary<string, List<T>> LooseIndex<T>(IEnumerable<T> items, Func<T, string> nameOf)
+    {
+        var index = new Dictionary<string, List<T>>(StringComparer.Ordinal);
+        foreach (var item in items)
+        {
+            var key = SpreadsheetReader.FoldLoose(nameOf(item));
+            if (key.Length == 0) continue;
+            if (!index.TryGetValue(key, out var bucket)) index[key] = bucket = new List<T>();
+            bucket.Add(item);
+        }
+        return index;
+    }
+
+    /// <summary>
+    /// لا يُطابَق متساهلاً إلا اسمٌ واحد. والاثنان يعنيان أن أحدهما مقصودٌ
+    /// والآخر لا، وليس عندنا ما يرجّح — والفئة تحمل مرتَّباً.
+    /// </summary>
+    static bool TryFindLoose<T>(Dictionary<string, List<T>> index, string? name, out T value)
+    {
+        var key = SpreadsheetReader.FoldLoose(name);
+        if (key.Length > 0 && index.TryGetValue(key, out var bucket) && bucket.Count == 1)
+        {
+            value = bucket[0];
+            return true;
+        }
+        value = default!;
+        return false;
     }
 
     /// <summary>
