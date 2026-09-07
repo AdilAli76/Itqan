@@ -446,9 +446,12 @@ class _SettingsFormState extends ConsumerState<_SettingsForm> {
                 const SizedBox(height: 12),
                 RadioGroup<String>(
                   groupValue: _costingMethod,
-                  onChanged: widget.canEdit
-                      ? (v) => v == null ? null : setState(() => _costingMethod = v)
-                      : null,
+                  // onChanged هنا غير قابل للإسناد الفارغ (بخلاف الأزرار)،
+                  // فمنعُ التعديل يقع داخل الدالّة لا بتمرير null.
+                  onChanged: (v) {
+                    if (!widget.canEdit || v == null) return;
+                    setState(() => _costingMethod = v);
+                  },
                   child: Column(
                     children: [
                       for (final option in const [
