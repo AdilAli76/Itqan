@@ -24,10 +24,10 @@ class NotificationBell extends ConsumerWidget {
         tooltip: 'الإشعارات',
       ),
       data: (notifications) {
-        final unreadCount = notifications.where((n) => n['read'] != true).length;
+        final unreadCount = notifications.where((n) => n['read'] == false).length;
 
         return Stack(
-          alignment: AlignmentDirectional.topEnd,
+          alignment: Alignment.topRight,
           children: [
             IconButton(
               onPressed: () => context.go('/notifications'),
