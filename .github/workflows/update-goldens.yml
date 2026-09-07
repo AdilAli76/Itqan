@@ -1,0 +1,57 @@
+name: تحديث الملفات الذهبية
+
+on:
+  workflow_dispatch:
+
+jobs:
+  update:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: تهيئة .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: تهيئة Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.44.9'
+          channel: stable
+          cache: true
+
+      - name: جلب الاعتماديات
+        run: flutter pub get
+
+      - name: بناء الخادم
+        run: dotnet build backend/KineticEnterprise.Api/KineticEnterprise.Api.csproj -c Release
+
+      - name: تحديث الملفات الذهبية
+        run: flutter test --update-goldens
+
+      - name: التحقّق من التغييرات
+        run: git status
+
+      - name: دفع التحديثات
+        if: hashFiles('**/screenshots/*.png') != ''
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add test/screenshots/
+          git commit -m "تحديث الملفات الذهبية
+
+Co-Authored-By: Claude Haiku 4.5 <noreply@anthropic.com>"
+          git push
+
+      - name: حفظ النتيجة كأثر
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: updated-goldens
+          path: test/screenshots/
+          if-no-files-found: ignore
