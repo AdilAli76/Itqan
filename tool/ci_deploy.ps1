@@ -100,27 +100,44 @@ New-Item -ItemType Directory -Force -Path $dir | Out-Null
 # ‏روابط تنزيل الآثار تُحوَّل إلى مخزن كائناتٍ يوقّع الإذن في الرابط نفسه،
 # ويردّ 400 على طلبٍ يحمل ترويسة Authorization فوق ذلك. فيُقرأ التحويل
 # ثمّ يُنزَّل الهدف عارياً من الترويسة.
+#
+# ‏و‎HttpWebRequest‎ لا ‎Invoke-WebRequest -MaximumRedirection 0‎: هذا الأخير
+# في ويندوز باورشيل يرمي ‎InvalidOperationException‎ («تجاوز عدد التحويلات»)
+# **بلا كائن ردّ**، فلا عنوانَ يُقرأ منه — لا WebException كما في السابع.
+# وقع فعلاً وأسقط أوّل نشرةٍ من أثر. أمّا AllowAutoRedirect=$false فيُعيد
+# الردّ 302 كما هو، وترويسته فيه.
 function Get-ArtifactZip($url, $outFile) {
-    $location = $null
-    try {
-        Invoke-WebRequest -Headers $auth -Uri $url -MaximumRedirection 0 -UseBasicParsing -OutFile $outFile
-    } catch {
-        $resp = $_.Exception.Response
-        if (-not $resp) { throw }
-        $code = [int]$resp.StatusCode
-        if ($code -lt 300 -or $code -ge 400) { throw }
+    $req = [Net.HttpWebRequest]::Create($url)
+    $req.AllowAutoRedirect = $false
+    $req.UserAgent = 'kinetic-deploy'
+    $req.Headers.Add('Authorization', "Bearer $Token")
+    $req.Accept = 'application/vnd.github+json'
 
-        # ‏ترويسات الردّ صنفان بحسب مُحرّك الطلب: WebHeaderCollection في
-        # ويندوز باورشيل (فهرسٌ بالاسم)، وHttpResponseHeaders في السابع
-        # (خاصيّة Location). وقراءةُ أحدهما بأسلوب الآخر تُعطي $null صامتاً
-        # فيُكتب ملفٌ فارغ مكان الحزمة.
-        $location = $null
-        if ($resp.Headers.Location) { $location = [string]$resp.Headers.Location }
-        else { try { $location = @($resp.Headers['Location'])[0] } catch { } }
-        if (-not $location) { throw "تحويلٌ بلا عنوان ($code) عند تنزيل الأثر." }
+    $resp = $null
+    try { $resp = $req.GetResponse() }
+    catch [Net.WebException] {
+        # ‏ما دون 400 يعود ردّاً لا استثناءً، فبلوغُ هنا يعني خطأً حقيقياً.
+        if (-not $_.Exception.Response) { throw }
+        $resp = $_.Exception.Response
     }
-    if ($location) {
+
+    try {
+        $code = [int]$resp.StatusCode
+        $location = $resp.Headers['Location']
+    } finally { $resp.Close() }
+
+    if ($code -ge 300 -and $code -lt 400) {
+        if (-not $location) { throw "تحويلٌ بلا عنوان ($code) عند تنزيل الأثر." }
+        # ‏عارياً من الترويسة: الإذن موقَّعٌ في الرابط، وضمُّ Authorization إليه
+        # يردّه المخزن بـ400 «آليّتا إذنٍ معاً».
         Invoke-WebRequest -Uri $location -OutFile $outFile -UseBasicParsing
+    }
+    elseif ($code -ge 400) {
+        throw "تنزيل الأثر ردّ $code. أفي سير النشر إذن actions: read؟"
+    }
+    else {
+        # ‏ردٌّ مباشر بلا تحويل — يُنزَّل بالترويسة كما هو.
+        Invoke-WebRequest -Headers $auth -Uri $url -OutFile $outFile -UseBasicParsing
     }
 }
 
