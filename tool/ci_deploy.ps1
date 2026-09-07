@@ -97,6 +97,41 @@ $dir = Join-Path $env:RUNNER_TEMP 'kinetic-pkg'
 if (Test-Path $dir) { Remove-Item $dir -Recurse -Force }
 New-Item -ItemType Directory -Force -Path $dir | Out-Null
 
+# ‏ينزّل ملفاً بالتدفّق إلى القرص.
+#
+# ‏و‎Invoke-WebRequest‎ لا يصلح للحزم: في ويندوز باورشيل يقرأ الردّ كلّه
+# **في الذاكرة** قبل أن يكتب، ويرسم شريط تقدّم عند كل دفعة — فينزل ملفٌ
+# بسبعين ميغابايت في دقائق بدل ثوانٍ، وقد تنتهي مهلته دون أن يكتمل. وقع
+# فعلاً وأسقط نشرة: «The operation has timed out» بعد ستّ دقائق ونصف.
+#
+# ‏والمهلتان مضبوطتان صراحةً: الافتراضية مئة ثانية للطلب كلّه، وهي كافيةٌ
+# لصفحةٍ ولا تكفي حزمة. فالاتصال دقيقتان، والقراءة عشر دقائق — على وصلةٍ
+# بطيئة يُكمَل التحميل بدل أن يُقطع في منتصفه.
+function Save-Stream($url, $outFile, $headers) {
+    $req = [Net.HttpWebRequest]::Create($url)
+    $req.Timeout = 120000
+    $req.ReadWriteTimeout = 600000
+    $req.UserAgent = 'kinetic-deploy'
+
+    if ($headers) {
+        foreach ($name in $headers.Keys) {
+            # ‏‎Accept‎ و‎User-Agent‎ ترويستان محجوزتان: إضافتهما بـAdd ترمي
+            # استثناءً، ويُضبطان بخاصيّتيهما.
+            switch ($name) {
+                'Accept'     { $req.Accept = $headers[$name] }
+                'User-Agent' { $req.UserAgent = $headers[$name] }
+                default      { $req.Headers.Add($name, $headers[$name]) }
+            }
+        }
+    }
+
+    $resp = $req.GetResponse()
+    $in = $resp.GetResponseStream()
+    $out = [IO.File]::Create($outFile)
+    try { $in.CopyTo($out, 1048576) }
+    finally { $out.Dispose(); $in.Dispose(); $resp.Close() }
+}
+
 # ‏روابط تنزيل الآثار تُحوَّل إلى مخزن كائناتٍ يوقّع الإذن في الرابط نفسه،
 # ويردّ 400 على طلبٍ يحمل ترويسة Authorization فوق ذلك. فيُقرأ التحويل
 # ثمّ يُنزَّل الهدف عارياً من الترويسة.
@@ -130,14 +165,14 @@ function Get-ArtifactZip($url, $outFile) {
         if (-not $location) { throw "تحويلٌ بلا عنوان ($code) عند تنزيل الأثر." }
         # ‏عارياً من الترويسة: الإذن موقَّعٌ في الرابط، وضمُّ Authorization إليه
         # يردّه المخزن بـ400 «آليّتا إذنٍ معاً».
-        Invoke-WebRequest -Uri $location -OutFile $outFile -UseBasicParsing
+        Save-Stream $location $outFile $null
     }
     elseif ($code -ge 400) {
         throw "تنزيل الأثر ردّ $code. أفي سير النشر إذن actions: read؟"
     }
     else {
         # ‏ردٌّ مباشر بلا تحويل — يُنزَّل بالترويسة كما هو.
-        Invoke-WebRequest -Headers $auth -Uri $url -OutFile $outFile -UseBasicParsing
+        Save-Stream $url $outFile $auth
     }
 }
 
@@ -202,12 +237,12 @@ else {
     $asset = $packages[0]
     $pkgName = $asset.name
     $pkg = Join-Path $dir $pkgName
-    Invoke-WebRequest -Headers $bin -Uri $asset.url -OutFile $pkg -UseBasicParsing
+    Save-Stream $asset.url $pkg $bin
 
     $sig = $rel.assets | Where-Object { $_.name -like '*.sha256' } | Select-Object -First 1
     if ($sig) {
         $sigFile = Join-Path $dir 'pkg.sha256'
-        Invoke-WebRequest -Headers $bin -Uri $sig.url -OutFile $sigFile -UseBasicParsing
+        Save-Stream $sig.url $sigFile $bin
         $wantSha = (Get-Content -LiteralPath $sigFile -Raw) -replace '[^0-9A-Fa-f]', ''
     }
 
@@ -449,7 +484,7 @@ else {
         $apkPath = Join-Path $appDir $apkName
 
         if ($apkLocal) { Copy-Item $apkLocal.FullName $apkPath -Force }
-        else { Invoke-WebRequest -Headers $bin -Uri $apkAsset.url -OutFile $apkPath -UseBasicParsing }
+        else { Save-Stream $apkAsset.url $apkPath $bin }
         Ok "$apkName  ($([math]::Round((Get-Item $apkPath).Length / 1MB, 1)) ميغابايت)"
 
         # آخر ثلاث نسخ تبقى — كما تفعل publish.ps1 بالحزم. ولا تُحذف كلها:
