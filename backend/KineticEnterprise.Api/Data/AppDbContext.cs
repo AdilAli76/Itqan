@@ -13,6 +13,7 @@ public class AppDbContext : DbContext
     public DbSet<Branch> Branches => Set<Branch>();
     public DbSet<AppUser> AppUsers => Set<AppUser>();
     public DbSet<LoginHistory> LoginHistories => Set<LoginHistory>();
+    public DbSet<UserPasskey> UserPasskeys => Set<UserPasskey>();
     public DbSet<Product> Products => Set<Product>();
     public DbSet<Supplier> Suppliers => Set<Supplier>();
     public DbSet<Sponsor> Sponsors => Set<Sponsor>();
@@ -71,6 +72,10 @@ public class AppDbContext : DbContext
         modelBuilder.Entity<Branch>().ToTable("branches");
         modelBuilder.Entity<AppUser>().ToTable("app_users");
         modelBuilder.Entity<LoginHistory>().ToTable("login_history");
+        modelBuilder.Entity<UserPasskey>().ToTable("user_passkeys");
+        // معرّف الاعتماد فريدٌ عالمياً بحكم المواصفة، والفهرس الفريد يمنع
+        // تسجيل المفتاح نفسه لحسابين — فمن سجّله عند الأوّل يبقى صاحبه.
+        modelBuilder.Entity<UserPasskey>().HasIndex(p => p.CredentialId).IsUnique();
         modelBuilder.Entity<Product>().ToTable("products");
         modelBuilder.Entity<Supplier>().ToTable("suppliers");
         modelBuilder.Entity<Sponsor>().ToTable("sponsors");
