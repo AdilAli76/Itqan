@@ -20,7 +20,7 @@ class NotificationBell extends ConsumerWidget {
       ),
       error: (err, _) => IconButton(
         onPressed: () => context.go('/notifications'),
-        icon: Icon(Icons.notifications_outlined),
+        icon: const Icon(Icons.notifications_outlined),
         tooltip: 'الإشعارات',
       ),
       data: (notifications) {
@@ -31,7 +31,7 @@ class NotificationBell extends ConsumerWidget {
           children: [
             IconButton(
               onPressed: () => context.go('/notifications'),
-              icon: Icon(Icons.notifications_outlined),
+              icon: const Icon(Icons.notifications_outlined),
               tooltip: unreadCount > 0
                   ? 'لديك $unreadCount إشعار جديد'
                   : 'الإشعارات',
