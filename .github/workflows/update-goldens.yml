@@ -43,9 +43,7 @@ jobs:
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
           git add test/screenshots/
-          git commit -m "تحديث الملفات الذهبية
-
-Co-Authored-By: Claude Haiku 4.5 <noreply@anthropic.com>"
+          git commit -m "تحديث الملفات الذهبية" -m "Co-Authored-By: Claude Haiku 4.5 <noreply@anthropic.com>"
           git push
 
       - name: حفظ النتيجة كأثر
