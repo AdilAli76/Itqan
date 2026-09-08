@@ -62,6 +62,9 @@ public class AppDbContext : DbContext
     public DbSet<PurchaseReceipt> PurchaseReceipts => Set<PurchaseReceipt>();
     public DbSet<PurchaseReceiptItem> PurchaseReceiptItems => Set<PurchaseReceiptItem>();
     public DbSet<PlatformOrganizationRecord> PlatformOrganizations => Set<PlatformOrganizationRecord>();
+    public DbSet<CustomerTag> CustomerTags => Set<CustomerTag>();
+    public DbSet<EntitlementDeductionSchedule> EntitlementDeductionSchedules => Set<EntitlementDeductionSchedule>();
+    public DbSet<PrintAuditLog> PrintAuditLogs => Set<PrintAuditLog>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -140,6 +143,9 @@ public class AppDbContext : DbContext
         modelBuilder.Entity<PurchaseReceipt>().ToTable("purchase_receipts");
         modelBuilder.Entity<PurchaseReceiptItem>().ToTable("purchase_receipt_items");
         modelBuilder.Entity<PlatformOrganizationRecord>().ToTable("platform_organizations");
+        modelBuilder.Entity<CustomerTag>().ToTable("customer_tags");
+        modelBuilder.Entity<EntitlementDeductionSchedule>().ToTable("entitlement_deduction_schedules");
+        modelBuilder.Entity<PrintAuditLog>().ToTable("print_audit_logs");
 
         modelBuilder.Entity<Invoice>()
             .HasMany(i => i.Items)

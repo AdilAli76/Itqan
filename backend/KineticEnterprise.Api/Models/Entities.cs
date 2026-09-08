@@ -2539,3 +2539,81 @@ public class UserPasskey
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? LastUsedAt { get; set; }
 }
+
+/// <summary>
+/// وسمٌ لتصنيف العملاء — للعميل الواحد عدّة أوسمٍ.
+/// مثالاً: «VIP»، «مشترٍ متكرّر»، «الجملة»، «تجريبي».
+/// </summary>
+public class CustomerTag
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid OrganizationId { get; set; }
+    public Guid CustomerId { get; set; }
+    public string TagName { get; set; } = "";
+    public string? Color { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+}
+
+/// <summary>
+/// جدول استحقاقات دوري — يحدّد مبلغ الصرف الشهري لفئة عملاء معيّنة.
+///
+/// <para><b>الفرق عن [CustomerCategory.PeriodAmount]:</b> الفئة ثابتة عند إنشاؤها،
+/// بينما هذا يسمح بجداولَ مختلفةٍ حسب الفترة الزمنية — مثلاً: سقفٌ إضافيٌّ
+/// في رمضان، أو زيادةُ شهرية للفئة لعام ميلادي واحد.</para>
+/// </summary>
+public class EntitlementDeductionSchedule
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid OrganizationId { get; set; }
+    public Guid CustomerCategoryId { get; set; }
+
+    /// <summary>المبلغ الذي يُخصم من كل عميل في الفئة عند الدورة.</summary>
+    public decimal DeductionAmount { get; set; }
+
+    /// <summary>
+    /// اليوم من الشهر الذي تُجرى عنده الخصومات (1-28).
+    /// استخدام 1-28 يضمن عمل الجدول في كل شهور السنة (فبراير بـ 28 يوم).
+    /// </summary>
+    public int DeductionDayOfMonth { get; set; }
+
+    /// <summary>آخر تاريخ مُعالجة — لمنع تطبيق الخصم مرّتين في نفس الشهر.</summary>
+    public DateTime? LastProcessedDate { get; set; }
+
+    /// <summary>هل هذا الجدول مفعّلٌ الآن أم موقوفٌ؟</summary>
+    public bool IsActive { get; set; } = true;
+
+    /// <summary>ملاحظاتٌ عن هذا الجدول — مثلاً: «زيادة رمضانية».</summary>
+    public string? Notes { get; set; }
+
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+}
+
+/// <summary>
+/// سجلّ عملية طباعة — لتتبع أيّ فواتيرَ طُبعت ومتى.
+///
+/// <para><b>الفائدة:</b> التدقيق والمطابقة: مثلاً عند شكوى عميل
+/// «ما طبعتَ لي إيصالاً»، يمكن التحقّق من السجل.</para>
+/// </summary>
+public class PrintAuditLog
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid OrganizationId { get; set; }
+    public Guid BranchId { get; set; }
+
+    /// <summary>الفاتورة التي طُلب طباعتُها (إن كانت موجودة).</summary>
+    public Guid? InvoiceId { get; set; }
+
+    /// <summary>ما نوع المستند المطبوع: invoice, wallet_receipt, report، إلخ.</summary>
+    public string DocumentType { get; set; } = "invoice";
+
+    /// <summary>نجحت عملية الطباعة أم فشلت؟</summary>
+    public bool Success { get; set; }
+
+    /// <summary>رسالة الخطأ إن فشلت (مثلاً: «لا يوجد اتصال بالطابعة»).</summary>
+    public string? ErrorMessage { get; set; }
+
+    /// <summary>من طلب الطباعة (معرّف المستخدم).</summary>
+    public Guid? RequestedBy { get; set; }
+
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+}
