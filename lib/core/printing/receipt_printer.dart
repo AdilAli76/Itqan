@@ -7,6 +7,8 @@ import 'package:printing/printing.dart';
 import 'package:barcode/barcode.dart' show Barcode;
 import '../pdf/arabic_pdf_theme.dart';
 import 'receipt_template.dart';
+import 'print_cache_manager.dart';
+import 'print_error_handler.dart';
 
 final _currencyFormat = NumberFormat('#,##0.00', 'en');
 final _dateFormat = DateFormat('yyyy-MM-dd HH:mm');
@@ -23,22 +25,41 @@ const _paymentLabels = {
 /// (وهذا حال أغلب الطابعات الحديثة USB/شبكة)، بلا حاجة لبرمجة ESC/POS
 /// مباشرة لموديل بعينه. الطول غير محدود (لفة مستمرة) والعرض فقط ثابت،
 /// نفس أسلوب PdfPageFormat.roll57/roll80 المدمج في مكتبة pdf.
+///
+/// [shouldPrint]: إذا كانت false، لا تُطبع الفاتورة. يُستخدم عند رغبة الكاشير
+/// في عدم الطباعة.
 Future<void> printInvoiceReceipt({
   required Map<String, dynamic> invoice,
   required String orgName,
   required String currencySymbol,
   ReceiptTemplate template = ReceiptTemplate.fallback,
   Uint8List? logoBytes,
+  bool shouldPrint = true,
+  Function(PrintErrorHandler)? onError,
 }) async {
-  final doc = pw.Document(theme: await arabicPdfTheme());
-  doc.addPage(buildReceiptPage(
-    invoice: invoice,
-    orgName: orgName,
-    currencySymbol: currencySymbol,
-    template: template,
-    logoBytes: logoBytes,
-  ));
-  await Printing.layoutPdf(onLayout: (format) async => doc.save());
+  if (!shouldPrint) return;
+
+  try {
+    final doc = pw.Document(theme: await arabicPdfTheme());
+    doc.addPage(buildReceiptPage(
+      invoice: invoice,
+      orgName: orgName,
+      currencySymbol: currencySymbol,
+      template: template,
+      logoBytes: logoBytes,
+    ));
+    await Printing.layoutPdf(onLayout: (format) async => doc.save()).timeout(
+      const Duration(seconds: 30),
+      onTimeout: () => throw TimeoutException('انقطع الاتصال بالطابعة', const Duration(seconds: 30)),
+    );
+  } catch (e) {
+    final error = e is Exception ? classifyError(e) : PrintErrorHandler(
+      errorMessage: e.toString(),
+      type: PrintErrorType.unknown,
+    );
+    onError?.call(error);
+    rethrow;
+  }
 }
 
 /// صفحة الإيصال — مفصولةً عن الطباعة **كي تستعملها المعاينة نفسها**.
