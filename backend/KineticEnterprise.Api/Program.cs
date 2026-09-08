@@ -8,6 +8,8 @@ using Microsoft.IdentityModel.Tokens;
 using KineticEnterprise.Api.Data;
 using KineticEnterprise.Api.Hubs;
 using KineticEnterprise.Api.Middleware;
+using KineticEnterprise.Api.Services;
+using KineticEnterprise.Api.HostedServices;
 using Microsoft.AspNetCore.ResponseCompression;
 using Microsoft.AspNetCore.StaticFiles;
 
@@ -171,6 +173,11 @@ builder.Services.AddHostedService<ExpirySweepService>();
 // إنذار الديون المتأخّرة يومياً — الآجل كان دَيناً بلا موعد ولا تذكير ولا
 // تصنيف تأخّر. راجع DebtReminderSweeper.
 builder.Services.AddHostedService<DebtReminderSweepService>();
+
+// خصم الاستحقاقات الشهرية يومياً — معالجة جداول الخصم المحدّدة، وخصم مبلغ من
+// كل عميل في الفئة المحددة في اليوم المحدّد. راجع EntitlementDeductionService.
+builder.Services.AddScoped<EntitlementDeductionService>();
+builder.Services.AddHostedService<EntitlementDeductionHostedService>();
 
 // النسخة الليلية إلى درايف المنظمة — النسخة اليدوية تعتمد على أن يتذكّرها
 // إنسان، والإنسان ينسى ولا يكتشف نسيانه إلا يوم يحتاجها. راجع BackupSweeper.
