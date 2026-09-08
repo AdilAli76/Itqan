@@ -42,6 +42,37 @@ public record SetCardModeRequest(string? CardMode, decimal? DailyCap);
 /// ولا معرفة ما إذا كانت هناك صفحة تالية أصلاً.
 public record CustomerPageDto(List<CustomerDto> Items, int TotalCount, int Page, int PageSize);
 
+/// <summary>بيانات العميل المطلوبة للاستيراد الجماعي من ملف CSV أو JSON.</summary>
+public record ImportCustomerRequest(
+    string FullName,
+    string? Phone = null,
+    string? Email = null,
+    string? Notes = null,
+    decimal CreditLimit = 0,
+    int CreditDays = 0,
+    Guid? BranchId = null,
+    string AccountModel = AccountModels.Prepaid,
+    Guid? SponsorId = null,
+    decimal EntitlementCeiling = 0,
+    DateOnly? EntitlementExpiresOn = null,
+    Guid? CategoryId = null,
+    decimal? EntitlementOverride = null);
+
+/// <summary>نتيجة استيراد عميل واحد — نجح أم فشل ولماذا.</summary>
+public record ImportCustomerResult(
+    int RowNumber,
+    bool Success,
+    string? Error = null,
+    Guid? CustomerId = null,
+    string? FullName = null);
+
+/// <summary>نتائج استيراد جماعي للعملاء.</summary>
+public record BulkImportCustomersResult(
+    int Total,
+    int Imported,
+    int Failed,
+    List<ImportCustomerResult> Results);
+
 /// <summary>
 /// ما يُقبَل من العميل عند إنشاء زبون أو تعديله.
 ///
@@ -292,6 +323,135 @@ public class CustomersController : ControllerBase
             return Conflict(new { message = "باركود البطاقة مستخدَم بالفعل" });
         }
         return CreatedAtAction(nameof(GetById), new { id = customer.Id }, ToDto(customer, 0, null, await OrgAsync()));
+    }
+
+    /// <summary>
+    /// استيراد عملاء جماعي من ملف CSV أو JSON.
+    ///
+    /// <para><b>السلوك عند التكرار:</b> الهاتف مفتاح المطابقة — إذا وُجد عميلٌ
+    /// برقم هاتفٍ موجود، يُحدَّث بيانات العميل الجديدة ولا يُنشأ مكرّر.
+    /// فمن يستورد ملفاً مرتين بسهو لن يجد عملاء مكرّرين.</para>
+    ///
+    /// <para><b>الخطأ لكل صفّ يُسجَّل لكن لا يوقف الاستيراد:</b> فشل صفّ واحد
+    /// لا يعني ترك بقية الملف — يُرجع التقرير أيّ الصفوف نجحت وأيّها فشلت
+    /// ولماذا.</para>
+    /// </summary>
+    [HttpPost("import")]
+    [RequirePermission("customers.manage")]
+    public async Task<ActionResult<BulkImportCustomersResult>> BulkImport(
+        [FromBody] List<ImportCustomerRequest> requests)
+    {
+        if (requests is null || requests.Count == 0)
+            return BadRequest(new { message = "الملف فارغ — لا عملاء للاستيراد" });
+
+        if (requests.Count > 10000)
+            return BadRequest(new { message = "عدد العملاء يتجاوز 10000" });
+
+        var orgId = Guid.Parse(User.FindFirstValue("organization_id")!);
+        var results = new List<ImportCustomerResult>();
+        var imported = 0;
+        var org = await OrgAsync();
+
+        // التحقّق من صحة نموذج الحساب
+        for (int i = 0; i < requests.Count; i++)
+        {
+            var request = requests[i];
+            var index = i;
+
+            if (string.IsNullOrWhiteSpace(request.FullName))
+            {
+                results.Add(new ImportCustomerResult(
+                    index + 1, false, "اسم العميل مطلوب"));
+                continue;
+            }
+
+            if (!AccountModels.IsValid(request.AccountModel))
+            {
+                results.Add(new ImportCustomerResult(
+                    index + 1, false, "نموذج حساب غير معروف"));
+                continue;
+            }
+
+            try
+            {
+                var existing = string.IsNullOrWhiteSpace(request.Phone)
+                    ? null
+                    : await _db.Customers.FirstOrDefaultAsync(c =>
+                        c.Phone == request.Phone && !c.IsDeleted);
+
+                Customer customer;
+                if (existing is not null)
+                {
+                    customer = existing;
+                    customer.FullName = request.FullName.Trim();
+                    customer.Email = request.Email;
+                    customer.Notes = request.Notes;
+                    customer.CreditLimit = request.CreditLimit;
+                    customer.CreditDays = Math.Max(0, request.CreditDays);
+                    customer.BranchId = request.BranchId;
+                    customer.AccountModel = request.AccountModel;
+
+                    if (customer.AccountModel == AccountModels.Entitlement)
+                    {
+                        customer.SponsorId = request.SponsorId;
+                        customer.EntitlementCeiling = request.EntitlementCeiling;
+                        customer.EntitlementExpiresOn = request.EntitlementExpiresOn;
+                    }
+                    else
+                    {
+                        customer.SponsorId = null;
+                        customer.EntitlementCeiling = 0;
+                        customer.EntitlementExpiresOn = null;
+                    }
+                }
+                else
+                {
+                    customer = new Customer
+                    {
+                        OrganizationId = orgId,
+                        FullName = request.FullName.Trim(),
+                        Phone = request.Phone,
+                        Email = request.Email,
+                        Notes = request.Notes,
+                        CreditLimit = request.CreditLimit,
+                        CreditDays = Math.Max(0, request.CreditDays),
+                        BranchId = request.BranchId,
+                        AccountModel = request.AccountModel,
+                        SponsorId = request.AccountModel == AccountModels.Entitlement
+                            ? request.SponsorId
+                            : null,
+                        EntitlementCeiling = request.AccountModel == AccountModels.Entitlement
+                            ? request.EntitlementCeiling
+                            : 0,
+                        EntitlementExpiresOn = request.AccountModel == AccountModels.Entitlement
+                            ? request.EntitlementExpiresOn
+                            : null,
+                        CategoryId = request.CategoryId,
+                        EntitlementOverride = request.EntitlementOverride,
+                    };
+                    _db.Customers.Add(customer);
+                }
+
+                await _db.SaveChangesAsync();
+                imported++;
+                results.Add(new ImportCustomerResult(
+                    index + 1, true, null, customer.Id, customer.FullName));
+            }
+            catch (Exception ex)
+            {
+                var errorMsg = ex is DbUpdateException dbEx && IsDuplicateKey(dbEx)
+                    ? "الهاتف مستخدَم بالفعل من قبل عميل آخر"
+                    : "خطأ في حفظ البيانات";
+                results.Add(new ImportCustomerResult(
+                    index + 1, false, errorMsg));
+            }
+        }
+
+        _db.LogAudit(orgId, CurrentUserId(), "customers.bulk_imported", "customers", null,
+            newValues: new { Total = requests.Count, Imported = imported, Failed = requests.Count - imported });
+
+        return new BulkImportCustomersResult(
+            requests.Count, imported, requests.Count - imported, results);
     }
 
     [HttpPut("{id:guid}")]
