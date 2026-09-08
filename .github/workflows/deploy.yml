@@ -84,13 +84,16 @@ jobs:
       # الدفع — وذاك ما يستحيل على خطوةٍ داخل YAML.
       - name: النشر
         shell: powershell
-        run: >
-          .\tool\ci_deploy.ps1
-          -Repo "${{ github.repository }}"
-          -Tag "${{ inputs.tag }}"
-          -RunId "${{ inputs.run_id }}"
-          -Version "${{ inputs.version }}"
-          -Target "${{ inputs.target }}"
-          -Token "${{ github.token }}"
-          -SkipDb:$${{ inputs.skip_db }}
-          -MandatoryUpdate:$${{ inputs.mandatory_update }}
+        run: |
+          $params = @{
+            Repo = "${{ github.repository }}"
+            Target = "${{ inputs.target }}"
+            Token = "${{ github.token }}"
+            SkipDb = $${{ inputs.skip_db }}
+            MandatoryUpdate = $${{ inputs.mandatory_update }}
+          }
+          if ("${{ inputs.tag }}") { $params.Tag = "${{ inputs.tag }}" }
+          if ("${{ inputs.run_id }}") { $params.RunId = "${{ inputs.run_id }}" }
+          if ("${{ inputs.version }}") { $params.Version = "${{ inputs.version }}" }
+
+          & .\tool\ci_deploy.ps1 @params
