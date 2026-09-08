@@ -100,3 +100,4 @@ android/key.properties
 
 # ناتج فشل الاختبارات الذهبية — يُولَّد ولا يُرفع
 test/failures/
+*.zip
