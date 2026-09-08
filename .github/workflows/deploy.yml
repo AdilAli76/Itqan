@@ -58,7 +58,9 @@ concurrency:
 
 jobs:
   deploy:
-    runs-on: [self-hosted, kinetic]
+    # مؤقتاً: استخدام GitHub-hosted runner حتى السيرفر يعمل
+    # TODO: تغييره لـ [self-hosted, kinetic] بعد تشغيل خدمة العداء على السيرفر
+    runs-on: windows-latest
     # يقرأ مرفَق الإصدار أو أثر السير، ولا يكتب شيئاً على GitHub.
     # وactions: read لازمة لقراءة الآثار — وبلاها يردّ 403 على وضع run_id
     # وحده، فيعمل النشر بالوسم ويسقط بالأثر بلا سببٍ ظاهر.
