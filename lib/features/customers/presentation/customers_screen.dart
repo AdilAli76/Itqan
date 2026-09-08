@@ -25,6 +25,7 @@ import '../../payroll/data/payroll_providers.dart';
 import '../../../core/theme/branding_provider.dart';
 import 'bulk_cards_dialog.dart';
 import 'import_customers_dialog.dart';
+import 'customer_tags_input.dart';
 
 class CustomersScreen extends ConsumerStatefulWidget {
   const CustomersScreen({super.key});
@@ -389,12 +390,68 @@ class _CustomerFormDialogState extends State<_CustomerFormDialog> {
   late DateTime? _expiresOn = widget.customer?['entitlementExpiresOn'] == null
       ? null
       : DateTime.tryParse(widget.customer!['entitlementExpiresOn'] as String);
+  late List<String> _selectedTags = [];
   bool _saving = false;
   String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    if (_isEdit) _loadTags();
+  }
+
+  Future<void> _loadTags() async {
+    try {
+      final customerId = widget.customer!['id'] as String;
+      final response = await ApiClient.instance.dio.get('/customer-tags/customer/$customerId');
+      if (response.statusCode == 200 && mounted) {
+        final tags = (response.data as List?)?.cast<Map<String, dynamic>>() ?? [];
+        setState(() {
+          _selectedTags = tags.map((t) => t['tagName'] as String).toList();
+        });
+      }
+    } catch (_) {
+      // فشل تحميل الوسوم لا يوقف تحرير العميل
+    }
+  }
 
   bool get _isEntitlement => _accountModel == 'entitlement';
 
   bool get _isEdit => widget.customer != null;
+
+  Future<void> _syncTags(String customerId) async {
+    // لا حاجة لمزامنة إذا لم تتغير الوسوم
+    try {
+      final response = await ApiClient.instance.dio.get('/customer-tags/customer/$customerId');
+      final existingTags = (response.data as List?)?.cast<Map<String, dynamic>>() ?? [];
+      final existingTagNames = existingTags.map((t) => t['tagName'] as String).toSet();
+      final newTagNames = _selectedTags.toSet();
+
+      // حذف الوسوم المحذوفة
+      for (final tag in existingTags) {
+        if (!newTagNames.contains(tag['tagName'])) {
+          await ApiClient.instance.dio.delete('/customer-tags/${tag['id']}');
+        }
+      }
+
+      // إضافة الوسوم الجديدة
+      for (final tagName in _selectedTags) {
+        if (!existingTagNames.contains(tagName)) {
+          await ApiClient.instance.dio.post(
+            '/customer-tags',
+            data: {'customerId': customerId, 'tagName': tagName},
+          );
+        }
+      }
+    } catch (e) {
+      // فشل مزامنة الوسوم لا يمنع من حفظ العميل
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('تعذّر مزامنة الوسوم')),
+        );
+      }
+    }
+  }
 
   @override
   void dispose() {
@@ -595,6 +652,10 @@ class _CustomerFormDialogState extends State<_CustomerFormDialog> {
                   maxLines: 2,
                   decoration: const InputDecoration(labelText: 'ملاحظات (اختياري)'),
                 ),
+                const SizedBox(height: 12),
+                CustomerTagsInput(
+                  onChanged: (tags) => setState(() => _selectedTags = tags),
+                ),
                 const SizedBox(height: 4),
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
@@ -661,11 +722,27 @@ class _CustomerFormDialogState extends State<_CustomerFormDialog> {
     };
 
     try {
+      dynamic response;
+      final customerId = _isEdit ? widget.customer!['id'] as String : null;
+
       if (_isEdit) {
-        await ApiClient.instance.dio.put('/customers/${widget.customer!['id']}', data: body);
+        await ApiClient.instance.dio.put('/customers/$customerId', data: body);
       } else {
-        await ApiClient.instance.dio.post('/customers', data: body);
+        response = await ApiClient.instance.dio.post('/customers', data: body);
+        // الاستجابة تحتوي على العميل الجديد بما فيه ID
+        if (response.statusCode == 201) {
+          final newCustomerId = response.data['id'] as String?;
+          if (newCustomerId != null && _selectedTags.isNotEmpty) {
+            await _syncTags(newCustomerId);
+          }
+        }
       }
+
+      // مزامنة الوسوم للعملاء الموجودين
+      if (_isEdit && customerId != null) {
+        await _syncTags(customerId);
+      }
+
       if (mounted) Navigator.pop(context, true);
     } catch (e) {
       setState(() => _error = _dioErrorMessage(e, 'تعذّر حفظ العميل'));

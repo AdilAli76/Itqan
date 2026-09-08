@@ -28,6 +28,7 @@ import '../../../shared/widgets/icon_action.dart';
 import '../../../core/network/offline_queue.dart';
 import '../../../shared/widgets/app_surface.dart';
 import '../../../shared/widgets/pagination_bar.dart';
+import '../../../shared/widgets/print_control_toggle.dart';
 import '../../../core/shortcuts/keyboard_shortcuts_manager.dart';
 
 /// ما يعرضه الشريط السفلي — بنفس ترتيب [_PosScreenState._onShortcut].
@@ -129,6 +130,7 @@ class _PosScreenState extends ConsumerState<PosScreen> {
   List<Map<String, dynamic>> _branches = const [];
   bool _loadingBranch = true;
   bool _placingOrder = false;
+  bool _shouldPrint = true;
   String? _error;
   Timer? _debounce;
 
@@ -656,6 +658,7 @@ class _PosScreenState extends ConsumerState<PosScreen> {
         _selectedLine = null;
         _padValue = '';
         _tenderedController.clear();
+        _shouldPrint = true;
       });
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -687,6 +690,7 @@ class _PosScreenState extends ConsumerState<PosScreen> {
             _selectedLine = null;
             _padValue = '';
             _tenderedController.clear();
+            _shouldPrint = true;
           });
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
@@ -722,6 +726,7 @@ class _PosScreenState extends ConsumerState<PosScreen> {
   }
 
   Future<void> _printReceipt(String invoiceId) async {
+    if (!_shouldPrint) return;
     try {
       final response = await ApiClient.instance.dio.get('/invoices/$invoiceId');
       final branding = ref.read(brandingProvider).valueOrNull;
@@ -733,6 +738,7 @@ class _PosScreenState extends ConsumerState<PosScreen> {
         currencySymbol: branding?.currencySymbol ?? 'د.ل',
         template: template,
         logoBytes: logoBytes,
+        shouldPrint: _shouldPrint,
       );
     } catch (_) {
       if (mounted) {
@@ -1347,6 +1353,11 @@ class _PosScreenState extends ConsumerState<PosScreen> {
           const SizedBox(height: 12),
           _buildQuantityPad(touch),
           const SizedBox(height: 16),
+          PrintControlToggle(
+            shouldPrint: _shouldPrint,
+            onChanged: (value) => setState(() => _shouldPrint = value),
+          ),
+          const SizedBox(height: 12),
           // أزرار الدفع أطول في وضع اللمس — آخر نقرة في العملية وأكثرها
           // تكراراً على مدار اليوم، وخطأ الضغط فيها يعني فاتورة بطريقة دفع خاطئة.
           Row(
