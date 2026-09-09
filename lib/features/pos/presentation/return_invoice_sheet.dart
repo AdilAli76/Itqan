@@ -33,6 +33,8 @@ class _ReturnInvoiceSheetState extends State<ReturnInvoiceSheet> {
   bool _busy = false;
   String? _error;
   Map<String, dynamic>? _invoice;
+  Map<int, double> _returnQuantities = {};
+  bool _showItemsList = false;
 
   @override
   void dispose() {
@@ -77,7 +79,11 @@ class _ReturnInvoiceSheetState extends State<ReturnInvoiceSheet> {
         setState(() => _error = 'هذه الفاتورة مسترجَعة مسبقاً');
         return;
       }
-      setState(() => _invoice = match);
+      setState(() {
+        _invoice = match;
+        _returnQuantities.clear();
+        _showItemsList = false;
+      });
     } catch (e) {
       setState(() => _error = _message(e, 'تعذّر البحث عن الفاتورة'));
     } finally {
@@ -89,12 +95,38 @@ class _ReturnInvoiceSheetState extends State<ReturnInvoiceSheet> {
     final invoice = _invoice;
     if (invoice == null || _busy) return;
 
+    if (_returnQuantities.isEmpty) {
+      setState(() => _error = 'اختر مادة واحدة على الأقل');
+      return;
+    }
+
     setState(() {
       _busy = true;
       _error = null;
     });
     try {
-      await ApiClient.instance.dio.post('/invoices/${invoice['id']}/refund');
+      final items = invoice['items'] as List? ?? [];
+      final returnItems = <Map<String, dynamic>>[];
+
+      for (var i = 0; i < items.length; i++) {
+        final qty = _returnQuantities[i] ?? 0;
+        if (qty > 0) {
+          returnItems.add({
+            'invoiceLineId': items[i]['id'],
+            'returnQuantity': qty,
+          });
+        }
+      }
+
+      if (returnItems.isEmpty) {
+        setState(() => _error = 'اختر كمية أكبر من صفر');
+        return;
+      }
+
+      await ApiClient.instance.dio.post(
+        '/invoices/${invoice['id']}/partial-refund',
+        data: {'returnItems': returnItems},
+      );
       if (mounted) Navigator.pop(context, true);
     } catch (e) {
       setState(() => _error = _message(e, 'تعذّر إتمام الاسترجاع'));
@@ -107,6 +139,7 @@ class _ReturnInvoiceSheetState extends State<ReturnInvoiceSheet> {
   Widget build(BuildContext context) {
     final invoice = _invoice;
 
+    final totalReturnQty = _returnQuantities.values.fold(0.0, (a, b) => a + b);
     return AdaptiveDialog(
       title: 'إرجاع فاتورة',
       maxWidth: 420,
@@ -121,11 +154,11 @@ class _ReturnInvoiceSheetState extends State<ReturnInvoiceSheet> {
           )
         else
           FilledButton(
-            onPressed: _busy ? null : _refund,
+            onPressed: (_busy || totalReturnQty == 0) ? null : _refund,
             style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
             child: _busy
                 ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-                : const Text('تأكيد الإرجاع'),
+                : Text('إرجاع (${totalReturnQty.toInt()})'),
           ),
       ],
       body: Column(
@@ -158,8 +191,19 @@ class _ReturnInvoiceSheetState extends State<ReturnInvoiceSheet> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(invoice['invoiceNumber'] as String? ?? '',
-                          style: AppTextStyles.headlineMd()),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(invoice['invoiceNumber'] as String? ?? '',
+                              style: AppTextStyles.headlineMd()),
+                          TextButton(
+                            onPressed: () {
+                              setState(() => _showItemsList = !_showItemsList);
+                            },
+                            child: Text(_showItemsList ? 'إخفاء' : 'عناصر الفاتورة'),
+                          ),
+                        ],
+                      ),
                       const SizedBox(height: 6),
                       Text(
                         DateFormat('yyyy-MM-dd HH:mm').format(
@@ -167,9 +211,6 @@ class _ReturnInvoiceSheetState extends State<ReturnInvoiceSheet> {
                         style: AppTextStyles.labelMd(),
                       ),
                       const SizedBox(height: 10),
-                      // المبلغ بارز: هو ما سيخرج من الدرج أو يعود إلى
-                      // المحفظة، ورؤيته قبل التأكيد تمنع استرجاع الفاتورة
-                      // الخطأ حين يتشابه رقمان.
                       CurrencyBadge(
                         amount: (invoice['totalAmount'] as num?)?.toDouble() ?? 0,
                         currencySymbol: 'د.ل',
@@ -177,6 +218,95 @@ class _ReturnInvoiceSheetState extends State<ReturnInvoiceSheet> {
                     ],
                   ),
                 ),
+                if (_showItemsList) ...[
+                  const SizedBox(height: 12),
+                  Container(
+                    decoration: BoxDecoration(
+                      border: Border.all(color: Colors.grey[300]!),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: ListView.separated(
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      itemCount: (invoice['items'] as List? ?? []).length,
+                      separatorBuilder: (_, __) => Divider(height: 1, color: Colors.grey[200]),
+                      itemBuilder: (_, index) {
+                        final item = (invoice['items'] as List)[index] as Map<String, dynamic>;
+                        final itemId = item['id'] as int?;
+                        final returnQty = _returnQuantities[index] ?? 0;
+                        final maxQty = (item['quantity'] as num?)?.toDouble() ?? 0;
+
+                        return Padding(
+                          padding: const EdgeInsets.all(12),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      item['productName'] as String? ?? 'منتج',
+                                      style: AppTextStyles.bodyMd(),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                  Text(
+                                    'الكمية: ${maxQty.toInt()}',
+                                    style: AppTextStyles.labelMd(),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 8),
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: Slider(
+                                      value: returnQty,
+                                      min: 0,
+                                      max: maxQty,
+                                      divisions: maxQty.toInt(),
+                                      onChanged: (val) {
+                                        setState(() {
+                                          _returnQuantities[index] = val;
+                                        });
+                                      },
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  SizedBox(
+                                    width: 50,
+                                    child: TextField(
+                                      textAlign: TextAlign.center,
+                                      decoration: InputDecoration(
+                                        isDense: true,
+                                        border: OutlineInputBorder(
+                                          borderRadius: BorderRadius.circular(4),
+                                        ),
+                                      ),
+                                      keyboardType: TextInputType.number,
+                                      controller: TextEditingController(
+                                        text: returnQty.toInt().toString(),
+                                      ),
+                                      onChanged: (val) {
+                                        final newQty = double.tryParse(val) ?? 0;
+                                        if (newQty >= 0 && newQty <= maxQty) {
+                                          setState(() {
+                                            _returnQuantities[index] = newQty;
+                                          });
+                                        }
+                                      },
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 12),
                 Text(
                   'ستُنشأ فاتورة مرتجع، وتعود الكمية إلى المخزون بدفعتها الأصلية. '
