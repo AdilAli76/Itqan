@@ -49,6 +49,10 @@ on:
         description: 'تحديث التطبيق إلزامي (يُستعمل حين يتغيّر عقد الـAPI)'
         type: boolean
         default: false
+      skip_staging_check:
+        description: 'تجاوز فحص التجربة (استخدام مؤقت)'
+        type: boolean
+        default: false
 
 # نشرتان معاً على خادم واحد تتنازعان نفس الملفات المقفولة. الطابور لا
 # الإلغاء: نشرةٌ تُلغى في منتصفها تترك ملفات نسختين مختلطة.
@@ -94,3 +98,4 @@ jobs:
           -Token "${{ github.token }}"
           -SkipDb:$${{ inputs.skip_db }}
           -MandatoryUpdate:$${{ inputs.mandatory_update }}
+          -SkipStagingCheck:$${{ inputs.skip_staging_check }}

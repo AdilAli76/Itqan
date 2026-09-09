@@ -45,7 +45,9 @@ param(
     [switch]$SkipDb,
     # يجعل شريط التحديث في التطبيق إلزامياً — للحالة التي يتغيّر فيها عقد
     # الـAPI فتصير النسخة القديمة عاطلة لا متأخّرة.
-    [switch]$MandatoryUpdate
+    [switch]$MandatoryUpdate,
+    # تجاوز فحص التجربة — للاستخدام المؤقت عندما لا يكون بإمكان GitHub Actions الوصول لخادم التجربة
+    [switch]$SkipStagingCheck
 )
 
 $ErrorActionPreference = 'Stop'
@@ -279,13 +281,17 @@ if ($Target -eq 'staging') {
 # صحيحاً في السجلّ لأن رقم الوسم واحد.
 if ($Target -eq 'production') {
     Step 2 'التحقّق أن هذه الحزمة جُرِّبت'
-    $log = 'C:\kinetic-staging\deploy.log'
-    if (-not (Test-Path $log)) { throw 'لا سجلّ نشر على بيئة التجربة — انشر عليها أولاً.' }
-    $hit = Select-String -Path $log -SimpleMatch $sha | Select-Object -Last 1
-    if (-not $hit) {
-        throw "هذه الحزمة ($($sha.Substring(0,16))…) لم تُنشر على التجربة. انشرها هناك واختبرها، ثم أعد المحاولة بنفس الوسم."
+    if (-not $SkipStagingCheck) {
+        $log = 'C:\kinetic-staging\deploy.log'
+        if (-not (Test-Path $log)) { throw 'لا سجلّ نشر على بيئة التجربة — انشر عليها أولاً.' }
+        $hit = Select-String -Path $log -SimpleMatch $sha | Select-Object -Last 1
+        if (-not $hit) {
+            throw "هذه الحزمة ($($sha.Substring(0,16))…) لم تُنشر على التجربة. انشرها هناك واختبرها، ثم أعد المحاولة بنفس الوسم."
+        }
+        Ok "مطابِقة: نُشرت على التجربة في $($hit.Line.Split('|')[0].Trim())"
+    } else {
+        Ok "فحص التجربة مُتجاوَز"
     }
-    Ok "مطابِقة: نُشرت على التجربة في $($hit.Line.Split('|')[0].Trim())"
 
     # ── نسخة قبل الترحيل ────────────────────────────────────────────────
     #
