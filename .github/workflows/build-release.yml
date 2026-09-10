@@ -12,7 +12,7 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
 
     steps:
       - uses: actions/checkout@v4
@@ -37,13 +37,19 @@ jobs:
       - name: Build windows
         run: flutter build windows --release
 
+      - name: Package builds
+        shell: pwsh
+        run: |
+          Compress-Archive -Path build/web/* -DestinationPath build/kinetic-web.zip -Force
+          Compress-Archive -Path build/windows/x64/runner/Release/* -DestinationPath build/kinetic-windows-x64.zip -Force
+
       - name: Create Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v1
         with:
           files: |
-            build/web/**/*
-            build/windows/x64/runner/Release/**/*
+            build/kinetic-web.zip
+            build/kinetic-windows-x64.zip
           draft: false
           prerelease: false
         env:
@@ -55,5 +61,5 @@ jobs:
         with:
           name: build-artifacts
           path: |
-            build/web
-            build/windows/x64/runner/Release
+            build/kinetic-web.zip
+            build/kinetic-windows-x64.zip
