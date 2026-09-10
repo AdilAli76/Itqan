@@ -1,38 +1,22 @@
-﻿<#
+&#65279;<#
 .SYNOPSIS
-    يثبّت عدّاء GitHub Actions على الخادم — الطرف الذي ينفّذ النشر.
-
+    إعداد عدّاء GitHub Actions مستضاف ذاتياً على الخادم.
+    
 .DESCRIPTION
-    بعده يصير النشر زرّاً في المتصفّح بدل أربع خطوات على جهازين: يُبنى في
-    السحابة، ويُنزَّل هنا، ويُرقَّى بـ deploy_update.ps1 — بلا سطح مكتب
-    بعيد ولا نسخ ملفات ولا احتمال أن تُنشر حزمة الأمس.
-
-    ولا يُفتح أي منفذ: العدّاء هو من يتّصل بـGitHub صادراً ويسأل «هل من
-    عمل؟» — فلا مدخل جديد إلى الخادم.
-
-    ⚠ ومن يملك الدفع إلى المستودع يملك تنفيذ أوامر على هذا الخادم. هذا
-    ثمن النشر بزرّ، ويُقبَل لأن المستودع خاصّ ومطوّره واحد. فإن دخل شريك
-    يوماً، فالنقاش يبدأ من هنا لا من ذاك اليوم.
-
-.PARAMETER Token
-    رمز التسجيل من:
-      Settings ← Actions ← Runners ← New self-hosted runner ← Windows
-    وهو صالح ساعةً واحدة. ليس رمز وصولٍ شخصياً ولا يُحفَظ في أي ملف.
-
-.EXAMPLE
-    .\runner_setup.ps1 -Token AXXXXXX...
+    ينشئ حسابات الخدمة والمجلدات المطلوبة، ويثبّت العدّاء.
+    يُشغَّل مرة واحدة على الخادم.
+    
+.PARAMETER GitHubRepo
+    المستودع (owner/repo)
+    
+.PARAMETER GitHubToken
+    Personal Access Token مع صلاحيات admin:org_self_hosted_runner
 #>
+
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory = $true)]
-    [string]$Token,
-    [string]$Repository = 'adilmohamed76-hub/kinetic-erp',
-    [string]$Path = 'C:\actions-runner',
-    [string]$Name = "kinetic-$env:COMPUTERNAME",
-    # الوسوم التي يختار بها سير النشر هذا العدّاء — راجع
-    # ‏.github/workflows/deploy.yml (runs-on).
-    [string]$Labels = 'self-hosted,windows,kinetic',
-    [string]$Version = '2.328.0'
+    [Parameter(Mandatory = $true)] [string]$GitHubRepo,
+    [Parameter(Mandatory = $true)] [string]$GitHubToken
 )
 
 $ErrorActionPreference = 'Stop'
@@ -42,82 +26,96 @@ function Step($n, $t) { Write-Host "`n[$n] $t" -ForegroundColor Cyan }
 function Ok($t)   { Write-Host "    $t" -ForegroundColor Green }
 function Warn($t) { Write-Host "    $t" -ForegroundColor Yellow }
 
-function Test-Admin {
-    ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
-        [Security.Principal.WindowsBuiltInRole]::Administrator)
-}
-if (-not (Test-Admin)) { throw 'شغّل PowerShell كمسؤول — تثبيت خدمة ويندوز يحتاج ذلك.' }
+Step 1 "إعداد حسابات الخدمة"
 
-Write-Host ""
-Write-Host "  عدّاء النشر لـ $Repository" -ForegroundColor White
-Write-Host "    المسار : $Path"
-Write-Host "    الاسم  : $Name"
-Write-Host "    الوسوم : $Labels"
+# حساب لتشغيل العدّاء
+$runnerUser = 'GitHubRunner'
+$runnerPassword = [System.Web.Security.Membership]::GeneratePassword(16, 2)
 
-# ── 1. التنزيل ──────────────────────────────────────────────────────────
-Step 1 'تنزيل العدّاء'
-if (Test-Path (Join-Path $Path 'config.cmd')) {
-    Ok 'العدّاء منزَّل مسبقاً — يُعاد ضبطه فقط.'
-} else {
-    New-Item -ItemType Directory -Force -Path $Path | Out-Null
-    $zip = Join-Path $env:TEMP "actions-runner-$Version.zip"
-    $url = "https://github.com/actions/runner/releases/download/v$Version/actions-runner-win-x64-$Version.zip"
-    # TLS 1.2 صراحةً: ويندوز سيرفر القديم يتفاوض 1.0 افتراضاً فيردّ GitHub
-    # بقطعٍ للاتصال بلا رسالة مفهومة.
-    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-    Invoke-WebRequest -Uri $url -OutFile $zip -UseBasicParsing
-    Expand-Archive -LiteralPath $zip -DestinationPath $Path -Force
-    Remove-Item $zip -Force
-    Ok "نُزِّل وفُكَّ في $Path"
-}
-
-# ── 2. الضبط ────────────────────────────────────────────────────────────
-Step 2 'تسجيل العدّاء'
-
-# تسجيلٌ سابق يُزال أولاً: config.cmd يفشل على مجلد مضبوط، ورسالتُه
-# «already configured» تُقرأ خطأً على أنها نجاح.
-if (Test-Path (Join-Path $Path '.runner')) {
-    Warn 'يوجد تسجيل سابق — يُزال.'
-    & (Join-Path $Path 'config.cmd') remove --token $Token
-}
-
-# ⚠ الخدمة تعمل بحساب مسؤول لا بـNETWORK SERVICE الافتراضي.
-#
-# لأن deploy_update.ps1 يوقف موقع IIS ويستبدل ملفات C:\kinetic — وكلاهما
-# ممنوع على الحساب الافتراضي. وبدون هذا ينجح التسجيل، ثم تفشل أول نشرة
-# بـ«Access denied» في منتصف الاستبدال: الموقع متوقّف والملفات نصفها.
-#
-# ويطلب config.cmd الحساب وكلمته تفاعلياً — لا تُمرَّر في سطر أوامر يُحفَظ
-# في سجلّ الأوامر.
-Push-Location $Path
 try {
-    & .\config.cmd --unattended --replace `
-        --url "https://github.com/$Repository" `
-        --token $Token --name $Name --labels $Labels `
-        --work '_work' --runasservice
-    if ($LASTEXITCODE -ne 0) { throw "فشل التسجيل (رمز $LASTEXITCODE) — تأكّد أن الرمز لم تمضِ عليه ساعة." }
-} finally { Pop-Location }
-Ok 'مسجَّل ومثبَّت كخدمة'
-
-# ── 3. صلاحية الخدمة ────────────────────────────────────────────────────
-Step 3 'حساب تشغيل الخدمة'
-$svc = Get-CimInstance Win32_Service -Filter "Name LIKE 'actions.runner%'" | Select-Object -First 1
-if ($svc) {
-    Ok "الخدمة: $($svc.Name)"
-    Write-Host "    الحساب: $($svc.StartName)" -ForegroundColor Gray
-    if ($svc.StartName -match 'NETWORK SERVICE|LocalService') {
-        Warn 'الحساب الافتراضي لا يملك إيقاف IIS ولا الكتابة في C:\kinetic.'
-        Warn 'غيّره إلى حساب مسؤول من services.msc ← خصائص ← Log On، ثم أعد تشغيل الخدمة.'
+    $user = Get-LocalUser -Name $runnerUser -ErrorAction SilentlyContinue
+    if (-not $user) {
+        New-LocalUser -Name $runnerUser -Password (ConvertTo-SecureString $runnerPassword -AsPlainText -Force) -FullName 'GitHub Actions Runner' -Description 'خدمة تشغيل العدّاء' -PasswordNeverExpires
+        Ok "تم إنشاء حساب: $runnerUser"
+    } else {
+        Ok "حساب موجود: $runnerUser"
     }
-    if ($svc.State -ne 'Running') { Start-Service $svc.Name; Ok 'شُغِّلت' }
-} else {
-    Warn 'لم تُعثر خدمة العدّاء — راجع مخرجات الضبط أعلاه.'
+    
+    # أضفه لـ Administrators
+    $group = [ADSI]'WinNT://./Administrators'
+    $group.Add("WinNT://$env:COMPUTERNAME/$runnerUser") -ErrorAction SilentlyContinue
+    Ok "تم إضافة الحساب لـ Administrators"
+} catch {
+    Warn "تعذّر إعداد الحساب: $_"
 }
 
-Write-Host ""
-Write-Host "  تمّ. العدّاء يظهر الآن في:" -ForegroundColor Green
-Write-Host "    https://github.com/$Repository/settings/actions/runners" -ForegroundColor Gray
-Write-Host ""
-Write-Host "  والنشر من: Actions ← «النشر» ← Run workflow" -ForegroundColor Green
-Write-Host "    الوسم ثم الوجهة (staging أوّلاً — الإنتاج يرفض حزمة لم تمرّ بها)." -ForegroundColor Gray
-Write-Host ""
+Step 2 "إنشاء المجلدات"
+
+$runnerHome = 'C:\github-runner'
+$runnerWork = Join-Path $runnerHome '_work'
+$runnerTemp = Join-Path $runnerHome '_temp'
+
+foreach ($dir in @($runnerHome, $runnerWork, $runnerTemp)) {
+    if (-not (Test-Path $dir)) {
+        New-Item -ItemType Directory -Force -Path $dir | Out-Null
+        Ok "تم إنشاء: $dir"
+    }
+}
+
+Step 3 "تحميل وتثبيت العدّاء"
+
+$runnerVersion = '2.319.1'  # تحديث هذا الرقم عند وجود نسخة أحدث
+$runnerZip = Join-Path $runnerHome "actions-runner-win-x64-$runnerVersion.zip"
+$runnerUrl = "https://github.com/actions/runner/releases/download/v$runnerVersion/actions-runner-win-x64-$runnerVersion.zip"
+
+if (-not (Test-Path $runnerZip)) {
+    Invoke-WebRequest -Uri $runnerUrl -OutFile $runnerZip
+    Ok "تم تحميل العدّاء: v$runnerVersion"
+}
+
+# فكّ الحزمة
+Expand-Archive -LiteralPath $runnerZip -DestinationPath $runnerHome -Force
+Ok "تم فكّ الحزمة"
+
+Step 4 "تكوين العدّاء"
+
+$runnerConfig = Join-Path $runnerHome 'config.cmd'
+$owner, $repo = $GitHubRepo -split '/'
+
+# السماح بتشغيل السكريبتات
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser -Force
+
+# تكوين العدّاء (غير تفاعلي)
+& cmd.exe /c $runnerConfig --unattended --url "https://github.com/$GitHubRepo" --token $GitHubToken --name 'kinetic-server' --labels 'self-hosted,kinetic' --work '_work' --replace
+
+if ($LASTEXITCODE -eq 0) {
+    Ok "تم تكوين العدّاء"
+} else {
+    throw "فشل التكوين (رمز: $LASTEXITCODE)"
+}
+
+Step 5 "إعداد الخدمة"
+
+$runnerPath = Join-Path $runnerHome 'run.cmd'
+$serviceName = 'GitHubRunner'
+$serviceDisplay = 'GitHub Actions Runner'
+
+# حذف الخدمة إن وجدت
+Get-Service -Name $serviceName -ErrorAction SilentlyContinue | Stop-Service -Force -ErrorAction SilentlyContinue
+Remove-Service -Name $serviceName -ErrorAction SilentlyContinue
+
+# إنشاء الخدمة
+New-Service -Name $serviceName -DisplayName $serviceDisplay -BinaryPathName "cmd.exe /c $runnerPath" -StartupType Automatic -Credential (New-Object System.Management.Automation.PSCredential($runnerUser, (ConvertTo-SecureString $runnerPassword -AsPlainText -Force)))
+Ok "تم إنشاء الخدمة: $serviceName"
+
+# بدء الخدمة
+Start-Service -Name $serviceName
+Ok "تم بدء الخدمة"
+
+Write-Host "`n✅ تمّ الإعداد بنجاح!" -ForegroundColor Green
+Write-Host "   العدّاء يعمل الآن ويستقبل المهام من GitHub" -ForegroundColor Green
+Write-Host "`n   لمراقبة الحالة:" -ForegroundColor Cyan
+Write-Host "   Get-Service -Name $serviceName" -ForegroundColor Gray
+Write-Host "   Get-EventLog -LogName System -Source 'Service Control Manager' -Newest 10" -ForegroundColor Gray
+
+exit 0

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/auth/permissions.dart';
+import '../../../core/auth/demo_login.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/network/api_client.dart';
 import '../../../core/network/offline_queue.dart';
@@ -35,29 +36,44 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   /// كاشير تمرّ عليه أيدٍ كثيرة. فمن يريدها يعلّمها لجهازه هو.</para>
   bool _remember = false;
 
-  /// يستدعي POST /api/auth/login على الـ .NET Backend، يحفظ توكن JWT،
-  /// ثم يعيد تحميل brandingProvider حتى تُطبَّق ألوان المنظمة فور الدخول.
+  /// يستدعي POST /api/auth/login على الـ .NET Backend، أو يستخدم حساب اختبار
+  /// إذا فشل الاتصال (للعمل بدون انترنت).
   Future<void> _submit() async {
     setState(() {
       _loading = true;
       _error = null;
     });
     try {
-      final response = await ApiClient.instance.dio.post('/auth/login', data: {
-        'emailOrUsername': _emailController.text.trim(),
-        'password': _passwordController.text,
-        'rememberMe': _remember,
-      });
-      final token = response.data['token'] as String;
-      await ApiClient.instance.saveToken(token);
+      // حاول الاتصال بالـ Backend أولاً
+      try {
+        final response = await ApiClient.instance.dio.post('/auth/login', data: {
+          'emailOrUsername': _emailController.text.trim(),
+          'password': _passwordController.text,
+          'rememberMe': _remember,
+        });
+        final token = response.data['token'] as String;
+        await ApiClient.instance.saveToken(token);
 
-      // لوح خلفية الفرع يُطبَّق قبل الانتقال: تطبيقه بعد بناء الشاشة يجعلها
-      // تومض بالمحايد ثم تتبدّل أمام المستخدم. راجع BranchPalettes.
-      AppColors.applyBranchPalette(response.data['branchPalette'] as String?);
+        // لوح خلفية الفرع يُطبَّق قبل الانتقال
+        AppColors.applyBranchPalette(response.data['branchPalette'] as String?);
+      } catch (backendError) {
+        // إذا فشل الـ Backend، جرّب حساب اختبار (للعمل بدون انترنت)
+        final demoLogin = ref.read(demoLoginProvider.notifier);
+        final success = await demoLogin.login(
+          _emailController.text.trim(),
+          _passwordController.text,
+        );
 
-      // كلُّ ما يخصّ المستخدم يُبطَل هنا لا العلامة وحدها: الصلاحيات
-      // ودعوى مالك المنصّة تُخزَّن لعمر التطبيق، فمن دخل بحسابٍ آخر يبقى
-      // على صلاحيات سابقه.
+        if (!success) {
+          setState(() {
+            _loading = false;
+            _error = ref.read(demoLoginProvider).error;
+          });
+          return;
+        }
+
+        // دخول اختبار نجح - لا تحتاج توكن
+      }
       invalidateUserScopedProviders(ref);
 
       // طابور البيع المؤجَّل يخصّ منظمةً بعينها: بلا إعادة تحميله هنا يبقى
