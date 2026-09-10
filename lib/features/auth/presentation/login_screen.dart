@@ -44,9 +44,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       _error = null;
     });
     try {
+      dynamic response;
       // حاول الاتصال بالـ Backend أولاً
       try {
-        final response = await ApiClient.instance.dio.post('/auth/login', data: {
+        response = await ApiClient.instance.dio.post('/auth/login', data: {
           'emailOrUsername': _emailController.text.trim(),
           'password': _passwordController.text,
           'rememberMe': _remember,
@@ -85,7 +86,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       // كلمةٌ مؤقّتة ← شاشة التغيير لا التطبيق: الخادم يردّ كل نداءٍ آخر
       // بـ403، فالدخول إلى القشرة يعني شاشاتٍ تفشل كلّها برسالةٍ واحدة لا
       // يفهم منها المستخدم أن المطلوب تغيير كلمته.
-      if (response.data['mustChangePassword'] == true) {
+      if (response != null && response.data['mustChangePassword'] == true) {
         context.go('/change-password?forced=1');
         return;
       }

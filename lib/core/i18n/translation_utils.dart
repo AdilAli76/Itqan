@@ -1,15 +1,4 @@
-&#65279;import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'app_translations.dart';
-
-/// مزود الترجمة - دالة مساعدة للحصول على الترجمة الحالية
-final translationProvider = Provider<String Function(String)>((ref) {
-  final locale = ref.watch(localeProvider);
-  return (key) => key.tr(locale.languageCode);
-});
-
-// استيراد المزود من locale_provider
-import 'locale_provider.dart';
+import 'package:flutter/material.dart';
 
 /// Context helper للترجمة السهلة داخل الواجهة
 extension BuildContextTranslation on BuildContext {
@@ -28,20 +17,14 @@ class CurrencyFormatter {
     String currencyCode,
     bool isArabic,
   ) {
-    final currencyInfo = AppConstants.supportedCurrencies[currencyCode];
-    if (currencyInfo == null) return amount.toString();
-
-    final symbol = currencyInfo.getSymbol(isArabic);
-    final fractionDigits = currencyInfo.fractionDigits;
-
     // تنسيق الرقم
-    final formatted = amount.toStringAsFixed(fractionDigits);
+    final formatted = amount.toStringAsFixed(2);
 
     // ترتيب العملة والرقم حسب الاتجاه
     if (isArabic) {
-      return '$formatted $symbol'; // العربية: الرقم ثم الرمز
+      return '$formatted $currencyCode'; // العربية: الرقم ثم الرمز
     } else {
-      return '$symbol $formatted'; // الإنجليزية: الرمز ثم الرقم
+      return '$currencyCode $formatted'; // الإنجليزية: الرمز ثم الرقم
     }
   }
 
@@ -60,16 +43,9 @@ class CurrencyFormatter {
     String currencyCode,
     bool isArabic,
   ) {
-    final currencyInfo = AppConstants.supportedCurrencies[currencyCode];
-    final fractionDigits = currencyInfo?.fractionDigits ?? 2;
-    final symbol = currencyInfo?.getSymbol(isArabic) ?? currencyCode;
-
     return (
-      amount: amount.toStringAsFixed(fractionDigits),
-      symbol: symbol,
+      amount: amount.toStringAsFixed(2),
+      symbol: currencyCode,
     );
   }
 }
-
-// استيراد AppConstants
-import '../constants/app_constants.dart';

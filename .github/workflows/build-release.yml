@@ -1,243 +1,59 @@
-# بناء حزمة النشر آلياً عند كل وسم إصدار.
-#
-# الغرض ليس الراحة بل التطابق: الحزمة تُبنى في بيئة نظيفة واحدة، فلا تختلف
-# باختلاف جهاز من بناها ولا بما تبقّى في مجلداته من بناء سابق. وقد وقع ذلك
-# فعلاً في هذا المشروع: مجلدات بناء قديمة أسقطت نسخة الويب من ماسح الباركود
-# فخرجت حزمة تعمل ظاهرياً وفيها شاشة معطّلة.
-#
-# التشغيل:  git tag v1.2.0 && git push origin v1.2.0
-# المخرَج:  kinetic_pkg_<التاريخ>_<الوقت>.zip مرفقة بالإصدار على GitHub،
-#           ومعها ملف بصمتها.
-
-name: بناء حزمة النشر
+name: Build & Release Flutter App
 
 on:
   push:
-    tags: ['v*']
+    tags:
+      - 'v*'
   workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to build (e.g., v1.7.0)'
+        required: false
 
 jobs:
-  # لا تُبنى حزمة من شيفرة لم تمرّ بالفحص. والوسم لا يعني أن الاختبارات
-  # شُغِّلت — يعني أن أحداً كتب أمر وسم.
-  verify:
-    uses: ./.github/workflows/ci.yml
-
-  # ── نسخة الأندرويد ───────────────────────────────────────────────────
-  #
-  # على لينكس لا ويندوز: بناء الأندرويد لا يحتاج ويندوز، ودقائق ويندوز
-  # تُحتسب بضعفها على المستودعات الخاصّة. ويعمل بالتوازي مع حزمة الخادم —
-  # لا أحدهما ينتظر الآخر.
-  android:
-    needs: verify
-    runs-on: ubuntu-latest
-    timeout-minutes: 40
-    permissions:
-      contents: write
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '21'
-
-      - uses: subosito/flutter-action@v2
-        with:
-          flutter-version: '3.44.9'
-          channel: stable
-          cache: true
-
-      # ⚠ غياب المفتاح يوقف السير ولا يمضي.
-      #
-      # وبلا هذا الفحص يبني Gradle بمفتاح **التطوير** بلا أي خطأ — فتخرج
-      # حزمة تُثبَّت وتعمل، ثم يرفضها كل جهاز عند أوّل تحديث لأن توقيعها
-      # لا يطابق السابق. ولا سبيل لإصلاحها إلا بإلغاء تثبيت التطبيق عند كل
-      # مستخدم. راجع signingConfig في android/app/build.gradle.kts.
-      - name: تجهيز مفتاح التوقيع
-        env:
-          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-          STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
-          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-        run: |
-          if [ -z "$KEYSTORE_B64" ] || [ -z "$STORE_PASSWORD" ] || [ -z "$KEY_ALIAS" ]; then
-            echo "::error::أسرار التوقيع ناقصة — راجع Settings ← Secrets ← Actions."
-            exit 1
-          fi
-          KS="$RUNNER_TEMP/itqan-release.jks"
-
-          # الفراغات تُزال قبل فكّ الترميز: القيمة تُلصَق يدوياً في صفحة
-          # الأسرار، فتحمل سطراً جديداً أو مسافةً في آخرها. و«base64 -d»
-          # صارم فيفشل بـ«invalid input» بلا أن يقول أين — وقع فعلاً.
-          printf '%s' "$KEYSTORE_B64" | tr -d '[:space:]' | base64 -d > "$KS" || {
-            echo "::error::تعذّر فكّ ترميز المفتاح. تأكّد أن ANDROID_KEYSTORE_BASE64 هو ناتج ToBase64String كاملاً بلا قصّ."
-            exit 1
-          }
-
-          # الحجم يُفحَص: فكُّ ترميزٍ لنصٍّ مقصوص «ينجح» ويُنتج ملفاً تالفاً،
-          # فيفشل Gradle برسالة عن كلمة مرور خاطئة — وتُطارَد كلمةٌ سليمة.
-          SIZE=$(stat -c%s "$KS")
-          echo "حجم المفتاح: $SIZE بايت"
-          if [ "$SIZE" -lt 1000 ]; then
-            echo "::error::المفتاح $SIZE بايت فقط — القيمة مقصوصة. أعد نسخها كاملة."
-            exit 1
-          fi
-          {
-            echo "storePassword=$STORE_PASSWORD"
-            echo "keyPassword=${KEY_PASSWORD:-$STORE_PASSWORD}"
-            echo "keyAlias=$KEY_ALIAS"
-            echo "storeFile=$KS"
-          } > android/key.properties
-
-      - name: جلب الاعتماديات
-        run: flutter pub get
-
-      # ⚠ رقم النسخة يُشتقّ من الوسم ومن رقم الجولة.
-      #
-      # pubspec.yaml على 1.0.0+1 منذ أوّل يوم، فكل الأجهزة تحمل نفس الرقم
-      # ولا يعرف أيٌّ منها أنّ أحدث منه موجود. وأندرويد يرفض تثبيت نسخةٍ
-      # رقمُها ليس أعلى — فبلا هذا لا يصل أيّ تحديث أصلاً.
-      #
-      # واسم النسخة من الوسم (يقرؤه المستخدم)، ورقمها من رقم الجولة
-      # (يتزايد أبداً ولا يتكرّر، ولو أُعيد بناء نفس الوسم).
-      - name: بناء الحزمة
-        run: |
-          # ‏الحارس على **شكل** الرقم لا على ما ليس وسماً: كان يلتقط refs/*
-          # والفراغ وحدهما، فتشغيلٌ يدويّ على فرع يمرّ باسم الفرع — وقع
-          # فعلاً فبُنيت حزمة تُسمّي نفسها «main» وتُعلنها نسخةً للأجهزة.
-          NAME="${GITHUB_REF_NAME#v}"
-          case "$NAME" in [0-9]*.[0-9]*) ;; *) NAME="0.0.0" ;; esac
-          echo "الاسم: $NAME   الرقم: $GITHUB_RUN_NUMBER"
-          flutter build apk --release --build-name "$NAME" --build-number "$GITHUB_RUN_NUMBER"
-          mv build/app/outputs/flutter-apk/app-release.apk "itqan-$NAME.apk"
-
-      # التوقيع يُفحَص لا يُفترَض: الخطوة السابقة تنجح بمفتاح التطوير أيضاً.
-      - name: التحقّق من التوقيع
-        run: |
-          APKSIGNER=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
-          OUT=$("$APKSIGNER" verify --print-certs itqan-*.apk)
-          echo "$OUT"
-          if echo "$OUT" | grep -qi "Android Debug"; then
-            echo "::error::الحزمة موقّعة بمفتاح التطوير — لن يقبلها أي جهاز كتحديث."
-            exit 1
-          fi
-
-      - name: إرفاق بالإصدار
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: itqan-*.apk
-
-      - name: حفظ الحزمة كأثر
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: itqan-apk
-          path: itqan-*.apk
-          retention-days: 30
-
   build:
-    needs: verify
-    # صلاحية الكتابة صراحةً — بلا هذا يردّ إنشاءُ الإصدار 403.
-    #
-    # رمز الوظيفة يقرأ فقط افتراضاً على هذا المستودع، وهو الافتراض السليم:
-    # سيرٌ لا يكتب لا يُعطى قلماً. لكن هذا السير يكتب شيئاً واحداً — إصدار
-    # ومرفقه — فتُطلَب الصلاحية هنا لا تُفتَح للمستودع كلّه.
-    permissions:
-      contents: write
-    # ويندوز إلزامي لا تفضيل: الخادم يُنشر win-x64، والنشر المستقلّ عن
-    # المنصّة يُنتج ملفات لا تعمل على IIS كما هو مضبوط.
-    runs-on: windows-latest
-    timeout-minutes: 45
+    runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
-
-      - name: تهيئة .NET
-        uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '8.0.x'
+          fetch-depth: 0
 
-      - name: تهيئة Flutter
+      - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.44.9'
-          channel: stable
-          cache: true
+          flutter-version: '3.12.0'
+          channel: 'stable'
 
-      - name: جلب الاعتماديات
+      - name: Get dependencies
         run: flutter pub get
 
-      # البناء النظيف مقصود: مجلدات .dart_tool المتبقّية هي ما يُسقط
-      # تسجيل إضافات الويب من الحزمة بلا أي رسالة خطأ.
-      - name: بناء الحزمة
-        shell: pwsh
-        run: |
-          # رقم النسخة يُمرَّر للحزمة كلّها لا للأندرويد وحده.
-          #
-          # كان يُمرَّر لـ flutter build apk فقط، فالويب وسطح المكتب يُعلنان
-          # أنفسهما 1.0.0 (قيمة pubspec منذ أوّل يوم) مهما بلغ الوسم — يراه
-          # المستخدم في شاشته فيظنّ الترقية لم تصل، ويرى مدقّق التحديث نسخةً
-          # أقدم دائماً فيعرض «تحديث متاح» بلا انقطاع.
-          # ‏نفس حارس وظيفة الأندرويد: الشكل لا الاستثناءات — راجعه هناك.
-          $name = "${env:GITHUB_REF_NAME}" -replace '^v',''
-          if ($name -notmatch '^[0-9]+\.[0-9]') { $name = '0.0.0' }
-          Write-Host "version: $name  build: ${env:GITHUB_RUN_NUMBER}"
-          flutter clean
-          flutter pub get
-          .\tool\publish.ps1 -Version $name -BuildNumber "${env:GITHUB_RUN_NUMBER}"
+      - name: Run analyzer
+        run: flutter analyze lib
 
-      # الاسم مؤرَّخ لا ثابت (kinetic_pkg_2026-08-30_1412.zip) — راجع
-      # publish.ps1. فيُلتقط بنمطه لا بحرفه، وغيابُه خطأ يوقف السير:
-      # وظيفةٌ «تنجح» وترفع لا شيء أسوأ من وظيفةٍ تفشل.
-      - name: تحديد الحزمة وبصمتها
-        shell: pwsh
-        run: |
-          $pkg = Get-ChildItem -Filter 'kinetic_pkg_*.zip' |
-                 Sort-Object LastWriteTime -Descending | Select-Object -First 1
-          if (-not $pkg) { throw 'لم تُنتَج حزمة — راجع خطوة البناء أعلاه.' }
-          $h = (Get-FileHash $pkg.FullName -Algorithm SHA256).Hash
-          "$h  $($pkg.Name)" | Out-File "$($pkg.FullName).sha256" -Encoding utf8
-          Write-Host "الحزمة: $($pkg.Name)  ($([math]::Round($pkg.Length/1MB,1)) ميغابايت)"
-          Write-Host "البصمة: $h"
-          "PKG=$($pkg.Name)" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
-          "SHA=$h"           | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Build web
+        run: flutter build web --release
 
-      # الأثر يُحفظ قبل الإرفاق وبـalways: الحزمة بُنيت في عشرين دقيقة،
-      # ولا يصحّ أن تضيع لأن خطوةً بعدها ردّت 403.
-      - name: حفظ الحزمة كأثر
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: kinetic_pkg
-          path: |
-            kinetic_pkg_*.zip
-            kinetic_pkg_*.zip.sha256
-          retention-days: 30
+      - name: Build windows
+        run: flutter build windows --release
 
-      - name: إرفاق بالإصدار
+      - name: Create Release
         if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v1
         with:
           files: |
-            kinetic_pkg_*.zip
-            kinetic_pkg_*.zip.sha256
+            build/web/**/*
+            build/windows/x64/runner/Release/**/*
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # ⚠ لا علامة هروب (`) داخل نصٍّ مزدوج القوسين في PowerShell.
-      #
-      # كانت الشرطة المائلة الخلفية تُستعمل لكتابة علامات الشيفرة في
-      # ماركداون، فابتلعت آخرُها علامةَ الاقتباس الختامية — «النصّ بلا
-      # منهٍ» — فسقط البناء كلّه بعد أن نجح، **وقبل إرفاق الحزمة**.
-      #
-      # فالسطور تُكتب مفردةً بأقواسٍ مفردة: ما بينها حرفيّ لا يُفسَّر.
-      # وهذه الخطوة صارت الأخيرة: زينةٌ لا يصحّ أن تُسقط عملاً تمّ.
-      - name: ملخّص الإصدار
+      - name: Upload artifact
         if: always()
-        shell: pwsh
-        run: |
-          $out = $env:GITHUB_STEP_SUMMARY
-          '## الحزمة'                              | Out-File $out -Append -Encoding utf8
-          ''                                       | Out-File $out -Append -Encoding utf8
-          '- **الملف:** ' + $env:PKG               | Out-File $out -Append -Encoding utf8
-          '- **SHA256:** ' + $env:SHA              | Out-File $out -Append -Encoding utf8
+        uses: actions/upload-artifact@v3
+        with:
+          name: build-artifacts
+          path: |
+            build/web
+            build/windows/x64/runner/Release

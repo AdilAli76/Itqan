@@ -1,4 +1,4 @@
-&#65279;/// ترجمات التطبيق - العربية والإنجليزية
+/// ترجمات التطبيق - العربية والإنجليزية
 class AppTranslations {
   static const Map<String, Map<String, String>> translations = {
     // العربية
