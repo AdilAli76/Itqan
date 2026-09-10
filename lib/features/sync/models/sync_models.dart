@@ -1,5 +1,3 @@
-import 'package:flutter_riverpod/flutter_riverpod.dart';
-
 /// نموذج بيانات المتصل
 class SyncMetadata {
   final String entityType;

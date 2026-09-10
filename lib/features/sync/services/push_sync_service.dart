@@ -78,7 +78,7 @@ class PushSyncService {
     final online = await isOnline();
 
     if (!online) {
-      return SyncResult(
+      return const SyncResult(
         success: false,
         message: 'لا يوجد اتصال بالإنترنت',
       );

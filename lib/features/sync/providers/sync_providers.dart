@@ -1,6 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
-import '../../core/network/api_client.dart';
+import '../../../core/network/api_client.dart';
 import '../models/sync_models.dart';
 import '../services/pull_sync_service.dart';
 import '../services/push_sync_service.dart';
@@ -9,20 +9,17 @@ import '../services/offline_queue_service.dart';
 
 /// مزود خدمة تحميل التحديثات
 final pullSyncServiceProvider = Provider((ref) {
-  final apiClient = ref.watch(apiClientProvider);
-  return PullSyncService(apiClient.dio);
+  return PullSyncService(ApiClient.instance.dio);
 });
 
 /// مزود خدمة إرسال التغييرات
 final pushSyncServiceProvider = Provider((ref) {
-  final apiClient = ref.watch(apiClientProvider);
-  return PushSyncService(apiClient.dio);
+  return PushSyncService(ApiClient.instance.dio);
 });
 
 /// مزود خدمة حل التضاربات
 final conflictServiceProvider = Provider((ref) {
-  final apiClient = ref.watch(apiClientProvider);
-  return ConflictService(apiClient.dio);
+  return ConflictService(ApiClient.instance.dio);
 });
 
 /// مزود خدمة الطابور غير المتصل
