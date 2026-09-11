@@ -35,11 +35,11 @@ jobs:
           # الحصول على معلومات الأثر
           ARTIFACTS_URL="https://api.github.com/repos/${{ github.repository }}/actions/runs/${{ inputs.run_id }}/artifacts"
 
-          echo "📦 البحث عن الأثر kinetic_pkg..."
-          ARTIFACT=$(curl -s -H "Authorization: Bearer ${{ github.token }}" "$ARTIFACTS_URL" | jq '.artifacts[] | select(.name=="kinetic_pkg")')
+          echo "📦 البحث عن الأثر build-artifacts..."
+          ARTIFACT=$(curl -s -H "Authorization: Bearer ${{ github.token }}" "$ARTIFACTS_URL" | jq '.artifacts[] | select(.name=="build-artifacts")')
 
           if [ -z "$ARTIFACT" ]; then
-            echo "❌ لم يتم العثور على أثر kinetic_pkg"
+            echo "❌ لم يتم العثور على أثر build-artifacts"
             exit 1
           fi
 
@@ -48,10 +48,10 @@ jobs:
 
           # تحميل الأثر
           mkdir -p build_artifacts
-          curl -L -H "Authorization: Bearer ${{ github.token }}" "$DOWNLOAD_URL" -o build_artifacts/kinetic_pkg.zip
+          curl -L -H "Authorization: Bearer ${{ github.token }}" "$DOWNLOAD_URL" -o build_artifacts/build.zip
 
           # فك الضغط
-          unzip -q build_artifacts/kinetic_pkg.zip -d build_artifacts/
+          unzip -q build_artifacts/build.zip -d build_artifacts/
           ls -la build_artifacts/
 
       - name: 📝 معلومات النشر
