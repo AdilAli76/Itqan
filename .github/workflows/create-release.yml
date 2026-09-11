@@ -1,0 +1,115 @@
+name: إنشاء Release من البناء
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: 'رقم سير البناء (من Build #49 وما بعده)'
+        required: true
+        type: string
+      version:
+        description: 'رقم النسخة (مثال v1.7.0)'
+        required: true
+        type: string
+      prerelease:
+        description: 'Release تجريبي؟'
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: تحميل البناء من الأثر
+        run: |
+          echo "📥 تحميل البناء #${{ inputs.run_id }}..."
+
+          # الحصول على معلومات الأثر
+          ARTIFACTS_URL="https://api.github.com/repos/${{ github.repository }}/actions/runs/${{ inputs.run_id }}/artifacts"
+
+          echo "📦 البحث عن حزمة build-artifacts..."
+          ARTIFACT=$(curl -s -H "Authorization: Bearer ${{ github.token }}" "$ARTIFACTS_URL" | jq '.artifacts[] | select(.name=="build-artifacts")')
+
+          if [ -z "$ARTIFACT" ]; then
+            echo "❌ لم يتم العثور على أثر build-artifacts"
+            exit 1
+          fi
+
+          DOWNLOAD_URL=$(echo "$ARTIFACT" | jq -r '.archive_download_url')
+          echo "✅ وجدت الأثر"
+
+          # تحميل الأثر
+          mkdir -p artifacts
+          curl -L -H "Authorization: Bearer ${{ github.token }}" "$DOWNLOAD_URL" -o artifacts/build.zip
+
+          # فك الضغط
+          unzip -q artifacts/build.zip -d artifacts/
+          ls -la artifacts/
+
+      - name: 📝 إنشاء Release
+        uses: actions/create-release@v1
+        id: create_release
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          tag_name: ${{ inputs.version }}
+          release_name: "الإصدار ${{ inputs.version }}"
+          body: |
+            # 🎉 إصدار Kinetic ERP ${{ inputs.version }}
+
+            ## 📦 المحتويات
+            - حزمة الويب Web (kinetic-web.zip)
+            - معلومات البناء
+
+            ## 📋 معلومات البناء
+            - **رقم السير**: ${{ inputs.run_id }}
+            - **الفرع**: ${{ github.ref }}
+            - **Commit**: ${{ github.sha }}
+            - **التاريخ**: $(date -u +'%Y-%m-%d %H:%M:%S UTC')
+
+            ## 🚀 للنشر على الخادم:
+            1. حمّل `kinetic-web.zip`
+            2. انسخه إلى `/var/www/staging` أو `/var/www/production`
+            3. فك الضغط: `unzip kinetic-web.zip`
+            4. أعد تشغيل الخدمات
+
+            ---
+            **تم الإنشاء بواسطة** [Claude Code](https://claude.ai/code)
+          draft: false
+          prerelease: ${{ inputs.prerelease }}
+
+      - name: 📤 رفع ملفات البناء
+        uses: actions/upload-release-asset@v1
+        if: always()
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: artifacts/kinetic-web.zip
+          asset_name: kinetic-web.zip
+          asset_content_type: application/zip
+
+      - name: ✅ تم إنشاء Release بنجاح
+        run: |
+          echo "================================"
+          echo "✅ Release تم إنشاؤه بنجاح!"
+          echo "================================"
+          echo ""
+          echo "📌 معلومات الإصدار:"
+          echo "  الإصدار: ${{ inputs.version }}"
+          echo "  الرابط: https://github.com/${{ github.repository }}/releases/tag/${{ inputs.version }}"
+          echo ""
+          echo "📦 الملفات المرفوعة:"
+          echo "  - kinetic-web.zip"
+          echo ""
+          echo "🚀 خطوات النشر:"
+          echo "  1. حمّل الملفات من الـ Release"
+          echo "  2. انسخها إلى الخادم"
+          echo "  3. فك الضغط وأعد تشغيل الخدمات"
