@@ -95,6 +95,6 @@ jobs:
           -Version "${{ inputs.version }}"
           -Target "${{ inputs.target }}"
           -Token "${{ github.token }}"
-          -SkipDb:$${{ inputs.skip_db }}
-          -MandatoryUpdate:$${{ inputs.mandatory_update }}
-          -SkipStagingCheck:$${{ inputs.skip_staging_check }}
+          -SkipDb:${{ inputs.skip_db }}
+          -MandatoryUpdate:${{ inputs.mandatory_update }}
+          -SkipStagingCheck:${{ inputs.skip_staging_check }}
