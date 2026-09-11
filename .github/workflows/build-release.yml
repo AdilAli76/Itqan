@@ -41,13 +41,13 @@ jobs:
         run: flutter build web --release
 
       - name: Build Android
-        run: flutter build apk --release
+        run: flutter build apk --debug
 
       - name: Package builds
         run: |
           mkdir -p build/output
           zip -r build/output/kinetic-web.zip build/web/
-          cp build/app/outputs/apk/release/app-release.apk build/output/kinetic-android.apk
+          cp build/app/outputs/apk/debug/app-debug.apk build/output/kinetic-android.apk
 
       - name: Create Release
         if: startsWith(github.ref, 'refs/tags/')
