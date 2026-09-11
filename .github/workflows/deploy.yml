@@ -76,13 +76,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: فحص الـ Runner
-        shell: bash
+      - name: فحص الـ Runner (اختبار بسيط جداً)
         run: |
-          echo "✅ الـ Runner يستجيب!"
-          echo "المسار الحالي: $(pwd)"
-          echo "النظام: $(uname -a)"
-          ls -la tool/
+          echo "Testing runner..."
+          pwd
+          id
+          uname -a
 
       # ⚠ سطرٌ واحد بالإنجليزية، والمنطق كلّه في tool/ci_deploy.ps1.
       #
