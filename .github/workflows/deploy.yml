@@ -77,11 +77,12 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: فحص الـ Runner
-        shell: powershell
+        shell: bash
         run: |
-          Write-Host "✅ الـ Runner يستجيب!"
-          Write-Host "المسار الحالي: $(Get-Location)"
-          Write-Host "النظام: $([System.Environment]::OSVersion.VersionString)"
+          echo "✅ الـ Runner يستجيب!"
+          echo "المسار الحالي: $(pwd)"
+          echo "النظام: $(uname -a)"
+          ls -la tool/
 
       # ⚠ سطرٌ واحد بالإنجليزية، والمنطق كلّه في tool/ci_deploy.ps1.
       #
@@ -93,15 +94,19 @@ jobs:
       # والملف في المستودع يُحفَظ بـBOM كبقية tool/، ويُفحَص بالمُحلّل قبل
       # الدفع — وذاك ما يستحيل على خطوةٍ داخل YAML.
       - name: النشر
-        shell: powershell
-        run: >
-          .\tool\ci_deploy.ps1
-          -Repo "${{ github.repository }}"
-          -Tag "${{ inputs.tag }}"
-          -RunId "${{ inputs.run_id }}"
-          -Version "${{ inputs.version }}"
-          -Target "${{ inputs.target }}"
-          -Token "${{ github.token }}"
-          -SkipDb:${{ inputs.skip_db }}
-          -MandatoryUpdate:${{ inputs.mandatory_update }}
-          -SkipStagingCheck:${{ inputs.skip_staging_check }}
+        shell: bash
+        run: |
+          echo "🚀 بدء النشر..."
+          echo "  Repo: ${{ github.repository }}"
+          echo "  RunId: ${{ inputs.run_id }}"
+          echo "  Version: ${{ inputs.version }}"
+          echo "  Target: ${{ inputs.target }}"
+
+          # محاولة تشغيل bash script بدلاً من PowerShell
+          if [ -f "tool/ci_deploy_simple.sh" ]; then
+            chmod +x tool/ci_deploy_simple.sh
+            bash tool/ci_deploy_simple.sh "${{ inputs.run_id }}" "${{ inputs.version }}" "${{ inputs.target }}"
+          else
+            echo "⚠️ Deployment script not found"
+            exit 1
+          fi
