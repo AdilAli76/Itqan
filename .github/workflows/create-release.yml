@@ -35,19 +35,27 @@ jobs:
           ARTIFACTS_URL="https://api.github.com/repos/${{ github.repository }}/actions/runs/${{ inputs.run_id }}/artifacts"
 
           echo "📦 البحث عن حزمة build-artifacts..."
-          ARTIFACT=$(curl -s -H "Authorization: Bearer ${{ github.token }}" "$ARTIFACTS_URL" | jq '.artifacts[] | select(.name=="build-artifacts")')
+          echo "API URL: $ARTIFACTS_URL"
+
+          ARTIFACTS_RESPONSE=$(curl -s -H "Authorization: Bearer ${{ github.token }}" "$ARTIFACTS_URL")
+          echo "API Response:"
+          echo "$ARTIFACTS_RESPONSE" | jq '.' || echo "$ARTIFACTS_RESPONSE"
+
+          ARTIFACT=$(echo "$ARTIFACTS_RESPONSE" | jq '.artifacts[] | select(.name=="build-artifacts")')
 
           if [ -z "$ARTIFACT" ]; then
             echo "❌ لم يتم العثور على أثر build-artifacts"
+            echo "Artifacts found:"
+            echo "$ARTIFACTS_RESPONSE" | jq '.artifacts[] | .name' || echo "No artifacts"
             exit 1
           fi
 
           DOWNLOAD_URL=$(echo "$ARTIFACT" | jq -r '.archive_download_url')
-          echo "✅ وجدت الأثر"
+          echo "✅ وجدت الأثر: $DOWNLOAD_URL"
 
           # تحميل الأثر
           mkdir -p artifacts
-          curl -L -H "Authorization: Bearer ${{ github.token }}" "$DOWNLOAD_URL" -o artifacts/build.zip
+          curl -L -H "Authorization: Bearer ${{ github.token }}" "$DOWNLOAD_URL" -o artifacts/build.zip 2>&1 | tail -20
 
           # فك الضغط
           unzip -q artifacts/build.zip -d artifacts/
