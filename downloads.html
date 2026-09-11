@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>تحميل Kinetic ERP - النسخة الأخيرة</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        header {
+            text-align: center;
+            color: white;
+            margin-bottom: 50px;
+            padding: 40px 20px;
+        }
+
+        header h1 {
+            font-size: 3em;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+
+        header p {
+            font-size: 1.2em;
+            opacity: 0.9;
+        }
+
+        .releases {
+            display: grid;
+            gap: 30px;
+            margin-bottom: 50px;
+        }
+
+        .release-card {
+            background: white;
+            border-radius: 12px;
+            padding: 30px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.1);
+            transition: transform 0.3s, box-shadow 0.3s;
+        }
+
+        .release-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 15px 50px rgba(0,0,0,0.2);
+        }
+
+        .release-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            border-bottom: 2px solid #f0f0f0;
+            padding-bottom: 15px;
+        }
+
+        .release-version {
+            font-size: 1.8em;
+            font-weight: bold;
+            color: #667eea;
+        }
+
+        .release-date {
+            color: #666;
+            font-size: 0.9em;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 0.85em;
+            font-weight: 600;
+        }
+
+        .badge-latest {
+            background: #4CAF50;
+            color: white;
+        }
+
+        .downloads {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 15px;
+            margin-top: 20px;
+        }
+
+        .download-item {
+            background: #f9f9f9;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 15px;
+            text-align: center;
+            transition: all 0.3s;
+        }
+
+        .download-item:hover {
+            border-color: #667eea;
+            background: #f0f4ff;
+        }
+
+        .download-icon {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+
+        .download-name {
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 1.1em;
+        }
+
+        .download-size {
+            color: #999;
+            font-size: 0.9em;
+            margin-bottom: 12px;
+        }
+
+        .download-btn {
+            display: inline-block;
+            padding: 10px 20px;
+            background: #667eea;
+            color: white;
+            text-decoration: none;
+            border-radius: 6px;
+            font-weight: 600;
+            transition: background 0.3s;
+            width: 100%;
+        }
+
+        .download-btn:hover {
+            background: #764ba2;
+        }
+
+        .description {
+            color: #555;
+            line-height: 1.6;
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 1px solid #f0f0f0;
+        }
+
+        .footer {
+            text-align: center;
+            color: white;
+            margin-top: 50px;
+            padding: 20px;
+            opacity: 0.9;
+        }
+
+        .web-link {
+            background: white;
+            border-radius: 12px;
+            padding: 30px;
+            text-align: center;
+            margin-bottom: 30px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.1);
+        }
+
+        .web-link h2 {
+            color: #667eea;
+            margin-bottom: 15px;
+        }
+
+        .web-link a {
+            display: inline-block;
+            padding: 15px 40px;
+            background: #667eea;
+            color: white;
+            text-decoration: none;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 1.1em;
+            transition: background 0.3s;
+        }
+
+        .web-link a:hover {
+            background: #764ba2;
+        }
+
+        @media (max-width: 768px) {
+            header h1 {
+                font-size: 2em;
+            }
+
+            .downloads {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>📱 Kinetic ERP</h1>
+            <p>نظام إدارة الموارد البشرية المتكامل</p>
+        </header>
+
+        <div class="web-link">
+            <h2>🌐 الإصدار الويب</h2>
+            <p style="color: #666; margin-bottom: 15px;">الوصول المباشر للنظام عبر المتصفح</p>
+            <a href="https://erp.droob-albayan.ly">الدخول للنظام</a>
+        </div>
+
+        <div class="releases">
+            <!-- v1.7.1 -->
+            <div class="release-card">
+                <div class="release-header">
+                    <div>
+                        <span class="release-version">v1.7.1</span>
+                        <span class="badge badge-latest">الأحدث</span>
+                    </div>
+                    <span class="release-date">11 سبتمبر 2026</span>
+                </div>
+
+                <div class="description">
+                    ✨ <strong>تحديث الإصدار v1.7.1:</strong><br>
+                    • إضافة نسخة Android APK و App Bundle<br>
+                    • تحسينات الأداء والاستقرار<br>
+                    • دعم الأجهزة المختلفة<br>
+                    • إصلاح الأخطاء المعروفة
+                </div>
+
+                <div class="downloads">
+                    <div class="download-item">
+                        <div class="download-icon">📦</div>
+                        <div class="download-name">Android App Bundle</div>
+                        <div class="download-size">~50 MB</div>
+                        <a href="https://github.com/adilmohamed76-hub/kinetic-erp/releases/download/v1.7.1/kinetic-app.aab" class="download-btn">تحميل</a>
+                    </div>
+
+                    <div class="download-item">
+                        <div class="download-icon">📱</div>
+                        <div class="download-name">Android APK</div>
+                        <div class="download-size">~45 MB</div>
+                        <a href="https://github.com/adilmohamed76-hub/kinetic-erp/releases/download/v1.7.1/kinetic-app.apk" class="download-btn">تحميل</a>
+                    </div>
+
+                    <div class="download-item">
+                        <div class="download-icon">🌐</div>
+                        <div class="download-name">إصدار الويب</div>
+                        <div class="download-size">~16 MB</div>
+                        <a href="https://github.com/adilmohamed76-hub/kinetic-erp/releases/download/v1.7.1/kinetic-web.zip" class="download-btn">تحميل</a>
+                    </div>
+                </div>
+            </div>
+
+            <!-- v1.7.0 -->
+            <div class="release-card">
+                <div class="release-header">
+                    <span class="release-version">v1.7.0</span>
+                    <span class="release-date">11 سبتمبر 2026</span>
+                </div>
+
+                <div class="description">
+                    ✨ <strong>إصدار الويب:</strong><br>
+                    • إطلاق النسخة الأولى من الويب<br>
+                    • واجهة مستخدم محسّنة<br>
+                    • أداء محسّن
+                </div>
+
+                <div class="downloads">
+                    <div class="download-item">
+                        <div class="download-icon">🌐</div>
+                        <div class="download-name">إصدار الويب</div>
+                        <div class="download-size">~16 MB</div>
+                        <a href="https://github.com/adilmohamed76-hub/kinetic-erp/releases/download/v1.7.0/kinetic-web.zip" class="download-btn">تحميل</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div style="background: white; border-radius: 12px; padding: 25px; margin-bottom: 30px; box-shadow: 0 10px 40px rgba(0,0,0,0.1);">
+            <h3 style="color: #667eea; margin-bottom: 15px;">❓ كيفية التثبيت</h3>
+            <div style="color: #555; line-height: 1.8;">
+                <h4 style="margin-top: 15px; margin-bottom: 8px;">📱 تثبيت Android:</h4>
+                <p>
+                    <strong>من APK:</strong> حمّل ملف APK وثبّته مباشرة على جهازك<br>
+                    <strong>من Google Play:</strong> البحث عن Kinetic ERP (قريباً)
+                </p>
+
+                <h4 style="margin-top: 15px; margin-bottom: 8px;">🌐 الإصدار الويب:</h4>
+                <p>
+                    1. حمّل ملف ZIP<br>
+                    2. فك الضغط عن الملف<br>
+                    3. انسخ المجلد إلى خادمك<br>
+                    4. اعرض الملف index.html في المتصفح
+                </p>
+
+                <h4 style="margin-top: 15px; margin-bottom: 8px;">💻 النسخة الويب عبر الإنترنت:</h4>
+                <p>
+                    <a href="https://erp.droob-albayan.ly" style="color: #667eea; text-decoration: none; font-weight: 600;">انقر هنا للوصول المباشر</a>
+                </p>
+            </div>
+        </div>
+
+        <footer class="footer">
+            <p>© 2026 Kinetic ERP - جميع الحقوق محفوظة</p>
+            <p style="margin-top: 10px; font-size: 0.9em;">آخر تحديث: 11 سبتمبر 2026</p>
+        </footer>
+    </div>
+</body>
+</html>
