@@ -25,12 +25,6 @@ jobs:
           channel: 'stable'
           cache: true
 
-      - name: Set up Java
-        uses: actions/setup-java@v3
-        with:
-          distribution: 'temurin'
-          java-version: '11'
-
       - name: Get dependencies
         run: flutter pub get
 
@@ -40,22 +34,17 @@ jobs:
       - name: Build web
         run: flutter build web --release
 
-      - name: Build Android
-        run: flutter build apk --debug
-
       - name: Package builds
+        shell: bash
         run: |
           mkdir -p build/output
-          zip -r build/output/kinetic-web.zip build/web/
-          cp build/app/outputs/apk/debug/app-debug.apk build/output/kinetic-android.apk
+          cd build/web && zip -r ../output/kinetic-web.zip . && cd ../..
 
       - name: Create Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v1
         with:
-          files: |
-            build/output/kinetic-web.zip
-            build/output/kinetic-android.apk
+          files: build/output/kinetic-web.zip
           draft: false
           prerelease: false
         env:
@@ -66,6 +55,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: build-artifacts
-          path: |
-            build/output/kinetic-web.zip
-            build/output/kinetic-android.apk
+          path: build/output/kinetic-web.zip
