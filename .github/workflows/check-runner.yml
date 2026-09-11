@@ -1,0 +1,17 @@
+name: فحص حالة الـ Runner
+
+on:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: [self-hosted, kinetic]
+    steps:
+      - name: فحص الـ Runner
+        run: |
+          Write-Host "✅ الـ Runner يعمل!"
+          Write-Host "المعلومات:"
+          Write-Host "  OS: $(whoami)"
+          Write-Host "  المسار: $pwd"
+          Get-Process | Where-Object { $_.Name -like "*runner*" } | Select-Object Name, Id
+        shell: powershell
