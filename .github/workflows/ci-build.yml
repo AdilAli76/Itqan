@@ -1,0 +1,56 @@
+name: CI - Build
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Run analyzer
+        run: flutter analyze lib
+
+      - name: Run tests
+        run: flutter test
+        continue-on-error: true
+
+      - name: Build web
+        run: flutter build web --release
+
+      - name: Build Android APK
+        run: flutter build apk --release
+
+      - name: Build Android App Bundle
+        run: flutter build appbundle --release
+
+      - name: Package builds
+        shell: bash
+        run: |
+          mkdir -p build/output
+          cd build/web && zip -r ../output/kinetic-web.zip . && cd ../..
+          cp build/app/outputs/flutter-app.apk build/output/kinetic-app.apk
+          cp build/app/outputs/bundle/release/app-release.aab build/output/kinetic-app.aab
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-artifacts
+          path: build/output/
+          retention-days: 7

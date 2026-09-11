@@ -1,0 +1,84 @@
+name: Release - Publish to GitHub
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to release (e.g., v1.7.0)'
+        required: true
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: read
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Run analyzer
+        run: flutter analyze lib
+
+      - name: Build web
+        run: flutter build web --release
+
+      - name: Build Android APK
+        run: flutter build apk --release
+
+      - name: Build Android App Bundle
+        run: flutter build appbundle --release
+
+      - name: Package builds
+        shell: bash
+        run: |
+          mkdir -p build/output
+          cd build/web && zip -r ../output/kinetic-web.zip . && cd ../..
+          cp build/app/outputs/flutter-app.apk build/output/kinetic-app.apk
+          cp build/app/outputs/bundle/release/app-release.aab build/output/kinetic-app.aab
+          ls -lh build/output/
+
+      - name: Get version from tag
+        id: tag_name
+        run: |
+          TAG=${{ github.ref_name }}
+          echo "version=${TAG#v}" >> $GITHUB_OUTPUT
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            build/output/kinetic-web.zip
+            build/output/kinetic-app.apk
+            build/output/kinetic-app.aab
+          tag_name: ${{ steps.tag_name.outputs.tag }}
+          name: Release ${{ steps.tag_name.outputs.version }}
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  notify:
+    needs: build-and-release
+    runs-on: ubuntu-latest
+    if: success()
+    steps:
+      - name: Notify Release Success
+        run: |
+          echo "✅ Release ${{ github.ref_name }} published successfully!"
+          echo "📦 Artifacts uploaded to GitHub Releases"

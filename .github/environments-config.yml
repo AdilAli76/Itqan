@@ -1,0 +1,29 @@
+# GitHub Environments Configuration
+# يُستخدم لتعريف البيئات والمتغيرات والـ secrets
+
+environments:
+  staging:
+    displayName: "Staging - التجريب"
+    url: "https://staging.itqan.local"
+    deployment_protection_rules:
+      required_reviewers: 0
+      wait_timer_minutes: 0
+    variables:
+      DEPLOY_URL: "https://staging.itqan.local"
+      LOG_LEVEL: "info"
+      DB_ENV: "staging"
+    # Secrets (يتم تعيينها يدويًا على GitHub):
+    # - STAGING_DEPLOY_KEY
+
+  production:
+    displayName: "Production - الإنتاج"
+    url: "https://erp.itqan.local"
+    deployment_protection_rules:
+      required_reviewers: 1
+      wait_timer_minutes: 5
+    variables:
+      DEPLOY_URL: "https://erp.itqan.local"
+      LOG_LEVEL: "warn"
+      DB_ENV: "production"
+    # Secrets (يتم تعيينها يدويًا على GitHub):
+    # - PRODUCTION_DEPLOY_KEY

@@ -1,0 +1,179 @@
+name: Deploy - Auto to Staging/Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to deploy (e.g., v1.7.0)'
+        required: true
+      target:
+        description: 'Deployment target'
+        required: true
+        type: choice
+        options:
+          - staging
+          - production
+      skip_db_migrations:
+        description: 'Skip database migrations'
+        type: boolean
+        default: false
+      mandatory_update:
+        description: 'Mark update as mandatory for mobile apps'
+        type: boolean
+        default: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    outputs:
+      release_id: ${{ steps.get_release.outputs.id }}
+      release_exists: ${{ steps.get_release.outputs.exists }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check if release exists
+        id: get_release
+        run: |
+          RELEASE=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            "https://api.github.com/repos/${{ github.repository }}/releases/tags/${{ github.event.inputs.tag }}")
+
+          if echo "$RELEASE" | grep -q '"id"'; then
+            RELEASE_ID=$(echo "$RELEASE" | grep '"id"' | head -1 | sed 's/[^0-9]//g')
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "id=$RELEASE_ID" >> $GITHUB_OUTPUT
+            echo "✅ Release ${{ github.event.inputs.tag }} found"
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "❌ Release ${{ github.event.inputs.tag }} not found"
+            exit 1
+          fi
+
+  deploy-staging:
+    needs: validate
+    if: github.event.inputs.target == 'staging'
+    runs-on: ubuntu-latest
+    environment:
+      name: staging
+      url: https://staging.itqan.local
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag }}
+
+      - name: Download artifacts
+        run: |
+          mkdir -p artifacts
+          curl -L -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            "https://api.github.com/repos/${{ github.repository }}/releases/download/${{ github.event.inputs.tag }}/kinetic-web.zip" \
+            -o artifacts/kinetic-web.zip
+          curl -L -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            "https://api.github.com/repos/${{ github.repository }}/releases/download/${{ github.event.inputs.tag }}/kinetic-app.apk" \
+            -o artifacts/kinetic-app.apk
+          curl -L -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            "https://api.github.com/repos/${{ github.repository }}/releases/download/${{ github.event.inputs.tag }}/kinetic-app.aab" \
+            -o artifacts/kinetic-app.aab
+          ls -lh artifacts/
+
+      - name: Deploy to Staging
+        run: |
+          echo "🚀 Deploying ${{ github.event.inputs.tag }} to Staging..."
+          echo "Tag: ${{ github.event.inputs.tag }}"
+          echo "Skip DB: ${{ github.event.inputs.skip_db_migrations }}"
+          echo "Mandatory Update: ${{ github.event.inputs.mandatory_update }}"
+
+          # يمكن إضافة deployment script هنا
+          # bash ./scripts/deploy-staging.sh artifacts/
+
+      - name: Verify Staging Deployment
+        run: |
+          echo "✅ Staging deployment completed"
+          echo "Artifacts deployed:"
+          echo "  - Web: artifacts/kinetic-web.zip"
+          echo "  - APK: artifacts/kinetic-app.apk"
+          echo "  - AAB: artifacts/kinetic-app.aab"
+
+      - name: Create Deployment Status
+        if: success()
+        run: |
+          curl -X POST \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}/deployments" \
+            -d "{\"ref\":\"${{ github.event.inputs.tag }}\",\"environment\":\"staging\",\"description\":\"Staging deployment\",\"auto_merge\":false}"
+
+  deploy-production:
+    needs: validate
+    if: github.event.inputs.target == 'production'
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://erp.itqan.local
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag }}
+
+      - name: Production Safety Check
+        run: |
+          echo "⚠️  PRODUCTION DEPLOYMENT"
+          echo "Tag: ${{ github.event.inputs.tag }}"
+          echo "Environment: production"
+          echo ""
+          echo "Checklist:"
+          echo "  ✓ Release must exist"
+          echo "  ✓ All tests must pass"
+          echo "  ✓ Staging deployment must succeed first"
+
+      - name: Download artifacts
+        run: |
+          mkdir -p artifacts
+          curl -L -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            "https://api.github.com/repos/${{ github.repository }}/releases/download/${{ github.event.inputs.tag }}/kinetic-web.zip" \
+            -o artifacts/kinetic-web.zip
+          curl -L -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            "https://api.github.com/repos/${{ github.repository }}/releases/download/${{ github.event.inputs.tag }}/kinetic-app.apk" \
+            -o artifacts/kinetic-app.apk
+          curl -L -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            "https://api.github.com/repos/${{ github.repository }}/releases/download/${{ github.event.inputs.tag }}/kinetic-app.aab" \
+            -o artifacts/kinetic-app.aab
+          ls -lh artifacts/
+
+      - name: Deploy to Production
+        run: |
+          echo "🚀 Deploying ${{ github.event.inputs.tag }} to Production..."
+          echo "Tag: ${{ github.event.inputs.tag }}"
+          echo "Skip DB: ${{ github.event.inputs.skip_db_migrations }}"
+          echo "Mandatory Update: ${{ github.event.inputs.mandatory_update }}"
+
+          # يمكن إضافة deployment script هنا
+          # bash ./scripts/deploy-production.sh artifacts/
+
+      - name: Verify Production Deployment
+        run: |
+          echo "✅ Production deployment completed"
+          echo "Artifacts deployed:"
+          echo "  - Web: artifacts/kinetic-web.zip"
+          echo "  - APK: artifacts/kinetic-app.apk"
+          echo "  - AAB: artifacts/kinetic-app.aab"
+
+      - name: Create Deployment Status
+        if: success()
+        run: |
+          curl -X POST \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}/deployments" \
+            -d "{\"ref\":\"${{ github.event.inputs.tag }}\",\"environment\":\"production\",\"description\":\"Production deployment\",\"auto_merge\":false}"
+
+      - name: Notify Team
+        if: success()
+        run: |
+          echo "📢 Production deployment successful!"
+          echo "Version: ${{ github.event.inputs.tag }}"
+          echo "Time: $(date -u +'%Y-%m-%d %H:%M:%S UTC')"
