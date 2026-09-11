@@ -1,0 +1,84 @@
+name: نشر على GitHub-hosted Runner
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: 'رقم السير (run_id) - من Build workflow'
+        required: true
+        type: string
+      version:
+        description: 'رقم النسخة (مثال 1.0.0)'
+        required: true
+        type: string
+      target:
+        description: 'الوجهة'
+        required: true
+        type: choice
+        options: [staging, production]
+        default: staging
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: تحميل البناء من أثر السير
+        run: |
+          echo "📥 تحميل البناء #${{ inputs.run_id }}..."
+
+          # الحصول على معلومات الأثر
+          ARTIFACTS_URL="https://api.github.com/repos/${{ github.repository }}/actions/runs/${{ inputs.run_id }}/artifacts"
+
+          echo "📦 البحث عن الأثر kinetic_pkg..."
+          ARTIFACT=$(curl -s -H "Authorization: Bearer ${{ github.token }}" "$ARTIFACTS_URL" | jq '.artifacts[] | select(.name=="kinetic_pkg")')
+
+          if [ -z "$ARTIFACT" ]; then
+            echo "❌ لم يتم العثور على أثر kinetic_pkg"
+            exit 1
+          fi
+
+          DOWNLOAD_URL=$(echo "$ARTIFACT" | jq -r '.archive_download_url')
+          echo "✅ وجدت الأثر: $DOWNLOAD_URL"
+
+          # تحميل الأثر
+          mkdir -p build_artifacts
+          curl -L -H "Authorization: Bearer ${{ github.token }}" "$DOWNLOAD_URL" -o build_artifacts/kinetic_pkg.zip
+
+          # فك الضغط
+          unzip -q build_artifacts/kinetic_pkg.zip -d build_artifacts/
+          ls -la build_artifacts/
+
+      - name: 📝 معلومات النشر
+        run: |
+          echo "================================"
+          echo "🚀 معلومات النشر:"
+          echo "================================"
+          echo "Version: ${{ inputs.version }}"
+          echo "Target: ${{ inputs.target }}"
+          echo "Run ID: ${{ inputs.run_id }}"
+          echo "Repository: ${{ github.repository }}"
+          echo "Commit: ${{ github.sha }}"
+          echo "================================"
+
+          # إذا كانت هناك ملفات بناء
+          if [ -d "build_artifacts" ]; then
+            echo ""
+            echo "📦 محتوى الأثر:"
+            find build_artifacts -type f | head -20
+          fi
+
+      - name: ✅ النشر جاهز
+        run: |
+          echo "✅ النشر جاهز للتطبيق على ${{ inputs.target }}"
+          echo ""
+          echo "📋 الخطوات التالية:"
+          echo "1. تحميل الملفات من build_artifacts/"
+          echo "2. نسخها إلى /var/www/staging أو /var/www/production"
+          echo "3. إعادة تشغيل الخدمات"
+          echo "4. اختبار الموقع"
