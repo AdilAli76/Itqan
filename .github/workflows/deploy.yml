@@ -76,6 +76,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: فحص الـ Runner
+        shell: powershell
+        run: |
+          Write-Host "✅ الـ Runner يستجيب!"
+          Write-Host "المسار الحالي: $(Get-Location)"
+          Write-Host "النظام: $([System.Environment]::OSVersion.VersionString)"
+
       # ⚠ سطرٌ واحد بالإنجليزية، والمنطق كلّه في tool/ci_deploy.ps1.
       #
       # ليس تنظيماً بل ضرورة: GitHub يكتب كل خطوة run: في ملف .ps1 مؤقّت
