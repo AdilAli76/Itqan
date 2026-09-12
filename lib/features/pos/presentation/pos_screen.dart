@@ -40,6 +40,23 @@ const _kPosShortcuts = [
   AppShortcut('تفريغ البحث', 'Esc'),
 ];
 
+// ──────────────────────────────────────────────────────────────────────────
+// الألوان والأشكال الديناميكية من البيانات
+// ──────────────────────────────────────────────────────────────────────────
+extension POSThemeExtension on BrandingResponse? {
+  Color get primaryColor => _parseColor(this?.primaryColor) ?? const Color(0xFF2196F3);
+  Color get secondaryColor => _parseColor(this?.secondaryColor) ?? const Color(0xFFFFC107);
+
+  static Color? _parseColor(String? hex) {
+    if (hex == null || hex.isEmpty) return null;
+    try {
+      return Color(int.parse(hex.replaceFirst('#', '0xff'), radix: 16));
+    } catch (_) {
+      return null;
+    }
+  }
+}
+
 class _CartLine {
   _CartLine({
     required this.productId,
@@ -1365,19 +1382,27 @@ class _PosScreenState extends ConsumerState<PosScreen> {
               Expanded(
                 child: SizedBox(
                   height: touch ? 64 : 44,
-                  child: ElevatedButton(
-                    onPressed: (_placingOrder || _loadingBranch) ? null : _startWalletCheckout,
-                    child: _placingOrder
-                        ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                          )
-                        : Text(
-                            'خصم من الرصيد',
-                            style: touch ? AppTextStyles.headlineMd(color: Colors.white) : null,
-                          ),
-                  ),
+                  child: Consumer(builder: (context, ref, _) {
+                    final branding = ref.watch(brandingProvider).valueOrNull;
+                    final primaryColor = branding?.primaryColor ?? Colors.blue;
+                    return ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: primaryColor,
+                        foregroundColor: Colors.white,
+                      ),
+                      onPressed: (_placingOrder || _loadingBranch) ? null : _startWalletCheckout,
+                      child: _placingOrder
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                            )
+                          : Text(
+                              'خصم من الرصيد',
+                              style: touch ? AppTextStyles.headlineMd(color: Colors.white) : null,
+                            ),
+                    );
+                  }),
                 ),
               ),
             ],
