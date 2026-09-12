@@ -34,12 +34,21 @@ public class TenantContextMiddleware
                     await connection.OpenAsync();
                 }
 
-                await using var command = connection.CreateCommand();
-                command.CommandText = "EXEC sp_set_session_context @key=N'organization_id', @value=@orgId, @read_only=1; " +
-                                       "EXEC sp_set_session_context @key=N'branch_id', @value=@branchId, @read_only=1;";
-                command.Parameters.Add(new SqlParameter("@orgId", orgId));
-                command.Parameters.Add(new SqlParameter("@branchId", (object?)branchId ?? DBNull.Value));
-                await command.ExecuteNonQueryAsync();
+                try
+                {
+                    await using var command = connection.CreateCommand();
+                    command.CommandText = "EXEC sp_set_session_context @key=N'organization_id', @value=@orgId, @read_only=1; " +
+                                           "EXEC sp_set_session_context @key=N'branch_id', @value=@branchId, @read_only=1;";
+                    command.Parameters.Add(new SqlParameter("@orgId", orgId));
+                    command.Parameters.Add(new SqlParameter("@branchId", (object?)branchId ?? DBNull.Value));
+                    await command.ExecuteNonQueryAsync();
+                }
+                catch (Microsoft.Data.SqlClient.SqlException ex) when (ex.Number == 2812)
+                {
+                    // sp_set_session_context غير متاحة على SQL Server 2008 R2 المحلي
+                    // (أُضيفت في 2016). في بيئة التطوير تُتجاهل وتعمل المنصة بدون RLS.
+                    // لا يحدث هذا على الإنتاج (SQL Server 2019+).
+                }
             }
         }
 

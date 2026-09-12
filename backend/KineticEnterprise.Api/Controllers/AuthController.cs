@@ -1,4 +1,4 @@
-﻿using System.IdentityModel.Tokens.Jwt;
+using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
 using Microsoft.AspNetCore.Mvc;
@@ -36,7 +36,10 @@ public record LoginResponse(
     ///
     /// <para>في ردّ الدخول لا بنداءٍ ثانٍ: النداء الثاني قد يفشل، فيدخل
     /// المستخدم إلى نظامٍ يردّ كل طلب بـ403 بلا أن يعرف لماذا.</para>
-    bool MustChangePassword);
+    bool MustChangePassword,
+    /// مالك المنصة أو مهندس توزيع — يُعاد توجيهه فور الدخول إلى /platform
+    /// بدلاً من لوحة المنظمة العادية.
+    bool IsPlatformAdmin);
 
 [ApiController]
 [Route("api/auth")]
@@ -102,8 +105,10 @@ public class AuthController : ControllerBase
             user.BranchId,
             user.FullName,
             branchPalette,
-            user.MustChangePassword
+            user.MustChangePassword,
+            user.IsPlatformAdmin
         );
+
     }
 
     /// <summary>
@@ -345,7 +350,7 @@ public class AuthController : ControllerBase
         return new LoginResponse(
             IssueToken(user, User.FindFirstValue("remember") == "1"),
             user.Role, user.OrganizationId, user.BranchId,
-            user.FullName, branchPalette, user.MustChangePassword);
+            user.FullName, branchPalette, user.MustChangePassword, user.IsPlatformAdmin);
     }
 
 }
