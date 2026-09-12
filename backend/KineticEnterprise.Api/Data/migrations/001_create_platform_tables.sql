@@ -10,12 +10,21 @@ BEGIN
         organization_id UNIQUEIDENTIFIER NOT NULL UNIQUE,
         storage_used_mb FLOAT NOT NULL DEFAULT 0,
         backup_path NVARCHAR(500) NULL,
+        is_active BIT NOT NULL DEFAULT 1,
         created_at DATETIME2 NOT NULL DEFAULT GETUTCDATE()
     );
     PRINT 'Created table: platform_organizations';
 END
 ELSE
+BEGIN
     PRINT 'Table platform_organizations already exists';
+    -- Add is_active column if it doesn't exist
+    IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'platform_organizations' AND COLUMN_NAME = 'is_active')
+    BEGIN
+        ALTER TABLE platform_organizations ADD is_active BIT NOT NULL DEFAULT 1;
+        PRINT 'Added column: platform_organizations.is_active';
+    END
+END
 
 IF OBJECT_ID('platform_settings', 'U') IS NULL
 BEGIN
