@@ -10,6 +10,7 @@ class CustomerFormDialog extends ConsumerStatefulWidget {
   final VoidCallback onSaved;
 
   const CustomerFormDialog({
+    super.key,
     required this.customer,
     required this.onSaved,
   });
@@ -153,7 +154,7 @@ class _CustomerFormDialogState extends ConsumerState<CustomerFormDialog> {
             Text('الفئة والنموذج', style: AppTextStyles.headlineMd()),
             const SizedBox(height: 12),
             DropdownButtonFormField<String?>(
-              value: _selectedCategoryId,
+              initialValue: _selectedCategoryId,
               decoration: const InputDecoration(
                 labelText: 'فئة العميل',
                 hintText: 'اختر فئة (اختياري)',

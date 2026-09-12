@@ -915,7 +915,7 @@ class _CreateInvoiceDialogState extends ConsumerState<_CreateInvoiceDialog> {
   Future<void> _addExpense() async {
     final name = await showDialog<String>(
       context: context,
-      builder: (_) => _ExpenseNameDialog(),
+      builder: (_) => const _ExpenseNameDialog(),
     );
     if (name == null || name.isEmpty) return;
 

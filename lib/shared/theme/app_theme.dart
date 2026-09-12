@@ -15,7 +15,7 @@ class AppTheme {
       // Color Scheme
       // ═══════════════════════════════════════════════════════════════
 
-      colorScheme: ColorScheme.light(
+      colorScheme: const ColorScheme.light(
         primary: AppColors.primary,
         onPrimary: Colors.white,
         primaryContainer: AppColors.lightPrimary,
@@ -34,12 +34,12 @@ class AppTheme {
       // App Bar Theme
       // ═══════════════════════════════════════════════════════════════
 
-      appBarTheme: AppBarTheme(
+      appBarTheme: const AppBarTheme(
         backgroundColor: AppColors.primary,
         foregroundColor: Colors.white,
         elevation: 0,
         centerTitle: false,
-        titleTextStyle: const TextStyle(
+        titleTextStyle: TextStyle(
           color: Colors.white,
           fontSize: 20,
           fontWeight: FontWeight.w600,
@@ -165,7 +165,7 @@ class AppTheme {
           fontSize: 14,
           fontWeight: FontWeight.w500,
         ),
-        hintStyle: TextStyle(
+        hintStyle: const TextStyle(
           color: AppColors.secondaryText,
           fontSize: 14,
         ),
@@ -312,7 +312,7 @@ class AppTheme {
       useMaterial3: true,
       brightness: Brightness.dark,
 
-      colorScheme: ColorScheme.dark(
+      colorScheme: const ColorScheme.dark(
         primary: AppColors.primary,
         onPrimary: Colors.white,
         primaryContainer: AppColors.darkPrimary,
@@ -321,16 +321,16 @@ class AppTheme {
         onSecondary: Colors.white,
         tertiary: AppColors.info,
         onTertiary: Colors.white,
-        surface: const Color(0xFF2C2C2C),
-        onSurface: const Color(0xFFEEEEEE),
+        surface: Color(0xFF2C2C2C),
+        onSurface: Color(0xFFEEEEEE),
         error: AppColors.error,
         onError: Colors.white,
       ),
 
       scaffoldBackgroundColor: const Color(0xFF1E1E1E),
-      appBarTheme: AppBarTheme(
-        backgroundColor: const Color(0xFF2C2C2C),
-        foregroundColor: const Color(0xFFEEEEEE),
+      appBarTheme: const AppBarTheme(
+        backgroundColor: Color(0xFF2C2C2C),
+        foregroundColor: Color(0xFFEEEEEE),
         elevation: 0,
       ),
     );

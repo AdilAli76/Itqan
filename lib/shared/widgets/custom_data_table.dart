@@ -41,7 +41,7 @@ class CustomDataTable extends StatefulWidget {
   final bool isCompact;
 
   const CustomDataTable({
-    Key? key,
+    super.key,
     required this.columns,
     required this.rows,
     this.title,
@@ -54,7 +54,7 @@ class CustomDataTable extends StatefulWidget {
     this.allowHorizontalScroll = true,
     this.emptyMessage = 'لا توجد بيانات',
     this.isCompact = false,
-  }) : super(key: key);
+  });
 
   @override
   State<CustomDataTable> createState() => _CustomDataTableState();
@@ -101,7 +101,7 @@ class _CustomDataTableState extends State<CustomDataTable> {
           if (widget.title != null) ...[
             Container(
               padding: EdgeInsets.all(padding),
-              decoration: BoxDecoration(
+              decoration: const BoxDecoration(
                 border: Border(
                   bottom: BorderSide(color: AppColors.lightBorder),
                 ),
@@ -152,8 +152,8 @@ class _CustomDataTableState extends State<CustomDataTable> {
     // إضافة العمود الأول (رقم الصف)
     if (widget.showRowNumbers) {
       columns.add(
-        DataColumn(
-          label: const Text('م'),
+        const DataColumn(
+          label: Text('م'),
           numeric: true,
         ),
       );
@@ -240,7 +240,7 @@ class _CustomDataTableState extends State<CustomDataTable> {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(
+          const Icon(
             Icons.inbox_outlined,
             size: 64,
             color: AppColors.secondaryText,
@@ -248,7 +248,7 @@ class _CustomDataTableState extends State<CustomDataTable> {
           const SizedBox(height: 16),
           Text(
             widget.emptyMessage,
-            style: TextStyle(
+            style: const TextStyle(
               fontSize: 14,
               color: AppColors.secondaryText,
               fontWeight: FontWeight.w500,
@@ -268,12 +268,12 @@ class SimpleDataTable extends StatelessWidget {
   final bool showRowNumbers;
 
   const SimpleDataTable({
-    Key? key,
+    super.key,
     required this.title,
     required this.columns,
     required this.data,
     this.showRowNumbers = true,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -298,14 +298,14 @@ class AdvancedDataTable extends StatefulWidget {
   final bool filterable;
 
   const AdvancedDataTable({
-    Key? key,
+    super.key,
     required this.title,
     required this.columns,
     required this.rows,
     this.onSort,
     this.sortable = true,
     this.filterable = true,
-  }) : super(key: key);
+  });
 
   @override
   State<AdvancedDataTable> createState() => _AdvancedDataTableState();

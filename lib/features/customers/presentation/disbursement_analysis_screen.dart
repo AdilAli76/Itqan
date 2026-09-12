@@ -309,7 +309,7 @@ class _ScenarioProjections extends StatelessWidget {
                 ),
               ),
             );
-          }).toList(),
+          }),
         ],
       ),
     );
@@ -367,7 +367,7 @@ class _DisbursementDialogState
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             DropdownButtonFormField<String?>(
-              value: _selectedCategoryId,
+              initialValue: _selectedCategoryId,
               decoration: const InputDecoration(
                 labelText: 'الفئة (اختياري - الكل إذا لم تختر)',
               ),

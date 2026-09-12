@@ -35,7 +35,7 @@ class StatsCard extends StatelessWidget {
   final String? subtitle;
 
   const StatsCard({
-    Key? key,
+    super.key,
     required this.title,
     required this.value,
     this.unit = '',
@@ -46,7 +46,7 @@ class StatsCard extends StatelessWidget {
     this.onTap,
     this.showChangePercent = true,
     this.subtitle,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context) {

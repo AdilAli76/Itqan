@@ -44,7 +44,7 @@ class ListToolbar extends StatefulWidget {
   final bool isCompact;
 
   const ListToolbar({
-    Key? key,
+    super.key,
     this.searchPlaceholder = 'بحث...',
     this.initialSearchQuery,
     this.onSearchChanged,
@@ -58,7 +58,7 @@ class ListToolbar extends StatefulWidget {
     this.showAddButton = true,
     this.addButtonLabel = 'جديد',
     this.isCompact = false,
-  }) : super(key: key);
+  });
 
   @override
   State<ListToolbar> createState() => _ListToolbarState();
@@ -225,7 +225,7 @@ class _ListToolbarState extends State<ListToolbar> {
       onChanged: widget.onSearchChanged,
       decoration: InputDecoration(
         hintText: widget.searchPlaceholder,
-        hintStyle: TextStyle(color: AppColors.disabledText),
+        hintStyle: const TextStyle(color: AppColors.disabledText),
         prefixIcon: const Icon(Icons.search),
         prefixIconColor: AppColors.secondaryText,
         suffixIcon: _searchController.text.isNotEmpty

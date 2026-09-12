@@ -33,7 +33,7 @@ class _ReturnInvoiceSheetState extends State<ReturnInvoiceSheet> {
   bool _busy = false;
   String? _error;
   Map<String, dynamic>? _invoice;
-  Map<int, bool> _selectedItems = {}; // item index → selected
+  final Map<int, bool> _selectedItems = {}; // item index → selected
 
   @override
   void dispose() {

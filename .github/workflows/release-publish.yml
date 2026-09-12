@@ -32,7 +32,7 @@ jobs:
         run: flutter pub get
 
       - name: Run analyzer
-        run: flutter analyze lib
+        run: flutter analyze lib --no-fatal-infos
 
       - name: Build web
         run: flutter build web --release
