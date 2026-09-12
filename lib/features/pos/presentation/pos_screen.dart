@@ -1430,9 +1430,12 @@ class _ProductTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final quantity = (product['quantity'] as num?)?.toDouble() ?? 0;
-    // الصنف المفتوح لا يتبع المخزون، فكميته صفر دائماً ولا يجوز منع بيعه بها.
     final tracksStock = product['tracksStock'] as bool? ?? true;
     final sellable = !tracksStock || quantity > 0;
+    final isFavorite = product['isFavorite'] as bool? ?? false;
+    final isTaxFree = product['isTaxFree'] as bool? ?? false;
+    final kind = product['kind'] as int? ?? 0;
+
     return InkWell(
       onTap: sellable ? onTap : null,
       borderRadius: BorderRadius.circular(12),
@@ -1441,10 +1444,20 @@ class _ProductTile extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Icon(
-              tracksStock ? Icons.inventory_2_outlined : Icons.edit_note_outlined,
-              color: sellable ? AppColors.textMuted : AppColors.danger,
-              size: touch ? 28 : 24,
+            Row(
+              children: [
+                Icon(
+                  tracksStock ? Icons.inventory_2_outlined : Icons.edit_note_outlined,
+                  color: sellable ? AppColors.textMuted : AppColors.danger,
+                  size: touch ? 28 : 24,
+                ),
+                const Spacer(),
+                if (isFavorite)
+                  Tooltip(
+                    message: 'صنف مفضّل',
+                    child: Icon(Icons.star, size: 16, color: AppColors.warning),
+                  ),
+              ],
             ),
             const Spacer(),
             Text(
@@ -1457,11 +1470,34 @@ class _ProductTile extends StatelessWidget {
             ),
             const SizedBox(height: 4),
             CurrencyBadge(amount: (product['salePrice'] as num?)?.toDouble() ?? 0),
-            Text(
-              !tracksStock
-                  ? 'قيمة حرة'
-                  : (quantity > 0 ? 'متوفر: ${quantity.toStringAsFixed(0)}' : 'نفد المخزون'),
-              style: AppTextStyles.labelMd(color: sellable ? AppColors.textMuted : AppColors.danger),
+            const SizedBox(height: 6),
+            Wrap(
+              spacing: 4,
+              runSpacing: 4,
+              children: [
+                Text(
+                  !tracksStock
+                      ? 'قيمة حرة'
+                      : (quantity > 0
+                          ? 'متوفر: ${quantity.toStringAsFixed(0)}'
+                          : 'نفد المخزون'),
+                  style: AppTextStyles.labelMd(
+                    color: sellable ? AppColors.textMuted : AppColors.danger,
+                  ),
+                ),
+                if (isTaxFree)
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: AppColors.secondary.withOpacity(0.2),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                      'معفى',
+                      style: AppTextStyles.labelSm(color: AppColors.secondary),
+                    ),
+                  ),
+              ],
             ),
           ],
         ),

@@ -73,6 +73,7 @@ public record InvoiceListItemDto(
 
 public record InvoiceDetailItemDto(Guid ProductId, string ProductName, decimal Quantity, decimal UnitPrice, decimal LineTotal);
 public record InvoicePaymentDto(string Method, decimal Amount);
+public record PartialRefundRequest(List<Guid> SelectedProductIds);
 public record InvoiceDetailDto(
     Guid Id, string InvoiceNumber, string InvoiceType, string Status,
     Guid? CustomerId, string? CustomerName, Guid? OriginalInvoiceId,
@@ -934,7 +935,7 @@ public class InvoicesController : ControllerBase
     /// </summary>
     [HttpPost("{id:guid}/refund")]
     [RequirePermission("invoices.refund")]
-    public async Task<ActionResult<Invoice>> Refund(Guid id)
+    public async Task<ActionResult<Invoice>> Refund(Guid id, [FromBody] PartialRefundRequest? request = null)
     {
         // ThenInclude(Batches) — تخصيص الدفعات لازم لإعادة كل كمية إلى دفعتها
         // الأصلية بدل «دفعة عامة» بلا تاريخ صلاحية (راجع InvoiceItemBatch).
@@ -968,6 +969,13 @@ public class InvoicesController : ControllerBase
 
         // تكلفة البضاعة العائدة — تُجمَع من الدفتر أثناء الإرجاع.
         decimal returnedCost = 0;
+        decimal returnedSubtotal = 0;
+        decimal returnedTax = 0;
+        decimal returnedDiscount = 0;
+
+        // إذا لم يُحدَّد منتج مختار، استرجع الفاتورة **كاملة** (للعكسية).
+        var selectedProductIds = request?.SelectedProductIds ?? new List<Guid>();
+        var isPartialReturn = selectedProductIds.Count > 0;
 
         var refund = new Invoice
         {
@@ -977,14 +985,20 @@ public class InvoicesController : ControllerBase
             InvoiceNumber = $"RET-{DateTime.UtcNow:yyyyMMddHHmmssfff}",
             InvoiceType = "return",
             OriginalInvoiceId = original.Id,
-            Subtotal = original.Subtotal,
-            TaxAmount = original.TaxAmount,
-            DiscountAmount = original.DiscountAmount,
-            TotalAmount = original.TotalAmount,
+            Subtotal = isPartialReturn ? 0 : original.Subtotal,
+            TaxAmount = isPartialReturn ? 0 : original.TaxAmount,
+            DiscountAmount = isPartialReturn ? 0 : original.DiscountAmount,
+            TotalAmount = isPartialReturn ? 0 : original.TotalAmount,
         };
 
         foreach (var item in original.Items)
         {
+            // تصفية: إذا كان استرجاع جزئي، أضف فقط المنتجات المختارة.
+            if (isPartialReturn && !selectedProductIds.Contains(item.ProductId))
+            {
+                continue;
+            }
+
             refund.Items.Add(new InvoiceItem
             {
                 ProductId = item.ProductId,
@@ -1054,15 +1068,50 @@ public class InvoicesController : ControllerBase
                     // دفعة معلومة الانتهاء.
                     trackExpiry: true);
             }
+
+            // احسب الإجمالي الجزئي
+            if (isPartialReturn)
+            {
+                returnedSubtotal += item.LineTotal;
+                // نسبة الضريبة من السعر
+                if (original.TaxAmount > 0 && original.Subtotal > 0)
+                {
+                    var taxRatio = original.TaxAmount / original.Subtotal;
+                    returnedTax += item.LineTotal * taxRatio;
+                }
+            }
+        }
+
+        // تحديث الأموال المسترجعة في حالة الاسترجاع الجزئي
+        if (isPartialReturn)
+        {
+            refund.Subtotal = returnedSubtotal;
+            refund.TaxAmount = returnedTax;
+            refund.DiscountAmount = 0; // لا خصم في المرتجع الجزئي
+            refund.TotalAmount = returnedSubtotal + returnedTax;
         }
 
         var walletRefundAmount = 0m;
         foreach (var payment in original.Payments)
         {
-            refund.Payments.Add(new InvoicePayment { Method = payment.Method, Amount = payment.Amount });
-            if (payment.Method == "customer_wallet" && original.CustomerId.HasValue)
+            // في حالة الاسترجاع الجزئي، وزّع المدفوعات بنسبة الإجمالي
+            if (isPartialReturn && original.TotalAmount > 0)
             {
-                walletRefundAmount += payment.Amount;
+                var refundRatio = refund.TotalAmount / original.TotalAmount;
+                var refundPaymentAmount = payment.Amount * refundRatio;
+                refund.Payments.Add(new InvoicePayment { Method = payment.Method, Amount = refundPaymentAmount });
+                if (payment.Method == "customer_wallet" && original.CustomerId.HasValue)
+                {
+                    walletRefundAmount += refundPaymentAmount;
+                }
+            }
+            else
+            {
+                refund.Payments.Add(new InvoicePayment { Method = payment.Method, Amount = payment.Amount });
+                if (payment.Method == "customer_wallet" && original.CustomerId.HasValue)
+                {
+                    walletRefundAmount += payment.Amount;
+                }
             }
         }
 

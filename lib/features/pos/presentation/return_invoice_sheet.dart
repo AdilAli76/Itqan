@@ -33,6 +33,7 @@ class _ReturnInvoiceSheetState extends State<ReturnInvoiceSheet> {
   bool _busy = false;
   String? _error;
   Map<String, dynamic>? _invoice;
+  Map<int, bool> _selectedItems = {}; // item index → selected
 
   @override
   void dispose() {
@@ -89,12 +90,30 @@ class _ReturnInvoiceSheetState extends State<ReturnInvoiceSheet> {
     final invoice = _invoice;
     if (invoice == null || _busy) return;
 
+    // التحقق من اختيار منتج واحد على الأقل
+    if (_selectedItems.values.every((v) => !v)) {
+      setState(() => _error = 'اختر منتجاً واحداً على الأقل للاسترجاع');
+      return;
+    }
+
     setState(() {
       _busy = true;
       _error = null;
     });
     try {
-      await ApiClient.instance.dio.post('/invoices/${invoice['id']}/refund');
+      final lines = invoice['lines'] as List? ?? [];
+      final selectedLineItems = <Map<String, dynamic>>[];
+
+      for (int i = 0; i < lines.length; i++) {
+        if (_selectedItems[i] ?? false) {
+          selectedLineItems.add(lines[i] as Map<String, dynamic>);
+        }
+      }
+
+      await ApiClient.instance.dio.post(
+        '/invoices/${invoice['id']}/refund',
+        data: {'lineItems': selectedLineItems},
+      );
       if (mounted) Navigator.pop(context, true);
     } catch (e) {
       setState(() => _error = _message(e, 'تعذّر إتمام الاسترجاع'));
@@ -167,20 +186,48 @@ class _ReturnInvoiceSheetState extends State<ReturnInvoiceSheet> {
                         style: AppTextStyles.labelMd(),
                       ),
                       const SizedBox(height: 10),
-                      // المبلغ بارز: هو ما سيخرج من الدرج أو يعود إلى
-                      // المحفظة، ورؤيته قبل التأكيد تمنع استرجاع الفاتورة
-                      // الخطأ حين يتشابه رقمان.
                       CurrencyBadge(
-                        amount: (invoice['totalAmount'] as num?)?.toDouble() ?? 0,
+                        amount: _calculateSelectedTotal(invoice),
                         currencySymbol: 'د.ل',
                       ),
                     ],
                   ),
                 ),
                 const SizedBox(height: 12),
+                Text('اختر المنتجات المراد استرجاعها:',
+                    style: AppTextStyles.labelMd(color: AppColors.textPrimary)),
+                const SizedBox(height: 8),
+                Flexible(
+                  child: ListView.separated(
+                    shrinkWrap: true,
+                    itemCount: (invoice['lines'] as List?)?.length ?? 0,
+                    separatorBuilder: (_, __) => const Divider(height: 1),
+                    itemBuilder: (_, index) {
+                      final line = ((invoice['lines'] as List?)?[index] as Map<String, dynamic>?) ?? {};
+                      final itemName = line['itemName'] as String? ?? 'منتج بدون اسم';
+                      final quantity = line['quantity'] as num? ?? 0;
+                      final price = line['price'] as num? ?? 0;
+                      final isSelected = _selectedItems[index] ?? false;
+
+                      return CheckboxListTile(
+                        dense: true,
+                        contentPadding: EdgeInsets.zero,
+                        title: Text(itemName, style: AppTextStyles.bodyMd()),
+                        subtitle: Text(
+                          '${quantity.toStringAsFixed(2)} × ${price.toStringAsFixed(2)} د.ل',
+                          style: AppTextStyles.labelMd(),
+                        ),
+                        value: isSelected,
+                        onChanged: (v) {
+                          setState(() => _selectedItems[index] = v ?? false);
+                        },
+                      );
+                    },
+                  ),
+                ),
+                const SizedBox(height: 12),
                 Text(
-                  'ستُنشأ فاتورة مرتجع، وتعود الكمية إلى المخزون بدفعتها الأصلية. '
-                  'ما دُفع من المحفظة يعود إليها، وما دُفع نقداً يُردّ من الدرج يدوياً.',
+                  'ستُنشأ فاتورة مرتجع، وتعود الكمية إلى المخزون بدفعتها الأصلية.',
                   style: AppTextStyles.labelMd(),
                 ),
               ],
@@ -191,6 +238,26 @@ class _ReturnInvoiceSheetState extends State<ReturnInvoiceSheet> {
             ],
           ),
     );
+  }
+
+  double _calculateSelectedTotal(Map<String, dynamic> invoice) {
+    final lines = invoice['lines'] as List? ?? [];
+    double total = 0;
+
+    for (int i = 0; i < lines.length; i++) {
+      if (_selectedItems[i] ?? false) {
+        final line = lines[i] as Map<String, dynamic>?;
+        if (line != null) {
+          final quantity = (line['quantity'] as num?)?.toDouble() ?? 0;
+          final price = (line['price'] as num?)?.toDouble() ?? 0;
+          final discount = (line['discount'] as num?)?.toDouble() ?? 0;
+          final tax = (line['tax'] as num?)?.toDouble() ?? 0;
+          total += (quantity * price) - discount + tax;
+        }
+      }
+    }
+
+    return total;
   }
 
   String _message(Object e, String fallback) {
