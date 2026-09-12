@@ -124,6 +124,13 @@ class ReceiptTemplate {
     this.taxNumber,
     this.commercialRegistry,
     this.logoUrl,
+    this.barcodePosition = 'bottom',
+    this.barcodeSize = 2.0,
+    this.showInvoiceNumber = true,
+    this.showInvoiceDate = true,
+    this.showCustomerName = true,
+    this.showPaymentMethod = true,
+    this.enablePrinting = true,
   });
 
   final String paper;
@@ -162,6 +169,21 @@ class ReceiptTemplate {
   final String? commercialRegistry;
   final String? logoUrl;
 
+  /// موضع الباركود — 'top', 'bottom', 'side' أو 'hidden'.
+  final String barcodePosition;
+
+  /// حجم الباركود (1.0 – 3.0).
+  final double barcodeSize;
+
+  /// خيارات الظهور المتقدمة.
+  final bool showInvoiceNumber;
+  final bool showInvoiceDate;
+  final bool showCustomerName;
+  final bool showPaymentMethod;
+
+  /// تفعيل/تعطيل الطباعة التلقائية عند البيع.
+  final bool enablePrinting;
+
   /// الافتراضي — يُستعمل حين يفشل التحميل، فتبقى الطباعة ممكنة.
   ///
   /// <para>إيصالٌ بلا شعار أهون من كاشيرٍ لا يستطيع الطباعة لأن الشبكة
@@ -195,6 +217,13 @@ class ReceiptTemplate {
       taxNumber: json['taxNumber'] as String?,
       commercialRegistry: json['commercialRegistry'] as String?,
       logoUrl: json['logoUrl'] as String?,
+      barcodePosition: (template['barcodePosition'] as String?) ?? 'bottom',
+      barcodeSize: ((template['barcodeSize'] as num?)?.toDouble() ?? 2.0).clamp(1.0, 3.0),
+      showInvoiceNumber: template['showInvoiceNumber'] as bool? ?? true,
+      showInvoiceDate: template['showInvoiceDate'] as bool? ?? true,
+      showCustomerName: template['showCustomerName'] as bool? ?? true,
+      showPaymentMethod: template['showPaymentMethod'] as bool? ?? true,
+      enablePrinting: template['enablePrinting'] as bool? ?? true,
     );
   }
 
