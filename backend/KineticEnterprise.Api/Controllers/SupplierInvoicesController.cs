@@ -11,10 +11,16 @@ namespace KineticEnterprise.Api.Controllers;
 
 public record SupplierInvoiceLineRequest(Guid PurchaseReceiptItemId, decimal Quantity, decimal UnitCost);
 
+public record NewProductLineRequest(Guid ProductId, decimal Quantity, decimal SupplierCost, decimal? SellingPrice);
+
+public record SupplierInvoiceExpenseRequest(string Name, decimal Amount);
+
 public record CreateSupplierInvoiceRequest(
     Guid BranchId, Guid SupplierId, string InvoiceNumber, DateTime InvoiceDate,
     DateTime? DueDate, decimal TotalAmount, string? Notes,
-    List<SupplierInvoiceLineRequest> Lines);
+    List<SupplierInvoiceLineRequest> Lines,
+    List<NewProductLineRequest>? NewProductLines,
+    List<SupplierInvoiceExpenseRequest>? Expenses);
 
 public record CancelSupplierInvoiceRequest(string Reason);
 
@@ -229,40 +235,59 @@ public class SupplierInvoicesController : ControllerBase
     {
         var number = (request.InvoiceNumber ?? "").Trim();
         if (number.Length == 0) return BadRequest(new { message = "رقم الفاتورة إلزامي" });
-        if (request.Lines is null || request.Lines.Count == 0)
-            return BadRequest(new { message = "الفاتورة بلا سطور — اختر ما تُفوتره من الوارد" });
+
+        var hasLines = request.Lines?.Count > 0;
+        var hasNewProducts = request.NewProductLines?.Count > 0;
+        if (!hasLines && !hasNewProducts)
+            return BadRequest(new { message = "الفاتورة بلا سطور — اختر ما تُفوتره أو أضف منتجات" });
+
         if (request.TotalAmount <= 0)
             return BadRequest(new { message = "إجمالي الفاتورة يجب أن يكون أكبر من صفر" });
 
         var supplier = await _db.Suppliers.FirstOrDefaultAsync(s => s.Id == request.SupplierId);
         if (supplier is null) return BadRequest(new { message = "المورّد غير موجود" });
 
-        var itemIds = request.Lines.Select(l => l.PurchaseReceiptItemId).ToList();
-        if (itemIds.Distinct().Count() != itemIds.Count)
-            return BadRequest(new { message = "سطر استلامٍ مكرَّر في الفاتورة" });
+        // معالجة سطور الاستلام (الموجودة)
+        var receiptProducts = new Dictionary<Guid, Guid>();
+        if (hasLines && request.Lines != null)
+        {
+            var itemIds = request.Lines!.Select(l => l.PurchaseReceiptItemId).ToList();
+            if (itemIds.Distinct().Count() != itemIds.Count)
+                return BadRequest(new { message = "سطر استلامٍ مكرَّر في الفاتورة" });
 
-        // كل سطر يجب أن يخصّ استلاماً من **هذا** المورّد: الربط بسطر استلام
-        // مورّدٍ آخر يُفرغ التزامه هو، فيختلّ كشفا الحسابين معاً.
-        var owned = await (
-            from item in _db.PurchaseReceiptItems
-            join receipt in _db.PurchaseReceipts on item.PurchaseReceiptId equals receipt.Id
-            join order in _db.PurchaseOrders on receipt.PurchaseOrderId equals order.Id
-            where itemIds.Contains(item.Id) && order.SupplierId == request.SupplierId
-            select item.Id).ToListAsync();
-        if (owned.Count != itemIds.Count)
-            return BadRequest(new { message = "سطرٌ لا يخصّ استلاماً من هذا المورّد" });
+            var owned = await (
+                from item in _db.PurchaseReceiptItems
+                join receipt in _db.PurchaseReceipts on item.PurchaseReceiptId equals receipt.Id
+                join order in _db.PurchaseOrders on receipt.PurchaseOrderId equals order.Id
+                where itemIds.Contains(item.Id) && order.SupplierId == request.SupplierId
+                select item.Id).ToListAsync();
+            if (owned.Count != itemIds.Count)
+                return BadRequest(new { message = "سطرٌ لا يخصّ استلاماً من هذا المورّد" });
 
-        var alreadyInvoiced = await _db.SupplierInvoiceLines
-            .Where(l => itemIds.Contains(l.PurchaseReceiptItemId))
-            .Where(l => _db.SupplierInvoices
-                .Any(i => i.Id == l.SupplierInvoiceId && i.Status != SupplierInvoiceStatuses.Cancelled))
-            .AnyAsync();
-        if (alreadyInvoiced)
-            return BadRequest(new { message = "أحد السطور مُفوتَر في فاتورة أخرى" });
+            var alreadyInvoiced = await _db.SupplierInvoiceLines
+                .Where(l => l.PurchaseReceiptItemId.HasValue && itemIds.Contains(l.PurchaseReceiptItemId.Value))
+                .Where(l => _db.SupplierInvoices
+                    .Any(i => i.Id == l.SupplierInvoiceId && i.Status != SupplierInvoiceStatuses.Cancelled))
+                .AnyAsync();
+            if (alreadyInvoiced)
+                return BadRequest(new { message = "أحد السطور مُفوتَر في فاتورة أخرى" });
 
-        var products = await _db.PurchaseReceiptItems
-            .Where(i => itemIds.Contains(i.Id))
-            .ToDictionaryAsync(i => i.Id, i => i.ProductId);
+            receiptProducts = await _db.PurchaseReceiptItems
+                .Where(i => itemIds.Contains(i.Id))
+                .ToDictionaryAsync(i => i.Id, i => i.ProductId);
+        }
+
+        // التحقق من المنتجات الجديدة
+        if (hasNewProducts && request.NewProductLines != null)
+        {
+            var newProductIds = request.NewProductLines!.Select(p => p.ProductId).ToList();
+            var existingProducts = await _db.Products
+                .Where(p => newProductIds.Contains(p.Id))
+                .Select(p => p.Id)
+                .ToListAsync();
+            if (existingProducts.Count != newProductIds.Count)
+                return BadRequest(new { message = "أحد المنتجات الجديدة غير موجود" });
+        }
 
         var orgId = Guid.Parse(User.FindFirstValue("organization_id")!);
 
@@ -279,26 +304,69 @@ public class SupplierInvoicesController : ControllerBase
             CreatedBy = CurrentUserId(),
         };
 
-        foreach (var line in request.Lines)
+        // إضافة سطور الاستلام
+        if (hasLines && request.Lines != null)
         {
-            if (line.Quantity <= 0)
-                return BadRequest(new { message = "كمية السطر يجب أن تكون أكبر من صفر" });
-            if (line.UnitCost < 0)
-                return BadRequest(new { message = "سعر الوحدة لا يكون سالباً" });
-
-            invoice.Lines.Add(new SupplierInvoiceLine
+            foreach (var line in request.Lines!)
             {
-                SupplierInvoiceId = invoice.Id,
-                PurchaseReceiptItemId = line.PurchaseReceiptItemId,
-                ProductId = products[line.PurchaseReceiptItemId],
-                Quantity = line.Quantity,
-                UnitCost = line.UnitCost,
-            });
+                if (line.Quantity <= 0)
+                    return BadRequest(new { message = "كمية السطر يجب أن تكون أكبر من صفر" });
+                if (line.UnitCost < 0)
+                    return BadRequest(new { message = "سعر الوحدة لا يكون سالباً" });
+
+                invoice.Lines.Add(new SupplierInvoiceLine
+                {
+                    PurchaseReceiptItemId = line.PurchaseReceiptItemId,
+                    ProductId = receiptProducts[line.PurchaseReceiptItemId],
+                    Quantity = line.Quantity,
+                    UnitCost = line.UnitCost,
+                });
+            }
+        }
+
+        // إضافة المنتجات الجديدة
+        if (hasNewProducts && request.NewProductLines != null)
+        {
+            foreach (var line in request.NewProductLines!)
+            {
+                if (line.Quantity <= 0)
+                    return BadRequest(new { message = "كمية المنتج يجب أن تكون أكبر من صفر" });
+                if (line.SupplierCost < 0)
+                    return BadRequest(new { message = "سعر المورد لا يكون سالباً" });
+                if (line.SellingPrice is { } sp && sp < 0)
+                    return BadRequest(new { message = "سعر البيع لا يكون سالباً" });
+
+                invoice.Lines.Add(new SupplierInvoiceLine
+                {
+                    ProductId = line.ProductId,
+                    Quantity = line.Quantity,
+                    UnitCost = line.SupplierCost,
+                    SellingPrice = line.SellingPrice,
+                });
+            }
+        }
+
+        // إضافة المصاريف
+        if (request.Expenses?.Count > 0)
+        {
+            foreach (var expense in request.Expenses)
+            {
+                var name = (expense.Name ?? "").Trim();
+                if (name.Length == 0) continue;
+                if (expense.Amount < 0)
+                    return BadRequest(new { message = "مبلغ المصروف لا يكون سالباً" });
+
+                invoice.Expenses.Add(new SupplierInvoiceExpense
+                {
+                    Name = name,
+                    Amount = expense.Amount,
+                });
+            }
         }
 
         _db.SupplierInvoices.Add(invoice);
         _db.LogAudit(orgId, CurrentUserId(), "supplier_invoice.created", "supplier_invoices", invoice.Id,
-            newValues: new { invoice.InvoiceNumber, invoice.TotalAmount, Lines = invoice.Lines.Count });
+            newValues: new { invoice.InvoiceNumber, invoice.TotalAmount, Lines = invoice.Lines.Count, Expenses = invoice.Expenses.Count });
         await _db.SaveChangesAsync();
 
         return await ToDtoAsync(invoice);
@@ -456,11 +524,11 @@ public class SupplierInvoicesController : ControllerBase
 
         var matchLines = lines.Select(l =>
         {
-            var r = received.GetValueOrDefault(l.PurchaseReceiptItemId);
+            var r = l.PurchaseReceiptItemId.HasValue ? received.GetValueOrDefault(l.PurchaseReceiptItemId.Value) : null;
             var receivedQuantity = r?.Quantity ?? 0;
             var receivedUnitCost = r?.UnitCost ?? 0;
             return new MatchLineDto(
-                l.PurchaseReceiptItemId, l.ProductId, r?.ProductName ?? "—",
+                l.PurchaseReceiptItemId ?? Guid.Empty, l.ProductId, r?.ProductName ?? "—",
                 r?.SupplierNoteNumber, r?.ReceivedOn ?? invoice.InvoiceDate,
                 receivedQuantity, receivedUnitCost, l.Quantity, l.UnitCost,
                 l.Quantity - receivedQuantity,

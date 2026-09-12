@@ -16,14 +16,21 @@ param(
 )
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$MigrationFile = Join-Path $ScriptDir "001_create_platform_tables.sql"
 
-if (-not (Test-Path $MigrationFile)) {
-    Write-Error "Migration file not found: $MigrationFile"
-    exit 1
+# Apply all SQL migration files in order
+$MigrationFiles = @(
+    "001_create_platform_tables.sql",
+    "002_supplier_invoice_enhancements.sql"
+) | ForEach-Object { Join-Path $ScriptDir $_ }
+
+$MigrationFiles | ForEach-Object {
+    if (-not (Test-Path $_)) {
+        Write-Error "Migration file not found: $_"
+        exit 1
+    }
 }
 
-Write-Host "Applying migration to $ServerName.$DatabaseName..." -ForegroundColor Cyan
+Write-Host "Applying migrations to $ServerName.$DatabaseName..." -ForegroundColor Cyan
 
 try {
     $ConnectionString = "Server=$ServerName;Database=$DatabaseName;Connection Timeout=30;"
@@ -34,19 +41,25 @@ try {
         $ConnectionString += "Integrated Security=true;"
     }
 
-    $SqlContent = Get-Content -Path $MigrationFile -Raw
-
     $Connection = New-Object System.Data.SqlClient.SqlConnection
     $Connection.ConnectionString = $ConnectionString
     $Connection.Open()
 
-    $Command = $Connection.CreateCommand()
-    $Command.CommandText = $SqlContent
-    $Command.CommandTimeout = 300
+    $MigrationFiles | ForEach-Object {
+        $SqlContent = Get-Content -Path $_ -Raw
+        $FileName = Split-Path -Leaf $_
 
-    $Command.ExecuteNonQuery()
+        Write-Host "  Applying: $FileName..." -ForegroundColor Cyan
 
-    Write-Host "✅ Migration applied successfully!" -ForegroundColor Green
+        $Command = $Connection.CreateCommand()
+        $Command.CommandText = $SqlContent
+        $Command.CommandTimeout = 300
+
+        $Command.ExecuteNonQuery()
+        Write-Host "  ✅ $FileName applied" -ForegroundColor Green
+    }
+
+    Write-Host "✅ All migrations applied successfully!" -ForegroundColor Green
 
     $Connection.Close()
 }

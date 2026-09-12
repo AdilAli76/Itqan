@@ -2412,10 +2412,11 @@ public class SupplierInvoice
     public DateTime? PostedAt { get; set; }
 
     public List<SupplierInvoiceLine> Lines { get; set; } = new();
+    public List<SupplierInvoiceExpense> Expenses { get; set; } = new();
 }
 
 /// <summary>
-/// سطر في فاتورة المورّد، مربوطٌ بسطر استلامٍ بعينه.
+/// سطر في فاتورة المورّد، مربوطٌ بسطر استلامٍ بعينه أو منتج جديد.
 /// </summary>
 public class SupplierInvoiceLine
 {
@@ -2423,22 +2424,33 @@ public class SupplierInvoiceLine
     public Guid SupplierInvoiceId { get; set; }
 
     /// <summary>
-    /// سطر الاستلام الذي تُفوتره. هو **مِحور المطابقة كله**: بدونه يبقى
-    /// السطر ادّعاءً لا يقابله وصول، ويصير «الفرق» غير قابل للحساب أصلاً.
-    ///
-    /// <para>ويمنع الازدواج: سطر استلامٍ فُوتر مرّة لا يُفوتر ثانية.</para>
+    /// سطر الاستلام الذي تُفوتره. NULL للمنتجات الجديدة.
     /// </summary>
-    public Guid PurchaseReceiptItemId { get; set; }
+    public Guid? PurchaseReceiptItemId { get; set; }
 
     public Guid ProductId { get; set; }
 
     /// <summary>الكمية كما فوترها المورّد — قد تخالف ما وصل.</summary>
     public decimal Quantity { get; set; }
 
-    /// <summary>سعر الوحدة كما فوتره المورّد — قد يخالف تكلفة الأمر.</summary>
+    /// <summary>سعر الشراء من المورّد — قد يخالف تكلفة الأمر.</summary>
     public decimal UnitCost { get; set; }
 
+    /// <summary>سعر البيع — يُدخله المستخدم لتحديد الهامش.</summary>
+    public decimal? SellingPrice { get; set; }
+
     public decimal LineTotal => Quantity * UnitCost;
+}
+
+/// <summary>
+/// مصروف إضافي في فاتورة المورّد (شحن، ضرائب، إلخ).
+/// </summary>
+public class SupplierInvoiceExpense
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid SupplierInvoiceId { get; set; }
+    public string Name { get; set; } = "";
+    public decimal Amount { get; set; }
 }
 
 

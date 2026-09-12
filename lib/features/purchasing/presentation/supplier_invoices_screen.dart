@@ -14,6 +14,7 @@ import '../../../shared/widgets/app_surface.dart';
 import '../../branches/data/branches_providers.dart';
 import '../../inventory/data/inventory_providers.dart';
 import '../data/supplier_invoice_providers.dart';
+import '../../inventory/data/inventory_providers.dart' as inventory;
 
 final _money = NumberFormat('#,##0.00', 'en');
 final _date = DateFormat('yyyy-MM-dd');
@@ -534,6 +535,13 @@ class _CreateInvoiceDialogState extends ConsumerState<_CreateInvoiceDialog> {
   /// الكمية لا تُحرَّر: تفويتر كميةٍ غير التي وصلت يترك رصيداً في «وردت ولم
   /// تُفوتَر» لا يُصفَّر أبداً. والفرق الحقيقي في السوق فرقُ سعر لا كمية.
   final Map<String, TextEditingController> _selected = {};
+
+  /// منتجات جديدة (غير موجودة في الوارد) — كل واحد: ID → {qty, supplierCost, sellingPrice}
+  final Map<String, Map<String, dynamic>> _newProducts = {};
+
+  /// مصاريف الفاتورة — كل واحد: اسم → مبلغ
+  final Map<String, TextEditingController> _expenses = {};
+
   bool _saving = false;
   String? _error;
 
@@ -543,6 +551,9 @@ class _CreateInvoiceDialogState extends ConsumerState<_CreateInvoiceDialog> {
     _total.dispose();
     for (final c in _selected.values) {
       c.dispose();
+    }
+    for (final exp in _expenses.values) {
+      exp.dispose();
     }
     super.dispose();
   }
@@ -631,7 +642,13 @@ class _CreateInvoiceDialogState extends ConsumerState<_CreateInvoiceDialog> {
                   ],
                 ),
                 const SizedBox(height: 16),
-                if (_supplierId != null) _uninvoicedList(),
+                if (_supplierId != null) ...[
+                  _uninvoicedList(),
+                  const SizedBox(height: 16),
+                  _newProductsSection(),
+                  const SizedBox(height: 16),
+                  _expensesSection(),
+                ],
                 if (_error != null) ...[
                   const SizedBox(height: 12),
                   Text(_error!, style: AppTextStyles.bodyMd(color: AppColors.danger)),
@@ -690,6 +707,223 @@ class _CreateInvoiceDialogState extends ConsumerState<_CreateInvoiceDialog> {
         );
       },
     );
+  }
+
+  Widget _newProductsSection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text('منتجات إضافية', style: AppTextStyles.bodyLg()),
+            TextButton.icon(
+              onPressed: () => _addNewProduct(),
+              icon: const Icon(Icons.add, size: 18),
+              label: const Text('إضافة منتج'),
+            ),
+          ],
+        ),
+        if (_newProducts.isEmpty)
+          Text(
+            'لا منتجات إضافية — أضف من الكتالوج إن لزم',
+            style: AppTextStyles.caption(color: AppColors.textSecondary),
+          )
+        else ...[
+          const SizedBox(height: 8),
+          for (final entry in _newProducts.entries) _newProductRow(entry.key, entry.value),
+        ],
+      ],
+    );
+  }
+
+  Widget _newProductRow(String productId, Map<String, dynamic> data) {
+    final product = data['product'] as Map<String, dynamic>?;
+    if (product == null) return const SizedBox.shrink();
+
+    final qtyCtrl = data['qtyCtrl'] as TextEditingController;
+    final costCtrl = data['costCtrl'] as TextEditingController;
+    final priceCtrl = data['priceCtrl'] as TextEditingController;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceAlt,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Expanded(
+                child: Text(product['name'] as String? ?? '', style: AppTextStyles.bodyMd()),
+              ),
+              IconButton(
+                icon: const Icon(Icons.close, size: 18),
+                onPressed: () => setState(() {
+                  _newProducts.remove(productId);
+                  qtyCtrl.dispose();
+                  costCtrl.dispose();
+                  priceCtrl.dispose();
+                }),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: qtyCtrl,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  decoration: const InputDecoration(
+                    labelText: 'الكمية',
+                    isDense: true,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: TextField(
+                  controller: costCtrl,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  decoration: const InputDecoration(
+                    labelText: 'سعر المورد',
+                    isDense: true,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: TextField(
+                  controller: priceCtrl,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  decoration: const InputDecoration(
+                    labelText: 'سعر البيع',
+                    isDense: true,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _expensesSection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text('مصاريف الفاتورة', style: AppTextStyles.bodyLg()),
+            TextButton.icon(
+              onPressed: () => _addExpense(),
+              icon: const Icon(Icons.add, size: 18),
+              label: const Text('إضافة مصروف'),
+            ),
+          ],
+        ),
+        if (_expenses.isEmpty)
+          Text(
+            'بلا مصاريف إضافية',
+            style: AppTextStyles.caption(color: AppColors.textSecondary),
+          )
+        else ...[
+          const SizedBox(height: 8),
+          for (final entry in _expenses.entries) _expenseRow(entry.key, entry.value),
+        ],
+      ],
+    );
+  }
+
+  Widget _expenseRow(String name, TextEditingController ctrl) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        children: [
+          Expanded(
+            flex: 2,
+            child: Text(name, style: AppTextStyles.bodyMd()),
+          ),
+          Expanded(
+            child: TextField(
+              controller: ctrl,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              decoration: const InputDecoration(
+                labelText: 'المبلغ',
+                isDense: true,
+              ),
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.close, size: 18),
+            onPressed: () => setState(() {
+              _expenses.remove(name);
+              ctrl.dispose();
+            }),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _addNewProduct() async {
+    // جلب أول صفحة من المنتجات — في إنتاج حقيقي يجب pagination كاملة
+    final productsAsync = ref.watch(inventory.productsInventoryProvider);
+
+    final products = productsAsync.whenData((pagedResult) {
+      final items = pagedResult.items as List?;
+      if (items == null) return const <Map<String, dynamic>>[];
+      return items.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+    }).valueOrNull ?? const [];
+
+    if (products.isEmpty) {
+      setState(() => _error = 'لا منتجات في الكتالوج');
+      return;
+    }
+
+    final selected = await showDialog<Map<String, dynamic>>(
+      context: context,
+      builder: (_) => _SelectProductDialog(products: products),
+    );
+    if (selected == null) return;
+
+    final productId = '${selected['id']}';
+    if (_newProducts.containsKey(productId)) {
+      setState(() => _error = 'المنتج موجود بالفعل');
+      return;
+    }
+
+    setState(() {
+      _newProducts[productId] = {
+        'product': selected,
+        'qtyCtrl': TextEditingController(text: '1'),
+        'costCtrl': TextEditingController(text: '${selected['costPrice'] ?? 0}'),
+        'priceCtrl': TextEditingController(text: '${selected['salePrice'] ?? 0}'),
+      };
+      _error = null;
+    });
+  }
+
+  Future<void> _addExpense() async {
+    final name = await showDialog<String>(
+      context: context,
+      builder: (_) => _ExpenseNameDialog(),
+    );
+    if (name == null || name.isEmpty) return;
+
+    setState(() {
+      if (!_expenses.containsKey(name)) {
+        _expenses[name] = TextEditingController();
+      }
+    });
   }
 
   Widget _uninvoicedRow(Map<String, dynamic> item) {
@@ -752,28 +986,76 @@ class _CreateInvoiceDialogState extends ConsumerState<_CreateInvoiceDialog> {
       setState(() => _error = 'أدخل إجمالي الفاتورة كما هو مكتوب عليها');
       return;
     }
-    if (_selected.isEmpty) {
-      setState(() => _error = 'اختر ما تُفوتره من الوارد');
+
+    final hasSelectedReceipts = _selected.isNotEmpty;
+    final hasNewProducts = _newProducts.isNotEmpty;
+
+    if (!hasSelectedReceipts && !hasNewProducts) {
+      setState(() => _error = 'اختر ما تُفوتره من الوارد أو أضف منتجات جديدة');
       return;
     }
 
-    final items = ref.read(uninvoicedReceiptsProvider(_supplierId!)).valueOrNull ?? const [];
+    // معالجة سطور الوارد المختارة
     final lines = <Map<String, dynamic>>[];
-    for (final entry in _selected.entries) {
-      final source = items.firstWhere(
-        (i) => '${i['purchaseReceiptItemId']}' == entry.key,
-        orElse: () => const {},
-      );
-      final cost = double.tryParse(entry.value.text.trim());
-      if (cost == null || cost < 0) {
-        setState(() => _error = 'سعرٌ غير صالح في أحد السطور');
+    if (hasSelectedReceipts) {
+      final items = ref.read(uninvoicedReceiptsProvider(_supplierId!)).valueOrNull ?? const [];
+      for (final entry in _selected.entries) {
+        final source = items.firstWhere(
+          (i) => '${i['purchaseReceiptItemId']}' == entry.key,
+          orElse: () => const {},
+        );
+        final cost = double.tryParse(entry.value.text.trim());
+        if (cost == null || cost < 0) {
+          setState(() => _error = 'سعرٌ غير صالح في أحد السطور');
+          return;
+        }
+        lines.add({
+          'purchaseReceiptItemId': entry.key,
+          'quantity': source['quantity'],
+          'unitCost': cost,
+        });
+      }
+    }
+
+    // معالجة المنتجات الجديدة
+    final newProductLines = <Map<String, dynamic>>[];
+    for (final entry in _newProducts.entries) {
+      final data = entry.value;
+      final qtyCtrl = data['qtyCtrl'] as TextEditingController;
+      final costCtrl = data['costCtrl'] as TextEditingController;
+      final priceCtrl = data['priceCtrl'] as TextEditingController;
+
+      final qty = double.tryParse(qtyCtrl.text.trim());
+      final cost = double.tryParse(costCtrl.text.trim());
+      final price = double.tryParse(priceCtrl.text.trim());
+
+      if (qty == null || qty <= 0) {
+        setState(() => _error = 'كمية غير صالحة في المنتجات الجديدة');
         return;
       }
-      lines.add({
-        'purchaseReceiptItemId': entry.key,
-        'quantity': source['quantity'],
-        'unitCost': cost,
+      if (cost == null || cost < 0) {
+        setState(() => _error = 'سعر مورد غير صالح');
+        return;
+      }
+
+      newProductLines.add({
+        'productId': entry.key,
+        'quantity': qty,
+        'supplierCost': cost,
+        if (price != null && price > 0) 'sellingPrice': price,
       });
+    }
+
+    // معالجة المصاريف
+    final expenses = <Map<String, dynamic>>[];
+    for (final entry in _expenses.entries) {
+      final amount = double.tryParse(entry.value.text.trim());
+      if (amount != null && amount > 0) {
+        expenses.add({
+          'name': entry.key,
+          'amount': amount,
+        });
+      }
     }
 
     setState(() {
@@ -788,7 +1070,9 @@ class _CreateInvoiceDialogState extends ConsumerState<_CreateInvoiceDialog> {
         'invoiceNumber': _number.text.trim(),
         'invoiceDate': _invoiceDate.toIso8601String(),
         'totalAmount': total,
-        'lines': lines,
+        if (lines.isNotEmpty) 'lines': lines,
+        if (newProductLines.isNotEmpty) 'newProductLines': newProductLines,
+        if (expenses.isNotEmpty) 'expenses': expenses,
       });
       if (mounted) Navigator.pop(context, true);
     } on DioException catch (e) {
@@ -847,6 +1131,159 @@ class _EmptyBox extends StatelessWidget {
           ),
         ),
       );
+}
+
+// ── حوارات إضافية ────────────────────────────────────────────────────────
+
+class _SelectProductDialog extends StatefulWidget {
+  const _SelectProductDialog({required this.products});
+  final List<Map<String, dynamic>> products;
+
+  @override
+  State<_SelectProductDialog> createState() => _SelectProductDialogState();
+}
+
+class _SelectProductDialogState extends State<_SelectProductDialog> {
+  late List<Map<String, dynamic>> _filtered = widget.products;
+  final _search = TextEditingController();
+
+  @override
+  void dispose() {
+    _search.dispose();
+    super.dispose();
+  }
+
+  void _filter(String query) {
+    setState(() {
+      if (query.isEmpty) {
+        _filtered = widget.products;
+      } else {
+        final q = query.toLowerCase();
+        _filtered = widget.products
+            .where((p) =>
+                ((p['name'] as String?)?.toLowerCase() ?? '').contains(q) ||
+                ((p['sku'] as String?)?.toLowerCase() ?? '').contains(q))
+            .toList();
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('اختر منتج'),
+      content: SizedBox(
+        width: 420,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: _search,
+              decoration: const InputDecoration(
+                labelText: 'ابحث حسب الاسم أو الرمز',
+                prefixIcon: Icon(Icons.search),
+              ),
+              onChanged: _filter,
+            ),
+            const SizedBox(height: 12),
+            Expanded(
+              child: _filtered.isEmpty
+                  ? Center(
+                      child: Text(
+                        'لا منتجات تطابق البحث',
+                        style: AppTextStyles.bodyMd(color: AppColors.textSecondary),
+                      ),
+                    )
+                  : ListView.separated(
+                      shrinkWrap: true,
+                      itemCount: _filtered.length,
+                      separatorBuilder: (_, __) => const Divider(height: 1),
+                      itemBuilder: (_, idx) {
+                        final product = _filtered[idx];
+                        return ListTile(
+                          dense: true,
+                          title: Text(product['name'] as String? ?? ''),
+                          subtitle: Text(
+                            'الرمز: ${product['sku'] ?? "—"} · التكلفة: ${_money.format(product['costPrice'] ?? 0)}',
+                            style: AppTextStyles.caption(),
+                          ),
+                          onTap: () => Navigator.pop(context, product),
+                        );
+                      },
+                    ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('إلغاء')),
+      ],
+    );
+  }
+}
+
+class _ExpenseNameDialog extends StatefulWidget {
+  const _ExpenseNameDialog();
+
+  @override
+  State<_ExpenseNameDialog> createState() => _ExpenseNameDialogState();
+}
+
+class _ExpenseNameDialogState extends State<_ExpenseNameDialog> {
+  final _controller = TextEditingController();
+  static const _defaults = ['الشحن', 'الضرائب', 'التأمين', 'الرسوم'];
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('إضافة مصروف'),
+      content: SizedBox(
+        width: 340,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            TextField(
+              controller: _controller,
+              autofocus: true,
+              textInputAction: TextInputAction.send,
+              decoration: const InputDecoration(labelText: 'اسم المصروف'),
+              onSubmitted: (_) => _submit(),
+            ),
+            const SizedBox(height: 16),
+            Text('خيارات سريعة:', style: AppTextStyles.labelMd()),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              children: [
+                for (final d in _defaults)
+                  ActionChip(
+                    label: Text(d),
+                    onPressed: () => Navigator.pop(context, d),
+                  ),
+              ],
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('إلغاء')),
+        FilledButton(onPressed: _submit, child: const Text('إضافة')),
+      ],
+    );
+  }
+
+  void _submit() {
+    final name = _controller.text.trim();
+    if (name.isEmpty) return;
+    Navigator.pop(context, name);
+  }
 }
 
 double _num(Object? value) => (value as num?)?.toDouble() ?? 0;

@@ -244,12 +244,12 @@ class _KeypadKey extends StatelessWidget {
       );
     } else if (isClear) {
       final style = isXlarge
-          ? AppTextStyles.displayMd()
+          ? AppTextStyles.displayLg()
           : (isLarge ? AppTextStyles.headlineMd() : AppTextStyles.bodyMd());
       child = Text('مسح', style: style);
     } else {
       final style = isXlarge
-          ? const TextStyle(fontSize: 48, fontWeight: FontWeight.bold, color: AppColors.textPrimary)
+          ? const TextStyle(fontSize: 48, fontWeight: FontWeight.bold)
           : (isLarge
               ? AppTextStyles.displayLg(color: AppColors.textPrimary)
               : AppTextStyles.headlineMd(color: AppColors.textPrimary));

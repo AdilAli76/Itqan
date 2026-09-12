@@ -40,22 +40,6 @@ const _kPosShortcuts = [
   AppShortcut('تفريغ البحث', 'Esc'),
 ];
 
-// ──────────────────────────────────────────────────────────────────────────
-// الألوان والأشكال الديناميكية من البيانات
-// ──────────────────────────────────────────────────────────────────────────
-extension POSThemeExtension on BrandingResponse? {
-  Color get primaryColor => _parseColor(this?.primaryColor) ?? const Color(0xFF2196F3);
-  Color get secondaryColor => _parseColor(this?.secondaryColor) ?? const Color(0xFFFFC107);
-
-  static Color? _parseColor(String? hex) {
-    if (hex == null || hex.isEmpty) return null;
-    try {
-      return Color(int.parse(hex.replaceFirst('#', '0xff'), radix: 16));
-    } catch (_) {
-      return null;
-    }
-  }
-}
 
 class _CartLine {
   _CartLine({
@@ -1412,7 +1396,7 @@ class _PosScreenState extends ConsumerState<PosScreen> {
                   height: touch ? 64 : 44,
                   child: Consumer(builder: (context, ref, _) {
                     final branding = ref.watch(brandingProvider).valueOrNull;
-                    final primaryColor = branding?.primaryColor ?? Colors.blue;
+                    final primaryColor = branding?.colors.primary ?? Colors.blue;
                     return ElevatedButton(
                       style: ElevatedButton.styleFrom(
                         backgroundColor: primaryColor,
@@ -1517,12 +1501,12 @@ class _ProductTile extends StatelessWidget {
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                     decoration: BoxDecoration(
-                      color: AppColors.secondary.withOpacity(0.2),
+                      color: AppColors.warningBg,
                       borderRadius: BorderRadius.circular(4),
                     ),
                     child: Text(
                       'معفى',
-                      style: AppTextStyles.labelSm(color: AppColors.secondary),
+                      style: AppTextStyles.caption(),
                     ),
                   ),
               ],
