@@ -1,16 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:dio/dio.dart';
 import 'package:intl/intl.dart';
 
 import '../../../core/network/api_client.dart';
 import '../../../core/responsive/adaptive_scaffold.dart';
 import '../../../core/theme/app_colors.dart';
-import '../../../core/theme/app_text_styles.dart';
 import '../../../shared/widgets/adaptive_dialog.dart';
 import '../../../shared/widgets/currency_badge.dart';
 import '../../../shared/widgets/data_table_widget.dart';
-import '../../../shared/widgets/app_surface.dart';
 import '../../../core/auth/permissions.dart';
 
 final customerCategoriesProvider = FutureProvider<List<Map<String, dynamic>>>((ref) async {
@@ -83,8 +80,8 @@ class _CustomerCategoriesScreenState extends ConsumerState<CustomerCategoriesScr
                           style: const TextStyle(fontSize: 12),
                         ),
                         backgroundColor: (c['isActive'] as bool?) == true
-                            ? AppColors.success.withOpacity(0.2)
-                            : AppColors.warning.withOpacity(0.2),
+                            ? AppColors.success.withValues(alpha: 0.2)
+                            : AppColors.warning.withValues(alpha: 0.2),
                       ),
                       Row(
                         mainAxisSize: MainAxisSize.min,

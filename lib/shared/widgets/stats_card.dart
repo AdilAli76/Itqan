@@ -50,7 +50,6 @@ class StatsCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final bool isDark = Theme.of(context).brightness == Brightness.dark;
     final Color baseColor = backgroundColor ?? AppColors.primary;
 
     return GestureDetector(
@@ -59,7 +58,7 @@ class StatsCard extends StatelessWidget {
         decoration: BoxDecoration(
           gradient: LinearGradient(
             colors: [
-              baseColor.withOpacity(0.8),
+              baseColor.withValues(alpha:0.8),
               baseColor,
             ],
             begin: Alignment.topLeft,
@@ -68,7 +67,7 @@ class StatsCard extends StatelessWidget {
           borderRadius: BorderRadius.circular(16),
           boxShadow: [
             BoxShadow(
-              color: baseColor.withOpacity(0.3),
+              color: baseColor.withValues(alpha:0.3),
               blurRadius: 12,
               offset: const Offset(0, 4),
             ),
@@ -84,7 +83,7 @@ class StatsCard extends StatelessWidget {
                 width: 100,
                 height: 100,
                 decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.1),
+                  color: Colors.white.withValues(alpha:0.1),
                   shape: BoxShape.circle,
                 ),
               ),
@@ -105,7 +104,7 @@ class StatsCard extends StatelessWidget {
                         child: Text(
                           title,
                           style: TextStyle(
-                            color: Colors.white.withOpacity(0.85),
+                            color: Colors.white.withValues(alpha:0.85),
                             fontSize: 14,
                             fontWeight: FontWeight.w500,
                           ),
@@ -114,7 +113,7 @@ class StatsCard extends StatelessWidget {
                       Container(
                         padding: const EdgeInsets.all(10),
                         decoration: BoxDecoration(
-                          color: Colors.white.withOpacity(0.15),
+                          color: Colors.white.withValues(alpha:0.15),
                           borderRadius: BorderRadius.circular(10),
                         ),
                         child: Icon(
@@ -146,7 +145,7 @@ class StatsCard extends StatelessWidget {
                         Text(
                           unit,
                           style: TextStyle(
-                            color: Colors.white.withOpacity(0.75),
+                            color: Colors.white.withValues(alpha:0.75),
                             fontSize: 14,
                             fontWeight: FontWeight.w500,
                           ),
@@ -161,7 +160,7 @@ class StatsCard extends StatelessWidget {
                     Text(
                       subtitle!,
                       style: TextStyle(
-                        color: Colors.white.withOpacity(0.65),
+                        color: Colors.white.withValues(alpha:0.65),
                         fontSize: 12,
                       ),
                     ),
@@ -177,8 +176,8 @@ class StatsCard extends StatelessWidget {
                       ),
                       decoration: BoxDecoration(
                         color: isPositive
-                            ? AppColors.success.withOpacity(0.2)
-                            : AppColors.error.withOpacity(0.2),
+                            ? AppColors.success.withValues(alpha:0.2)
+                            : AppColors.error.withValues(alpha:0.2),
                         borderRadius: BorderRadius.circular(6),
                       ),
                       child: Row(
@@ -209,8 +208,8 @@ class StatsCard extends StatelessWidget {
                             'من الشهر',
                             style: TextStyle(
                               color: isPositive
-                                  ? AppColors.success.withOpacity(0.8)
-                                  : AppColors.error.withOpacity(0.8),
+                                  ? AppColors.success.withValues(alpha:0.8)
+                                  : AppColors.error.withValues(alpha:0.8),
                               fontSize: 10,
                             ),
                           ),

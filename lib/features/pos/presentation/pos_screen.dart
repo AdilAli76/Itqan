@@ -1446,7 +1446,6 @@ class _ProductTile extends StatelessWidget {
     final sellable = !tracksStock || quantity > 0;
     final isFavorite = product['isFavorite'] as bool? ?? false;
     final isTaxFree = product['isTaxFree'] as bool? ?? false;
-    final kind = product['kind'] as int? ?? 0;
 
     return InkWell(
       onTap: sellable ? onTap : null,

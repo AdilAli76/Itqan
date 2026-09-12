@@ -6,7 +6,6 @@ import '../../../core/network/api_client.dart';
 import '../../../core/responsive/adaptive_scaffold.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_text_styles.dart';
-import '../../../shared/widgets/currency_badge.dart';
 import '../../../shared/widgets/app_surface.dart';
 
 final customerStatsProvider = FutureProvider<Map<String, dynamic>>((ref) async {

@@ -253,11 +253,11 @@ class AppTheme {
       // ═══════════════════════════════════════════════════════════════
 
       dataTableTheme: DataTableThemeData(
-        headingRowColor: MaterialStateProperty.all(
+        headingRowColor: WidgetStateProperty.all(
           AppColors.lightBackground,
         ),
-        headingRowHeight: 56,
-        dataRowHeight: 56,
+        dataRowMinHeight: 56,
+        dataRowMaxHeight: 56,
         headingTextStyle: const TextStyle(
           color: AppColors.primaryText,
           fontSize: 14,

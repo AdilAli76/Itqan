@@ -80,17 +80,6 @@ class _CustomDataTableState extends State<CustomDataTable> {
     widget.onSelectionChanged?.call(_selectedRows.toList());
   }
 
-  void _toggleAllSelection() {
-    setState(() {
-      if (_selectedRows.length == widget.rows.length) {
-        _selectedRows.clear();
-      } else {
-        _selectedRows = Set.from(List.generate(widget.rows.length, (i) => i));
-      }
-    });
-    widget.onSelectionChanged?.call(_selectedRows.toList());
-  }
-
   @override
   Widget build(BuildContext context) {
     if (widget.rows.isEmpty) {
@@ -139,11 +128,11 @@ class _CustomDataTableState extends State<CustomDataTable> {
                 columns: _buildColumns(),
                 rows: _buildRows(),
                 columnSpacing: widget.isCompact ? 12 : 16,
-                dataRowHeight: widget.rowHeight,
-                headingRowHeight: widget.rowHeight,
+                dataRowMinHeight: widget.rowHeight,
+                dataRowMaxHeight: widget.rowHeight,
                 border: TableBorder.symmetric(
                   inside: BorderSide(
-                    color: AppColors.lightBorder.withOpacity(0.5),
+                    color: AppColors.lightBorder.withValues(alpha: 0.5),
                     width: 0.5,
                   ),
                 ),
@@ -225,7 +214,7 @@ class _CustomDataTableState extends State<CustomDataTable> {
               : null,
           color: WidgetStateProperty.resolveWith<Color?>((states) {
             if (isSelected) {
-              return AppColors.primary.withOpacity(0.1);
+              return AppColors.primary.withValues(alpha: 0.1);
             }
             if (isAlternate) {
               return AppColors.lightBackground;
@@ -323,9 +312,6 @@ class AdvancedDataTable extends StatefulWidget {
 }
 
 class _AdvancedDataTableState extends State<AdvancedDataTable> {
-  String _sortColumn = '';
-  bool _sortAscending = true;
-
   @override
   Widget build(BuildContext context) {
     final rows = widget.rows

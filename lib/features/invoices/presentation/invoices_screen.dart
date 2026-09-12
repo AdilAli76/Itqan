@@ -73,8 +73,6 @@ class _InvoicesScreenState extends ConsumerState<InvoicesScreen> {
   @override
   Widget build(BuildContext context) {
     final invoicesAsync = ref.watch(invoicesProvider);
-    final status = ref.watch(invoiceStatusFilterProvider);
-    final type = ref.watch(invoiceTypeFilterProvider);
 
     return AdaptiveScaffold(
       title: 'الفواتير',
@@ -214,35 +212,6 @@ class _InvoicesScreenState extends ConsumerState<InvoicesScreen> {
         decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(6)),
         child: Text(label, style: AppTextStyles.labelMd(color: fg)),
       );
-}
-
-class _FilterDropdown<T> extends StatelessWidget {
-  const _FilterDropdown(
-      {required this.label, required this.value, required this.items, required this.onChanged});
-  final String label;
-  final T value;
-  final Map<T, String> items;
-  final ValueChanged<T> onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: AppColors.border),
-      ),
-      child: DropdownButtonHideUnderline(
-        child: DropdownButton<T>(
-          value: value,
-          hint: Text(label),
-          items: items.entries.map((e) => DropdownMenuItem<T>(value: e.key, child: Text(e.value))).toList(),
-          onChanged: (v) => onChanged(v as T),
-        ),
-      ),
-    );
-  }
 }
 
 class _ErrorBox extends StatelessWidget {
