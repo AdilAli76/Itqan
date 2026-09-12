@@ -85,9 +85,12 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       if (!mounted) return;
       // كلمةٌ مؤقّتة ← شاشة التغيير لا التطبيق: الخادم يردّ كل نداءٍ آخر
       // بـ403، فالدخول إلى القشرة يعني شاشاتٍ تفشل كلّها برسالةٍ واحدة لا
-      // يفهم منها المستخدم أن المطلوب تغيير كلمته.
       if (response != null && response.data['mustChangePassword'] == true) {
         context.go('/change-password?forced=1');
+        return;
+      }
+      if (response != null && response.data['isPlatformAdmin'] == true) {
+        context.go('/platform');
         return;
       }
       context.go('/app');
@@ -191,6 +194,14 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
             ),
           ),
           const Divider(height: 24),
+          Center(
+            child: OutlinedButton.icon(
+              onPressed: () => context.go('/trial'),
+              icon: const Icon(Icons.rocket_launch_outlined, size: 18),
+              label: const Text('تسجيل تجريبي مجاني (14 يوماً)'),
+            ),
+          ),
+          const SizedBox(height: 8),
           Center(
             child: TextButton.icon(
               onPressed: () => context.go('/my-account'),

@@ -6,6 +6,8 @@ import '../../features/customer_portal/presentation/customer_portal_screen.dart'
 import '../shell/app_shell.dart';
 import '../network/api_client.dart';
 import '../../features/auth/presentation/server_setup_screen.dart';
+import '../../features/platform/presentation/platform_dashboard_screen.dart';
+import '../../features/trial/presentation/trial_registration_screen.dart';
 
 /// يُبنى مرة واحدة فقط ويُعاد استخدامه — إنشاء GoRouter داخل build() كان
 /// يهدم Navigator/Overlay الجذر ويعيد بناءه مع كل تغيّر في brandingProvider
@@ -49,6 +51,22 @@ GoRouter buildAppRouter() {
       // مرادفٌ أقصر يُملى على الهاتف: «سلاش كلاينت» أسهل من «ماي داش
       // أكاونت». ويُضاف ولا يُستبدَل — رابطٌ وُزّع على العملاء لا يبطل.
       GoRoute(path: '/client', builder: (context, state) => const CustomerPortalScreen()),
+      // بوابة إدارة المنصة المستقلة (مالك المنصة ومهندسو البيع)
+      GoRoute(path: '/platform', builder: (context, state) => const PlatformDashboardScreen()),
+      GoRoute(path: '/platform-portal', builder: (context, state) => const PlatformDashboardScreen()),
+      // بوابة التسجيل الذاتي في النسخة التجريبية (14 يوماً)
+      GoRoute(
+        path: '/trial',
+        builder: (context, state) => TrialRegistrationScreen(
+          initialReferralCode: state.uri.queryParameters['ref'],
+        ),
+      ),
+      GoRoute(
+        path: '/register',
+        builder: (context, state) => TrialRegistrationScreen(
+          initialReferralCode: state.uri.queryParameters['ref'],
+        ),
+      ),
       GoRoute(
         path: '/app',
         builder: (context, state) {

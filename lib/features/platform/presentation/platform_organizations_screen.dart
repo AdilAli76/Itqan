@@ -1,5 +1,6 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../../../shared/widgets/adaptive_dialog.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
@@ -173,6 +174,9 @@ class _OrgCard extends ConsumerWidget {
     final expiresRaw = org['licenseExpiresAt'] as String?;
     final expires = expiresRaw == null ? null : DateTime.tryParse(expiresRaw);
     final expired = expires != null && expires.isBefore(AppClock.now());
+    final licenseKey = org['licenseKey'] as String?;
+    final storageBytes = org['storageBytes'] as num? ?? 0;
+    final storageMb = (storageBytes / 1048576).toStringAsFixed(1);
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
@@ -191,6 +195,39 @@ class _OrgCard extends ConsumerWidget {
                         Text(org['displayName'] as String? ?? '', style: AppTextStyles.headlineMd()),
                         Text(org['legalName'] as String? ?? '',
                             style: AppTextStyles.bodyMd(color: AppColors.textSecondary)),
+                        if (licenseKey != null && licenseKey.isNotEmpty) ...[
+                          const SizedBox(height: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: AppColors.surfaceAlt,
+                              borderRadius: BorderRadius.circular(6),
+                              border: Border.all(color: AppColors.border),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.vpn_key_outlined, size: 14, color: Theme.of(context).colorScheme.primary),
+                                const SizedBox(width: 6),
+                                Text('السيريال: $licenseKey',
+                                    style: AppTextStyles.caption(color: Theme.of(context).colorScheme.primary).copyWith(fontWeight: FontWeight.bold)),
+                                const SizedBox(width: 8),
+                                InkWell(
+                                  onTap: () {
+                                    Clipboard.setData(ClipboardData(text: licenseKey));
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(content: Text('تم نسخ السيريال بنجاح')),
+                                    );
+                                  },
+                                  child: Tooltip(
+                                    message: 'نسخ السيريال',
+                                    child: Icon(Icons.copy_rounded, size: 14, color: Theme.of(context).colorScheme.primary),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
                       ],
                     ),
                   ),
@@ -207,14 +244,11 @@ class _OrgCard extends ConsumerWidget {
                 spacing: 18,
                 runSpacing: 8,
                 children: [
-                  // «—» لا «null»: القيمة قد تغيب فعلاً — منظمةٌ أُنشئت
-                  // قبل ترحيل عمود الإصدار تحمله NULL. وطباعة اسم القيمة
-                  // الفارغة كما هي تُظهر كلمة برمجية للمستخدم بدل أن تقول
-                  // له إن البيانات ناقصة.
                   _fact('الإصدار', _labelOr(_editionLabels, org['edition'])),
                   _fact('الباقة', _labelOr(_tierLabels, org['planTier'])),
                   _fact('الفروع', '${org['branchCount'] ?? 0}'),
                   _fact('المستخدمون', '${org['userCount'] ?? 0}'),
+                  _fact('المساحة', '$storageMb م.ب'),
                   _fact('انتهاء الترخيص', expires == null ? '—' : _dateFormat.format(expires)),
                 ],
               ),

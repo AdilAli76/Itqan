@@ -1,4 +1,4 @@
-﻿﻿using System.IdentityModel.Tokens.Jwt;
+using System.IdentityModel.Tokens.Jwt;
 using System.Text.Json;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
@@ -47,7 +47,9 @@ public record PlatformOrganizationDto(
     Guid? OwnerUserId,
     /// اسم البائع ورقم ترخيصه — للعرض، فالمعرّف وحده لا يُقرأ.
     string? OwnerName,
-    string? OwnerLicense);
+    string? OwnerLicense,
+    /// السيريال ورقم ترخيص المنظمة
+    string? LicenseKey = null);
 
 /// <summary>مستخدم في منظمة عميل — كما يراه مالك المنصّة.</summary>
 public record OrganizationUserDto(
@@ -196,7 +198,8 @@ public class PlatformController : ControllerBase
                     d?.GrantedModulesJson, d?.RevokedModulesJson).ToList(),
                 o.OwnerUserId,
                 o.OwnerUserId is null ? null : sellers.GetValueOrDefault(o.OwnerUserId.Value).Name,
-                o.OwnerUserId is null ? null : sellers.GetValueOrDefault(o.OwnerUserId.Value).License);
+                o.OwnerUserId is null ? null : sellers.GetValueOrDefault(o.OwnerUserId.Value).License,
+                d?.LicenseKey);
         }).ToList();
     }
 
@@ -549,7 +552,7 @@ WHERE id = @userId;";
 
     private record OrgDetail(string Edition, string PlanTier, DateTime? ExpiresAt, string? LicenseStatus,
         int Branches, int Users, decimal MonthlyFee, decimal StorageFee, decimal MaintenanceRate, DateTime? IssuedAt,
-        string? GrantedModulesJson, string? RevokedModulesJson);
+        string? GrantedModulesJson, string? RevokedModulesJson, string? LicenseKey = null);
 
     /// <summary>
     /// تفاصيل كل منظمة — إصدارها وترخيصها وعدد فروعها ومستخدميها.
@@ -601,7 +604,7 @@ SELECT o.edition,
        ISNULL(l.monthly_fee, 0), ISNULL(l.storage_fee, 0), ISNULL(l.maintenance_rate, 0), l.issued_at,
        (SELECT COUNT(*) FROM dbo.branches  b WHERE b.organization_id = o.id) AS branches,
        (SELECT COUNT(*) FROM dbo.app_users u WHERE u.organization_id = o.id AND u.is_active = 1) AS users,
-       l.granted_modules, l.revoked_modules
+       l.granted_modules, l.revoked_modules, l.license_key
 FROM dbo.organizations o
 LEFT JOIN dbo.licenses l ON l.organization_id = o.id;";
 
@@ -627,7 +630,8 @@ LEFT JOIN dbo.licenses l ON l.organization_id = o.id;";
                         reader.IsDBNull(6) ? 0 : reader.GetDecimal(6),
                         reader.IsDBNull(7) ? null : reader.GetDateTime(7),
                         reader.IsDBNull(10) ? null : reader.GetString(10),
-                        reader.IsDBNull(11) ? null : reader.GetString(11));
+                        reader.IsDBNull(11) ? null : reader.GetString(11),
+                        reader.IsDBNull(12) ? null : reader.GetString(12));
                 }
             }
             catch (Exception ex)
