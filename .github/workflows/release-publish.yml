@@ -48,7 +48,7 @@ jobs:
         run: |
           mkdir -p build/output
           cd build/web && zip -r ../output/kinetic-web.zip . && cd ../..
-          cp build/app/outputs/flutter-app.apk build/output/kinetic-app.apk
+          cp build/app/outputs/apk/release/app-release.apk build/output/kinetic-app.apk
           cp build/app/outputs/bundle/release/app-release.aab build/output/kinetic-app.aab
           ls -lh build/output/
 
