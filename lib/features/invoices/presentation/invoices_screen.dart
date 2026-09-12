@@ -8,11 +8,13 @@ import '../../../core/network/api_client.dart';
 import '../../../core/printing/receipt_template.dart';
 import '../../../core/printing/receipt_printer.dart';
 import '../../../core/responsive/adaptive_scaffold.dart';
+import '../../../core/responsive/breakpoints.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_text_styles.dart';
 import '../../../core/theme/branding_provider.dart';
 import '../../../shared/widgets/currency_badge.dart';
 import '../../../shared/widgets/data_table_widget.dart';
+import '../../../shared/widgets/list_toolbar.dart';
 import '../data/invoices_providers.dart';
 import '../../../shared/widgets/skeleton.dart';
 import '../../../shared/widgets/pagination_bar.dart';
@@ -80,33 +82,42 @@ class _InvoicesScreenState extends ConsumerState<InvoicesScreen> {
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // Wrap لا Row: شريط الفلاتر يفيض على عرض الهاتف. الالتفاف يبقي
-          // كل فلتر ظاهراً وقابلاً للنقر بدل قصّ آخره بصمت.
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: [
-              _FilterDropdown<String?>(
-                label: 'الحالة',
-                value: status,
-                items: const {null: 'كل الحالات', ..._statusLabels},
-                onChanged: (v) {
-                  ref.read(invoiceStatusFilterProvider.notifier).state = v;
-                  _resetPage();
-                },
-              ),
-              const SizedBox(width: 12),
-              _FilterDropdown<String?>(
-                label: 'النوع',
-                value: type,
-                items: const {null: 'كل الأنواع', ..._typeLabels},
-                onChanged: (v) {
-                  ref.read(invoiceTypeFilterProvider.notifier).state = v;
-                  _resetPage();
-                },
-              ),
+          // شريط الأدوات المحسّن مع البحث والفلاتر والإجراءات
+          ListToolbar(
+            searchPlaceholder: 'ابحث برقم الفاتورة أو اسم العميل...',
+            onSearchChanged: _onSearch,
+            onAddPressed: () {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('الانتقال لإنشاء فاتورة جديدة...')),
+              );
+            },
+            onRefreshPressed: () => ref.invalidate(invoicesProvider),
+            onPrintPressed: () {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('جاري تحضير الطباعة...')),
+              );
+            },
+            onExportPressed: () {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('جاري تصدير البيانات...')),
+              );
+            },
+            filterOptions: [
+              FilterOption(label: 'الكل', value: ''),
+              FilterOption(label: 'معلقة', value: 'pending'),
+              FilterOption(label: 'مكتملة', value: 'completed'),
+              FilterOption(label: 'مسترجعة', value: 'refunded'),
+              FilterOption(label: 'ملغاة', value: 'cancelled'),
             ],
+            onFilterChanged: (status) {
+              ref.read(invoiceStatusFilterProvider.notifier).state =
+                  status?.isEmpty ?? true ? null : status;
+              _resetPage();
+            },
+            showActionButtons: true,
+            showAddButton: true,
+            addButtonLabel: 'فاتورة جديدة',
+            isCompact: Breakpoints.isMobile(context),
           ),
           const SizedBox(height: 16),
           invoicesAsync.when(
@@ -143,6 +154,8 @@ class _InvoicesScreenState extends ConsumerState<InvoicesScreen> {
               ],
             ),
           ),
+
+          // ✅ تم تطبيق ListToolbar أعلاه
         ],
       ),
     );

@@ -151,7 +151,7 @@ class _CustomerFormDialogState extends ConsumerState<CustomerFormDialog> {
               enabled: !_busy,
             ),
             const SizedBox(height: 24),
-            Text('الفئة والنموذج', style: AppTextStyles.headingMd()),
+            Text('الفئة والنموذج', style: AppTextStyles.headlineMd()),
             const SizedBox(height: 12),
             DropdownButtonFormField<String?>(
               value: _selectedCategoryId,
@@ -181,7 +181,7 @@ class _CustomerFormDialogState extends ConsumerState<CustomerFormDialog> {
             ),
             const SizedBox(height: 24),
             if (_accountModel == 'prepaid') ...[
-              Text('خيارات الرصيد', style: AppTextStyles.headingMd()),
+              Text('خيارات الرصيد', style: AppTextStyles.headlineMd()),
               const SizedBox(height: 12),
               Row(
                 children: [
@@ -209,7 +209,7 @@ class _CustomerFormDialogState extends ConsumerState<CustomerFormDialog> {
                 ],
               ),
             ] else ...[
-              Text('خيارات الاستحقاق', style: AppTextStyles.headingMd()),
+              Text('خيارات الاستحقاق', style: AppTextStyles.headlineMd()),
               const SizedBox(height: 12),
               TextField(
                 controller: _entitlementCeilingController,

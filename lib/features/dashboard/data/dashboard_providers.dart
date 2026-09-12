@@ -20,5 +20,9 @@ final dashboardInventoryProvider = FutureProvider.autoDispose<Map<String, dynami
 final dashboardBranchesProvider =
     FutureProvider.autoDispose<List<Map<String, dynamic>>>((ref) async {
   final response = await ApiClient.instance.dio.get('/branches');
-  return List<Map<String, dynamic>>.from(response.data as List);
+  final data = response.data;
+  if (data == null) return [];
+  if (data is List) return List<Map<String, dynamic>>.from(data);
+  if (data is Map) return [data as Map<String, dynamic>];
+  return [];
 });

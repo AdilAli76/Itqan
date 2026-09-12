@@ -20,7 +20,8 @@ final customersProvider = FutureProvider.autoDispose<PagedResult>((ref) async {
     'page': page,
     'pageSize': customersPageSize,
   });
-  return PagedResult.fromJson(response.data as Map<String, dynamic>);
+  final data = response.data;
+  return PagedResult.fromJson(data is Map ? Map<String, dynamic>.from(data) : {});
 });
 
 /// الجهات الممولة — تُقرأ في نموذج العميل وفي شاشة الجهات معاً.
@@ -29,5 +30,9 @@ final customersProvider = FutureProvider.autoDispose<PagedResult>((ref) async {
 /// القائمة مع كل فتح طلبٌ زائد لبيانات نادرة التغيّر.
 final sponsorsProvider = FutureProvider<List<Map<String, dynamic>>>((ref) async {
   final response = await ApiClient.instance.dio.get('/sponsors');
-  return List<Map<String, dynamic>>.from(response.data as List);
+  final data = response.data;
+  if (data == null) return [];
+  if (data is List) return List<Map<String, dynamic>>.from(data);
+  if (data is Map) return [data as Map<String, dynamic>];
+  return [];
 });

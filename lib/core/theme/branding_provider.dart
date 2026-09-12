@@ -96,27 +96,29 @@ Set<String> modulesOfEdition(String edition) => switch (edition) {
 final brandingProvider = FutureProvider<OrganizationBranding>((ref) async {
   try {
     final response = await ApiClient.instance.dio.get('/organizations/me');
-    final data = response.data as Map<String, dynamic>;
-    final edition = data['edition'] as String? ?? 'standard';
-    final modules = (data['modules'] as List?)?.whereType<String>().toSet() ?? <String>{};
+    final data = response.data;
+    if (data == null || data is! Map) return OrganizationBranding.fallback;
+
+    final dataMap = Map<String, dynamic>.from(data);
+    final edition = dataMap['edition'] as String? ?? 'standard';
+    final modulesRaw = dataMap['modules'];
+    final modules = (modulesRaw is List)
+      ? modulesRaw.whereType<String>().toSet()
+      : <String>{};
 
     return OrganizationBranding(
-      displayName: data['displayName'] as String? ?? OrganizationBranding.fallback.displayName,
-      logoUrl: data['logoUrl'] as String?,
+      displayName: dataMap['displayName'] as String? ?? OrganizationBranding.fallback.displayName,
+      logoUrl: dataMap['logoUrl'] as String?,
       colors: AppColors.fromHex(
-        primaryHex: data['primaryColor'] as String?,
-        secondaryHex: data['secondaryColor'] as String?,
+        primaryHex: dataMap['primaryColor'] as String?,
+        secondaryHex: dataMap['secondaryColor'] as String?,
       ),
-      currencySymbol: data['currencySymbol'] as String? ?? 'د.ل',
-      navLayout: data['navLayout'] as String? ?? 'sidebar',
+      currencySymbol: dataMap['currencySymbol'] as String? ?? 'د.ل',
+      navLayout: dataMap['navLayout'] as String? ?? 'sidebar',
       edition: edition,
-      // قائمة فارغة من خادمٍ أقدم لا تعني «لا وحدات» بل «لا يعرفها»: تفسيرها
-      // حرفياً كان يُفرغ القائمة الجانبية تماماً بعد نشرِ واجهةٍ قبل خادمها.
       modules: modules.isEmpty ? modulesOfEdition(edition) : modules,
     );
   } catch (_) {
-    // قبل تسجيل الدخول (لا توكن بعد) أو تعذّر الاتصال بالسيرفر -> اللوحة
-    // الافتراضية بدل شاشة بيضاء أو استثناء غير معالَج.
     return OrganizationBranding.fallback;
   }
 });

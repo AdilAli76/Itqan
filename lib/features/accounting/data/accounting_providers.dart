@@ -4,7 +4,11 @@ import '../../../core/network/api_client.dart';
 final chartOfAccountsProvider =
     FutureProvider.autoDispose<List<Map<String, dynamic>>>((ref) async {
   final response = await ApiClient.instance.dio.get('/accounting/accounts');
-  return (response.data as List).map((e) => Map<String, dynamic>.from(e as Map)).toList();
+  final data = response.data;
+  if (data == null) return [];
+  if (data is List) return data.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+  if (data is Map) return [data as Map<String, dynamic>];
+  return [];
 });
 
 /// الحساب المحدَّد لتصفية دفتر اليومية — null يعني كل القيود.
@@ -16,29 +20,43 @@ final journalProvider =
   final response = await ApiClient.instance.dio.get('/accounting/journal', queryParameters: {
     if (accountId != null) 'accountId': accountId,
   });
-  return (response.data as List).map((e) => Map<String, dynamic>.from(e as Map)).toList();
+  final data = response.data;
+  if (data == null) return [];
+  if (data is List) return data.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+  if (data is Map) return [data as Map<String, dynamic>];
+  return [];
 });
 
 final trialBalanceProvider =
     FutureProvider.autoDispose<Map<String, dynamic>>((ref) async {
   final response = await ApiClient.instance.dio.get('/accounting/trial-balance');
-  return response.data as Map<String, dynamic>;
+  final data = response.data;
+  if (data is Map) return Map<String, dynamic>.from(data);
+  return {};
 });
 
 final incomeStatementProvider =
     FutureProvider.autoDispose<Map<String, dynamic>>((ref) async {
   final response = await ApiClient.instance.dio.get('/accounting/income-statement');
-  return response.data as Map<String, dynamic>;
+  final data = response.data;
+  if (data is Map) return Map<String, dynamic>.from(data);
+  return {};
 });
 
 final balanceSheetProvider =
     FutureProvider.autoDispose<Map<String, dynamic>>((ref) async {
   final response = await ApiClient.instance.dio.get('/accounting/balance-sheet');
-  return response.data as Map<String, dynamic>;
+  final data = response.data;
+  if (data is Map) return Map<String, dynamic>.from(data);
+  return {};
 });
 
 final fiscalClosingsProvider =
     FutureProvider.autoDispose<List<Map<String, dynamic>>>((ref) async {
   final response = await ApiClient.instance.dio.get('/accounting/closings');
-  return (response.data as List).map((e) => Map<String, dynamic>.from(e as Map)).toList();
+  final data = response.data;
+  if (data == null) return [];
+  if (data is List) return data.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+  if (data is Map) return [data as Map<String, dynamic>];
+  return [];
 });
