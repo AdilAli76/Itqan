@@ -514,7 +514,15 @@ public class ProductsController : ControllerBase
 
         product.IsDeleted = true;
         _db.LogAudit(product.OrganizationId, CurrentUserId(), "product.deleted", "products", product.Id,
-            oldValues: new { product.Name, product.Sku });
+            oldValues: new {
+                product.Name,
+                product.Sku,
+                product.Barcode,
+                product.CostPrice,
+                product.SalePrice,
+                product.UnitBase,
+                product.SubUnitName
+            });
         await _db.SaveChangesAsync();
         return NoContent();
     }

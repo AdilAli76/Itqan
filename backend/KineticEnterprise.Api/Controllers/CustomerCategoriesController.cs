@@ -185,6 +185,87 @@ public class CustomerCategoriesController : ControllerBase
     /// تحسب بنفس قواعد الصرف: التعديل الفردي، والصفر الموقوف، ومن قُبض له
     /// في الدورة أصلاً.</para>
     /// </summary>
+    [HttpGet("analysis")]
+    [Authorize(Roles = "super_admin,branch_manager")]
+    public async Task<ActionResult<object>> Analysis([FromQuery] Guid? categoryId)
+    {
+        var org = await _db.Organizations.FirstOrDefaultAsync();
+        if (org is null) return BadRequest(new { message = "تعذّر تحديد المنظمة" });
+
+        var today = OrgClock.Today(org);
+        var periodStart = new DateTime(today.Year, today.Month, 1);
+        var periodEnd = periodStart.AddMonths(1).AddDays(-1);
+
+        var categories = await _db.CustomerCategories
+            .Where(c => c.IsActive && (categoryId == null || c.Id == categoryId))
+            .ToListAsync();
+
+        var members = await _db.Customers
+            .Where(c => !c.IsDeleted
+                     && c.AccountModel == AccountModels.Entitlement
+                     && c.CategoryId != null
+                     && categories.Select(x => x.Id).Contains(c.CategoryId.Value))
+            .Select(c => new { c.Id, c.CategoryId, c.EntitlementOverride })
+            .ToListAsync();
+
+        var memberIds = members.Select(m => m.Id).ToList();
+        var alreadyPaid = (await _db.CustomerWalletTransactions
+            .Where(t => memberIds.Contains(t.CustomerId)
+                     && t.Kind == WalletKinds.EntitlementGrant
+                     && t.CreatedAt >= periodStart)
+            .Select(t => t.CustomerId).Distinct().ToListAsync()).ToHashSet();
+
+        var catDict = categories.ToDictionary(c => c.Id);
+        var categoriesBreakdown = categories.Select(cat =>
+        {
+            var catMembers = members.Where(m => m.CategoryId == cat.Id).ToList();
+            var paid = catMembers.Count(m => alreadyPaid.Contains(m.Id));
+            var amounts = catMembers.Select(m => m.EntitlementOverride ?? cat.PeriodAmount)
+                .Where(a => a > 0).ToList();
+            return new
+            {
+                id = cat.Id.ToString(),
+                name = cat.Name,
+                memberCount = catMembers.Count,
+                paidCount = paid,
+                periodAmount = cat.PeriodAmount,
+                totalAmount = amounts.Sum(),
+            };
+        }).ToList();
+
+        var scenarios = new[]
+        {
+            new {
+                name = "صرف عادي",
+                description = "صرف المرتب الشهري لجميع المستحقين",
+                projectedAmount = categoriesBreakdown.Sum(c => (decimal)c.totalAmount),
+                impact = "normal",
+            },
+            new {
+                name = "صرف مع زيادة",
+                description = "صرف المرتب مع علاوة 10%",
+                projectedAmount = categoriesBreakdown.Sum(c => (decimal)c.totalAmount) * 1.1m,
+                impact = "increase",
+            },
+            new {
+                name = "صرف مخفض",
+                description = "صرف 80% من المرتب الأساسي",
+                projectedAmount = categoriesBreakdown.Sum(c => (decimal)c.totalAmount) * 0.8m,
+                impact = "decrease",
+            },
+        };
+
+        return Ok(new
+        {
+            currentPeriodStart = periodStart.ToString("yyyy-MM-dd"),
+            currentPeriodEnd = periodEnd.ToString("yyyy-MM-dd"),
+            totalMembers = members.Count,
+            totalDisbursementAmount = categoriesBreakdown.Sum(c => (decimal)c.totalAmount),
+            categories = categoriesBreakdown,
+            scenarios = scenarios,
+        });
+    }
+
     [HttpGet("disburse/preview")]
     [Authorize(Roles = "super_admin,branch_manager")]
     public async Task<ActionResult<object>> PreviewDisburse([FromQuery] Guid? categoryId)

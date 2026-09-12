@@ -545,7 +545,7 @@ public class LoginHistory
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }
 
-public class Product
+public partial class Product
 {
     public Guid Id { get; set; } = Guid.NewGuid();
     public Guid OrganizationId { get; set; }
@@ -877,7 +877,7 @@ public static class WarehouseKinds
 /// <c>in_transit</c> يُخصم من المصدر ولا يُضاف للهدف — فتختفي البضاعة من كل
 /// تقرير طوال الترحيل. بمستودع عبور تبقى مرئية، لها مكان ومسؤول.</para>
 /// </summary>
-public class Warehouse
+public partial class Warehouse
 {
     public Guid Id { get; set; } = Guid.NewGuid();
     public Guid OrganizationId { get; set; }
@@ -2550,4 +2550,154 @@ public class UserPasskey
 
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? LastUsedAt { get; set; }
+}
+
+// ── نظام إدارة الأصول الثابتة والاهلاك ─────────────────────────────────
+
+/// <summary>
+/// الأصول الثابتة (Fixed Assets) — مبان، معدات، مركبات، إلخ.
+/// استخدام الاهلاك في تقسيط قيمتها على سنوات حياتها الافتراضية.
+/// </summary>
+public class FixedAsset
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid OrganizationId { get; set; }
+
+    /// <summary>اسم الأصل الواصف — «مبنى المقر الرئيسي»، «ماكينة إنتاج رقم 3».</summary>
+    public string AssetName { get; set; } = "";
+
+    /// <summary>رقم الأصل الفريد — كود داخلي أو رقم تسلسلي من الموردّ.</summary>
+    public string AssetCode { get; set; } = "";
+
+    /// <summary>تصنيف الأصل: buildings, equipment, vehicles, furniture, etc.</summary>
+    public string AssetCategory { get; set; } = "";
+
+    /// <summary>تاريخ الحصول على الأصل (تاريخ الشراء أو الإنشاء).</summary>
+    public DateTime AcquisitionDate { get; set; } = DateTime.UtcNow;
+
+    /// <summary>القيمة الأصلية للأصل (تكلفة الشراء أو الإنشاء).</summary>
+    public decimal AcquisitionCost { get; set; }
+
+    /// <summary>العمر الافتراضي للأصل بالسنوات.</summary>
+    public int UsefulLifeYears { get; set; }
+
+    /// <summary>القيمة المتبقية المتوقعة في نهاية العمر الافتراضي.</summary>
+    public decimal ResidualValue { get; set; }
+
+    /// <summary>طريقة الاهلاك: straight_line (القسط الثابت) أو declining_balance (التناقص).</summary>
+    public string DepreciationMethod { get; set; } = "straight_line";
+
+    /// <summary>نسبة الاهلاك السنوية (كنسبة مئوية 0-100).</summary>
+    public decimal AnnualDepreciationRate { get; set; }
+
+    /// <summary>مركز التكلفة المسؤول عن هذا الأصل.</summary>
+    public string? CostCenter { get; set; }
+
+    /// <summary>موقع الأصل الفيزيائي (الفرع أو الموقع).</summary>
+    public string? Location { get; set; }
+
+    /// <summary>هل الأصل نشط ومستخدم حالياً؟</summary>
+    public bool IsActive { get; set; } = true;
+
+    /// <summary>تاريخ استبعاد الأصل (إن وُجد).</summary>
+    public DateTime? DisposalDate { get; set; }
+
+    /// <summary>قيمة بيع/استبعاد الأصل عند التخلّي عنه.</summary>
+    public decimal? DisposalAmount { get; set; }
+
+    /// <summary>حالة الأصل: active, disposed, retired.</summary>
+    public string Status { get; set; } = "active";
+
+    public Guid? CreatedBy { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public Guid? UpdatedBy { get; set; }
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+    public bool IsDeleted { get; set; }
+}
+
+/// <summary>
+/// جدول الاهلاك الشهري/السنوي — تسجيل قيم الاهلاك الدوري لكل أصل.
+/// مصدر الحقيقة للمعالجات المحاسبية.
+/// </summary>
+public class AssetDepreciation
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid FixedAssetId { get; set; }
+    public Guid OrganizationId { get; set; }
+
+    /// <summary>رقم الشهر (1-12).</summary>
+    public int Month { get; set; }
+
+    /// <summary>السنة المالية.</summary>
+    public int Year { get; set; }
+
+    /// <summary>القيمة الدفترية في بداية الفترة.</summary>
+    public decimal BeginningValue { get; set; }
+
+    /// <summary>مبلغ الاهلاك للفترة.</summary>
+    public decimal DepreciationAmount { get; set; }
+
+    /// <summary>إجمالي الاهلاك المتراكم إلى نهاية هذه الفترة.</summary>
+    public decimal AccumulatedDepreciation { get; set; }
+
+    /// <summary>القيمة الدفترية في نهاية الفترة (الأساس − المتراكم).</summary>
+    public decimal EndingValue { get; set; }
+
+    /// <summary>هل تمّ تسجيل القيد المحاسبي لهذا الاهلاك؟</summary>
+    public bool IsRecorded { get; set; }
+
+    /// <summary>رقم القيد المحاسبي المرتبط (JournalEntryId).</summary>
+    public Guid? JournalEntryId { get; set; }
+
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+}
+
+/// <summary>
+/// بيانات الشركة التجارية — المعلومات القانونية والإدارية.
+/// تُستخدم في الفاتورات والتقارير الرسمية.
+/// </summary>
+public class CompanyInfo
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid OrganizationId { get; set; }
+
+    /// <summary>رقم السجل التجاري.</summary>
+    public string? CommercialRegistryNumber { get; set; }
+
+    /// <summary>الرقم الضريبي للشركة.</summary>
+    public string? TaxNumber { get; set; }
+
+    /// <summary>الاسم القانوني الكامل للشركة.</summary>
+    public string LegalName { get; set; } = "";
+
+    /// <summary>العنوان التجاري الرسمي.</summary>
+    public string? TradeAddress { get; set; }
+
+    /// <summary>سنة التأسيس.</summary>
+    public int? FoundationYear { get; set; }
+
+    /// <summary>نوع الشركة: sole_proprietor, partnership, limited_company, etc.</summary>
+    public string? CompanyType { get; set; }
+
+    /// <summary>رقم حساب البنك الرئيسي.</summary>
+    public string? BankAccountNumber { get; set; }
+
+    /// <summary>اسم البنك.</summary>
+    public string? BankName { get; set; }
+
+    /// <summary>رقم IBAN الدولي للحساب البنكي.</summary>
+    public string? IBAN { get; set; }
+
+    /// <summary>رقم الهاتف المكتبي.</summary>
+    public string? Phone { get; set; }
+
+    /// <summary>البريد الإلكتروني الرسمي.</summary>
+    public string? Email { get; set; }
+
+    /// <summary>العملة المستخدمة في التقارير.</summary>
+    public string? CurrencyCode { get; set; }
+
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+    public Guid? UpdatedBy { get; set; }
 }

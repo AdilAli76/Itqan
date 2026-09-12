@@ -211,6 +211,14 @@ builder.Services.AddResponseCompression(options =>
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
+// ── خدمات مخصصة ──────────────────────────────────────────────────────
+// خدمة حساب الاهلاك والأصول الثابتة.
+builder.Services.AddScoped<KineticEnterprise.Api.Services.DepreciationService>();
+
+// خدمات نظام إدارة المخزون المتقدم.
+builder.Services.AddScoped<KineticEnterprise.Api.Services.InventoryAlertService>();
+builder.Services.AddScoped<KineticEnterprise.Api.Services.InventoryService>();
+
 // يسمح لتطبيق Flutter Web (على منفذ مختلف أثناء التطوير) بالاتصال بالـ API.
 // في الإنتاج على IIS: يُقيَّد Origin للنطاق الفعلي فقط.
 builder.Services.AddCors(options =>

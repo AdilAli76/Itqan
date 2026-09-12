@@ -225,7 +225,11 @@ public class SuppliersController : ControllerBase
 
         supplier.IsDeleted = true;
         _db.LogAudit(supplier.OrganizationId, CurrentUserId(), "supplier.deleted", "suppliers", supplier.Id,
-            oldValues: new { supplier.Name });
+            oldValues: new {
+                supplier.Name,
+                supplier.Phone,
+                supplier.Balance
+            });
         await _db.SaveChangesAsync();
         return NoContent();
     }

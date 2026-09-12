@@ -202,6 +202,30 @@ public class CustomersController : ControllerBase
         return new CustomerPageDto(items, totalCount, page, pageSize);
     }
 
+    [HttpGet("stats")]
+    public async Task<ActionResult<object>> GetStats()
+    {
+        var customers = await _db.Customers.Where(c => !c.IsDeleted).ToListAsync();
+        var ids = customers.Select(c => c.Id).ToList();
+
+        var balances = await WalletBalances.ComputeManyAsync(_db, ids);
+        var totalWalletBalance = balances.Values.Sum();
+        var totalLoyaltyPoints = customers.Sum(c => c.LoyaltyPoints);
+
+        var today = DateTime.UtcNow.Date;
+        var activeToday = await _db.Invoices
+            .Where(i => i.CreatedAt >= today && i.CreatedAt < today.AddDays(1))
+            .Select(i => i.CustomerId).Distinct().CountAsync();
+
+        return Ok(new
+        {
+            totalCount = customers.Count,
+            totalWalletBalance = totalWalletBalance,
+            totalLoyaltyPoints = totalLoyaltyPoints,
+            activeToday = activeToday,
+        });
+    }
+
     /// <summary>
     /// بحث بالمطابقة التامة لرمز البطاقة — لمسح البطاقة مباشرة في نقطة البيع.
     ///
@@ -688,7 +712,12 @@ public class CustomersController : ControllerBase
 
         customer.IsDeleted = true;
         _db.LogAudit(customer.OrganizationId, CurrentUserId(), "customer.deleted", "customers", customer.Id,
-            oldValues: new { customer.FullName });
+            oldValues: new {
+                customer.FullName,
+                customer.Phone,
+                customer.Email,
+                customer.Notes
+            });
         await _db.SaveChangesAsync();
         return NoContent();
     }

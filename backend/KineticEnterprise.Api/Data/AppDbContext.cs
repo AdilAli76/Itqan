@@ -63,6 +63,19 @@ public class AppDbContext : DbContext
     public DbSet<PurchaseReceiptItem> PurchaseReceiptItems => Set<PurchaseReceiptItem>();
     public DbSet<PlatformOrganizationRecord> PlatformOrganizations => Set<PlatformOrganizationRecord>();
 
+    // ── نظام إدارة الأصول الثابتة والاهلاك ──────────────────────────────
+    public DbSet<FixedAsset> FixedAssets => Set<FixedAsset>();
+    public DbSet<AssetDepreciation> AssetDepreciations => Set<AssetDepreciation>();
+    public DbSet<CompanyInfo> CompanyInfos => Set<CompanyInfo>();
+
+    // ── نظام إدارة المخزون المتقدم ───────────────────────────────────
+    public DbSet<ProductBatch> ProductBatches => Set<ProductBatch>();
+    public DbSet<ProductSerialNumber> ProductSerialNumbers => Set<ProductSerialNumber>();
+    public DbSet<BatchMovement> BatchMovements => Set<BatchMovement>();
+    public DbSet<InventoryAlertRule> InventoryAlertRules => Set<InventoryAlertRule>();
+    public DbSet<InventoryAlert> InventoryAlerts => Set<InventoryAlert>();
+    public DbSet<InventoryValuation> InventoryValuations => Set<InventoryValuation>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         // أسماء الجداول تطابق DATABASE_SCHEMA_SQLSERVER.sql بالضبط حتى لا
@@ -140,6 +153,19 @@ public class AppDbContext : DbContext
         modelBuilder.Entity<PurchaseReceipt>().ToTable("purchase_receipts");
         modelBuilder.Entity<PurchaseReceiptItem>().ToTable("purchase_receipt_items");
         modelBuilder.Entity<PlatformOrganizationRecord>().ToTable("platform_organizations");
+
+        // ── الأصول الثابتة والاهلاك ───────────────────────────────────
+        modelBuilder.Entity<FixedAsset>().ToTable("fixed_assets");
+        modelBuilder.Entity<AssetDepreciation>().ToTable("asset_depreciation");
+        modelBuilder.Entity<CompanyInfo>().ToTable("company_info");
+
+        // ── نظام المخزون المتقدم ───────────────────────────────────────
+        modelBuilder.Entity<ProductBatch>().ToTable("product_batches");
+        modelBuilder.Entity<ProductSerialNumber>().ToTable("product_serial_numbers");
+        modelBuilder.Entity<BatchMovement>().ToTable("batch_movements");
+        modelBuilder.Entity<InventoryAlertRule>().ToTable("inventory_alert_rules");
+        modelBuilder.Entity<InventoryAlert>().ToTable("inventory_alerts");
+        modelBuilder.Entity<InventoryValuation>().ToTable("inventory_valuations");
 
         modelBuilder.Entity<Invoice>()
             .HasMany(i => i.Items)

@@ -402,19 +402,83 @@ class _JsonBlock extends StatelessWidget {
   const _JsonBlock({required this.raw});
   final String raw;
 
+  String _formatValue(dynamic value) {
+    if (value == null) return '—';
+    if (value is bool) return value ? 'نعم' : 'لا';
+    if (value is num) {
+      if (value is int) return value.toString();
+      return (value as double).toStringAsFixed(2);
+    }
+    return value.toString();
+  }
+
   @override
   Widget build(BuildContext context) {
+    try {
+      final decoded = json.decode(raw);
+      if (decoded is Map<String, dynamic>) {
+        return Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: AppColors.surfaceAlt,
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: decoded.entries
+                .map((e) => Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      SizedBox(
+                        width: 100,
+                        child: Text(
+                          '${e.key}:',
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 14,
+                          ),
+                        ),
+                      ),
+                      Expanded(
+                        child: Text(
+                          _formatValue(e.value),
+                          style: AppTextStyles.bodyMd(),
+                        ),
+                      ),
+                    ],
+                  ),
+                ))
+                .toList(),
+          ),
+        );
+      }
+    } catch (_) {
+      // تحويل فاشل — عرض JSON مُنسّق بدلاً من النص الخام
+    }
+
+    // احتياطي: عرض JSON منسّق
     String formatted = raw;
     try {
       formatted = const JsonEncoder.withIndent('  ').convert(json.decode(raw));
-    } catch (_) {
-      // نص غير قابل للتحليل كـ JSON (حالة غير متوقَّعة) — يُعرض كما هو.
-    }
+    } catch (_) {}
+
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(color: AppColors.surfaceAlt, borderRadius: BorderRadius.circular(8)),
-      child: Text(formatted, style: AppTextStyles.bodyMd(color: AppColors.textPrimary)),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceAlt,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Text(
+          formatted,
+          style: AppTextStyles.bodyMd(color: AppColors.textPrimary),
+        ),
+      ),
     );
   }
 }
