@@ -1,4 +1,4 @@
-&#65279;# Kinetic ERP - PowerShell Scripts Package
+# Kinetic ERP - PowerShell Scripts Package
 # ملفات النشر والنسخ الاحتياطية والعدّاء
 
 ## 📦 محتويات الحزمة:
