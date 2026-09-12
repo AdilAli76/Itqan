@@ -37,6 +37,8 @@ final posOpenProductsProvider = FutureProvider.autoDispose<List<Map<String, dyna
 });
 
 const _touchModeKey = 'kinetic_pos_touch_mode';
+const _showProductsGridKey = 'kinetic_pos_show_products_grid';
+const _numpadSizeKey = 'kinetic_pos_numpad_size'; // 'compact', 'normal', 'large'
 
 /// وضع اللمس — إعداد **للجهاز** لا للمنظمة.
 ///
@@ -104,4 +106,62 @@ class PosTouchModeNotifier extends StateNotifier<bool> {
 
 final posTouchModeProvider = StateNotifierProvider<PosTouchModeNotifier, bool>(
   (ref) => PosTouchModeNotifier(),
+);
+
+/// إظهار/إخفاء شبكة المنتجات في نقطة البيع.
+class PosShowProductsGridNotifier extends StateNotifier<bool> {
+  PosShowProductsGridNotifier() : super(true) {
+    _load();
+  }
+
+  static const _storage = FlutterSecureStorage();
+
+  Future<void> _load() async {
+    try {
+      final stored = await _storage.read(key: _showProductsGridKey);
+      if (stored != null) state = stored == 'true';
+    } catch (_) {}
+  }
+
+  Future<void> toggle() async {
+    state = !state;
+    try {
+      await _storage.write(key: _showProductsGridKey, value: state.toString());
+    } catch (_) {}
+  }
+}
+
+final posShowProductsGridProvider = StateNotifierProvider<PosShowProductsGridNotifier, bool>(
+  (ref) => PosShowProductsGridNotifier(),
+);
+
+/// حجم لوحة المفاتيح الرقمية: 'compact', 'normal', 'large'.
+class PosNumpadSizeNotifier extends StateNotifier<String> {
+  PosNumpadSizeNotifier() : super('normal') {
+    _load();
+  }
+
+  static const _storage = FlutterSecureStorage();
+
+  Future<void> _load() async {
+    try {
+      final stored = await _storage.read(key: _numpadSizeKey);
+      if (stored != null && ['compact', 'normal', 'large'].contains(stored)) {
+        state = stored;
+      }
+    } catch (_) {}
+  }
+
+  Future<void> setSize(String size) async {
+    if (['compact', 'normal', 'large'].contains(size)) {
+      state = size;
+      try {
+        await _storage.write(key: _numpadSizeKey, value: size);
+      } catch (_) {}
+    }
+  }
+}
+
+final posNumpadSizeProvider = StateNotifierProvider<PosNumpadSizeNotifier, String>(
+  (ref) => PosNumpadSizeNotifier(),
 );

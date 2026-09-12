@@ -5,8 +5,8 @@ import '../../core/theme/app_text_styles.dart';
 
 /// حجم اللوحة — الفرق ليس جمالياً: 44 نقطة هو أصغر هدف لمس موصى به من
 /// إرشادات Material، و64 هو المريح لكاشير يعمل بإصبعه ساعات على شاشة لمس
-/// دون النظر إلى يده. النسخة المدمجة للفأرة على سطح المكتب.
-enum KeypadSize { compact, large }
+/// دون النظر إلى يده. xlarge هو حجم ضخم جداً للشاشات الكبيرة والأصابع الثقيلة.
+enum KeypadSize { compact, large, xlarge }
 
 /// لوحة أرقام على شكل آلة حاسبة — بديل حقل الإدخال في نقطة البيع.
 ///
@@ -149,8 +149,27 @@ class _NumericKeypadState extends State<NumericKeypad> {
     return KeyEventResult.ignored;
   }
 
-  double get _keyHeight => widget.size == KeypadSize.large ? 64 : 44;
-  double get _gap => widget.size == KeypadSize.large ? 10 : 8;
+  double get _keyHeight {
+    switch (widget.size) {
+      case KeypadSize.xlarge:
+        return 88;
+      case KeypadSize.large:
+        return 64;
+      case KeypadSize.compact:
+        return 44;
+    }
+  }
+
+  double get _gap {
+    switch (widget.size) {
+      case KeypadSize.xlarge:
+        return 14;
+      case KeypadSize.large:
+        return 10;
+      case KeypadSize.compact:
+        return 8;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -214,20 +233,27 @@ class _KeypadKey extends StatelessWidget {
   Widget build(BuildContext context) {
     final isClear = label == 'clear';
     final isDelete = label == 'del';
-    final big = size == KeypadSize.large;
+    final isXlarge = size == KeypadSize.xlarge;
+    final isLarge = size == KeypadSize.large;
 
     Widget child;
     if (isDelete) {
-      child = Icon(Icons.backspace_outlined, size: big ? 28 : 20);
-    } else if (isClear) {
-      child = Text('مسح', style: big ? AppTextStyles.headlineMd() : AppTextStyles.bodyMd());
-    } else {
-      child = Text(
-        label,
-        style: big
-            ? AppTextStyles.displayLg(color: AppColors.textPrimary)
-            : AppTextStyles.headlineMd(color: AppColors.textPrimary),
+      child = Icon(
+        Icons.backspace_outlined,
+        size: isXlarge ? 40 : (isLarge ? 28 : 20),
       );
+    } else if (isClear) {
+      final style = isXlarge
+          ? AppTextStyles.displayMd()
+          : (isLarge ? AppTextStyles.headlineMd() : AppTextStyles.bodyMd());
+      child = Text('مسح', style: style);
+    } else {
+      final style = isXlarge
+          ? const TextStyle(fontSize: 48, fontWeight: FontWeight.bold, color: AppColors.textPrimary)
+          : (isLarge
+              ? AppTextStyles.displayLg(color: AppColors.textPrimary)
+              : AppTextStyles.headlineMd(color: AppColors.textPrimary));
+      child = Text(label, style: style);
     }
 
     return SizedBox(

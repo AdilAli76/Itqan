@@ -895,6 +895,7 @@ class _PosScreenState extends ConsumerState<PosScreen> {
   Widget _scannerBuilder(BuildContext context, bool touch) {
     final resultsAsync = ref.watch(posProductResultsProvider);
     final allowOpen = ref.watch(posAllowOpenProductProvider).valueOrNull ?? false;
+    final showProductsGrid = ref.watch(posShowProductsGridProvider);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -956,63 +957,65 @@ class _PosScreenState extends ConsumerState<PosScreen> {
             ),
           ),
         ],
-        const SizedBox(height: 16),
-        resultsAsync.when(
-          loading: () => const Padding(
-            padding: EdgeInsets.all(24),
-            child: Center(child: CircularProgressIndicator()),
-          ),
-          error: (err, _) => Padding(
-            padding: const EdgeInsets.all(16),
-            child: Text('تعذّر البحث عن الأصناف', style: AppTextStyles.bodyMd(color: AppColors.danger)),
-          ),
-          data: (products) {
-            if (products.isEmpty) {
-              // لا شيء مكتوب: تُعرض أصناف الوصول السريع بدل نصّ إرشادي.
-              // شاشة فارغة أمام كاشير بلا قارئ باركود تعني عملاً متوقّفاً،
-              // لا إرشاداً.
-              if (_searchController.text.trim().isEmpty) {
-                return _buildQuickPicks(touch);
-              }
-              return Padding(
-                padding: const EdgeInsets.all(16),
-                child: Text('لا توجد نتائج', style: AppTextStyles.bodyMd()),
-              );
-            }
-            // بطاقات أقل في الصف وأكبر حجماً في وضع اللمس — الهدف أن تُنقَر
-            // بالإصبع دون تكبير ولا دقة، لا أن تُعرَض أكبر عدد ممكن.
-            // ارتفاع خلية ثابت (mainAxisExtent) لا نسبة أبعاد.
-            //
-            // childAspectRatio يجعل ارتفاع الخلية تابعاً لعرضها: على شاشة
-            // أضيق تضيق الخلية فيقصر ارتفاعها، بينما محتواها ثابت (أيقونة
-            // واسم سطرين وسعر وحالة مخزون) — فيفيض. وهذا ما كان يحدث على
-            // الجهاز اللوحي والهاتف بأربعين بكسل.
-            //
-            // ارتفاع المحتوى لا علاقة له بالعرض أصلاً، فتثبيته يُنهي تبعية
-            // لم يكن لها مبرّر.
-            return GridView(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              // عرض أقصى للبطاقة بدل عدد أعمدة ثابت: ثلاثة أعمدة على هاتف
-              // بعرض 420 تعطي بطاقة بـ120 بكسل — يضيق فيها اسم الصنف إلى
-              // سطرين فيفيض المحتوى، وهي ضيّقة على الإصبع أصلاً. اشتقاق
-              // العدد من عرض أدنى معقول يجعل الشاشة الضيقة تعرض عمودين
-              // مقروءين بدل ثلاثة مزدحمة، والعريضة تعرض أكثر تلقائياً.
-              gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
-                maxCrossAxisExtent: touch ? 280 : 220,
-                mainAxisSpacing: 12,
-                crossAxisSpacing: 12,
-                // ارتفاع ثابت لا نسبة أبعاد: ارتفاع المحتوى (أيقونة واسم
-                // سطرين وسعر وحالة) لا علاقة له بعرض البطاقة، وربطه به
-                // يجعل كل تضييق للشاشة فيضاً.
-                mainAxisExtent: touch ? 200 : 176,
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            Expanded(child: Container()),
+            Tooltip(
+              message: showProductsGrid ? 'إخفاء المنتجات' : 'عرض المنتجات',
+              child: TextButton.icon(
+                onPressed: () => ref.read(posShowProductsGridProvider.notifier).toggle(),
+                icon: Icon(showProductsGrid ? Icons.visibility : Icons.visibility_off, size: 18),
+                label: Text(showProductsGrid ? 'المنتجات' : 'مخفي'),
               ),
-              children: products
-                  .map((p) => _ProductTile(product: p, touch: touch, onTap: () => _addProduct(p)))
-                  .toList(),
-            );
-          },
+            ),
+          ],
         ),
+        const SizedBox(height: 16),
+        if (showProductsGrid)
+          resultsAsync.when(
+            loading: () => const Padding(
+              padding: EdgeInsets.all(24),
+              child: Center(child: CircularProgressIndicator()),
+            ),
+            error: (err, _) => Padding(
+              padding: const EdgeInsets.all(16),
+              child: Text('تعذّر البحث عن الأصناف', style: AppTextStyles.bodyMd(color: AppColors.danger)),
+            ),
+            data: (products) {
+              if (products.isEmpty) {
+                if (_searchController.text.trim().isEmpty) {
+                  return _buildQuickPicks(touch);
+                }
+                return Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Text('لا توجد نتائج', style: AppTextStyles.bodyMd()),
+                );
+              }
+              return GridView(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
+                  maxCrossAxisExtent: touch ? 280 : 220,
+                  mainAxisSpacing: 12,
+                  crossAxisSpacing: 12,
+                  mainAxisExtent: touch ? 200 : 176,
+                ),
+                children: products
+                    .map((p) => _ProductTile(product: p, touch: touch, onTap: () => _addProduct(p)))
+                    .toList(),
+              );
+            },
+          )
+        else
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Text(
+              'شبكة المنتجات مخفية',
+              style: AppTextStyles.bodyMd(color: AppColors.textMuted),
+              textAlign: TextAlign.center,
+            ),
+          ),
       ],
     );
   }
@@ -1151,6 +1154,10 @@ class _PosScreenState extends ConsumerState<PosScreen> {
     if (_cart.isEmpty) return const SizedBox.shrink();
 
     final open = _padOpenOverride ?? touch;
+    final numpadSizeStr = ref.watch(posNumpadSizeProvider);
+    final numpadSize = numpadSizeStr == 'xlarge'
+        ? KeypadSize.xlarge
+        : (numpadSizeStr == 'normal' ? KeypadSize.large : KeypadSize.compact);
 
     if (!open) {
       return SizedBox(
@@ -1235,14 +1242,35 @@ class _PosScreenState extends ConsumerState<PosScreen> {
             NumericKeypad(
               value: _padValue,
               onChanged: (v) => setState(() => _padValue = v),
-              size: touch ? KeypadSize.large : KeypadSize.compact,
+              size: touch ? numpadSize : KeypadSize.compact,
               allowDecimal: true,
               decimalPlaces: 3,
               onSubmit: _applyPadQuantity,
-              // التركيز يبقى لحقل المسح: قارئ الباركود جهاز لوحة مفاتيح،
-              // ولو خطفت اللوحة التركيز لتوقف المسح عن العمل.
               autofocus: false,
             ),
+            if (touch)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Row(
+                  children: [
+                    Text('حجم اللوحة:', style: AppTextStyles.labelMd()),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: SegmentedButton<String>(
+                        segments: const [
+                          ButtonSegment(value: 'compact', label: Text('صغير')),
+                          ButtonSegment(value: 'normal', label: Text('عادي')),
+                          ButtonSegment(value: 'xlarge', label: Text('كبير')),
+                        ],
+                        selected: {numpadSizeStr},
+                        onSelectionChanged: (v) {
+                          ref.read(posNumpadSizeProvider.notifier).setSize(v.first);
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+              ),
           ],
           const SizedBox(height: 10),
           SizedBox(
