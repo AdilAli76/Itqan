@@ -1,0 +1,112 @@
+name: Deploy to Staging
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'lib/**'
+      - 'pubspec.yaml'
+      - 'pubspec.lock'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment environment'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+          - staging
+          - production
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Build web
+        run: flutter build web --release
+
+      - name: Package build
+        shell: bash
+        run: |
+          mkdir -p build/output
+          cd build/web && zip -r ../output/kinetic-web.zip . && cd ../..
+          echo "✅ Web build packaged"
+          ls -lh build/output/
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: staging-build
+          path: build/output/kinetic-web.zip
+          retention-days: 7
+
+      - name: Deploy to Staging Server
+        env:
+          DEPLOY_HOST: ${{ secrets.STAGING_SERVER_HOST }}
+          DEPLOY_USER: ${{ secrets.STAGING_SERVER_USER }}
+          DEPLOY_PASS: ${{ secrets.STAGING_SERVER_PASS }}
+          DEPLOY_PATH: C:\kinetic\staging-erp
+        run: |
+          # Create deployment script
+          cat > deploy.ps1 << 'EOF'
+          param(
+              [string]$ZipPath = "build/output/kinetic-web.zip",
+              [string]$DeployPath = "${{ env.DEPLOY_PATH }}"
+          )
+
+          Write-Host "🚀 Deploying to Staging..."
+
+          # Backup current
+          $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+          $backupPath = "$DeployPath.backup.$timestamp"
+
+          if (Test-Path $DeployPath) {
+              Write-Host "💾 Backing up: $backupPath"
+              Copy-Item $DeployPath $backupPath -Recurse -Force
+          }
+
+          # Clean and deploy
+          Write-Host "📦 Deploying new build..."
+          Remove-Item "$DeployPath\*" -Recurse -Force -ErrorAction SilentlyContinue
+          Expand-Archive $ZipPath -DestinationPath $DeployPath -Force
+
+          # Restart IIS
+          Write-Host "♻️ Restarting IIS AppPool..."
+          Restart-WebAppPool -Name "KineticStaging" -ErrorAction SilentlyContinue
+
+          Write-Host "✅ Deployment complete!"
+          Write-Host "📍 Staging URL: http://staging-erp.droob-albayan.ly:8080/"
+          EOF
+
+          # Run deployment
+          powershell -NoProfile -ExecutionPolicy Bypass -File deploy.ps1
+        shell: bash
+
+      - name: Notify Deployment
+        if: success()
+        run: |
+          echo "✅ Deployment to Staging Successful"
+          echo "📍 URL: http://staging-erp.droob-albayan.ly:8080/"
+          echo "📦 Build: ${{ github.sha }}"
+          echo "⏰ Time: $(date)"
+
+      - name: Notify Failure
+        if: failure()
+        run: |
+          echo "❌ Deployment to Staging Failed"
+          echo "📍 Check GitHub Actions for details"
+          exit 1
