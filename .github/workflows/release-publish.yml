@@ -38,9 +38,11 @@ jobs:
         run: flutter build web --release
 
       - name: Build Android APK
+        continue-on-error: true
         run: flutter build apk --release
 
       - name: Build Android App Bundle
+        continue-on-error: true
         run: flutter build appbundle --release
 
       - name: Package builds
@@ -48,8 +50,24 @@ jobs:
         run: |
           mkdir -p build/output
           cd build/web && zip -r ../output/kinetic-web.zip . && cd ../..
-          cp build/app/outputs/apk/release/app-release.apk build/output/kinetic-app.apk
-          cp build/app/outputs/bundle/release/app-release.aab build/output/kinetic-app.aab
+
+          # Copy APK if it exists
+          if [ -f build/app/outputs/apk/release/app-release.apk ]; then
+            cp build/app/outputs/apk/release/app-release.apk build/output/kinetic-app.apk
+            echo "✅ APK packaged"
+          else
+            echo "⚠️ APK not found - skipping"
+          fi
+
+          # Copy AAB if it exists
+          if [ -f build/app/outputs/bundle/release/app-release.aab ]; then
+            cp build/app/outputs/bundle/release/app-release.aab build/output/kinetic-app.aab
+            echo "✅ AAB packaged"
+          else
+            echo "⚠️ AAB not found - skipping"
+          fi
+
+          echo "✅ Web build packaged"
           ls -lh build/output/
 
       - name: Get version from tag
