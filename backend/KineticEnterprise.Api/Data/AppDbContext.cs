@@ -14,6 +14,7 @@ public class AppDbContext : DbContext
     public DbSet<AppUser> AppUsers => Set<AppUser>();
     public DbSet<LoginHistory> LoginHistories => Set<LoginHistory>();
     public DbSet<UserPasskey> UserPasskeys => Set<UserPasskey>();
+    public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
     public DbSet<Product> Products => Set<Product>();
     public DbSet<Supplier> Suppliers => Set<Supplier>();
     public DbSet<Sponsor> Sponsors => Set<Sponsor>();
@@ -87,6 +88,8 @@ public class AppDbContext : DbContext
         modelBuilder.Entity<AppUser>().ToTable("app_users");
         modelBuilder.Entity<LoginHistory>().ToTable("login_history");
         modelBuilder.Entity<UserPasskey>().ToTable("user_passkeys");
+        modelBuilder.Entity<RefreshToken>().ToTable("refresh_tokens");
+        modelBuilder.Entity<RefreshToken>().HasIndex(rt => rt.UserId);
         // معرّف الاعتماد فريدٌ عالمياً بحكم المواصفة، والفهرس الفريد يمنع
         // تسجيل المفتاح نفسه لحسابين — فمن سجّله عند الأوّل يبقى صاحبه.
         modelBuilder.Entity<UserPasskey>().HasIndex(p => p.CredentialId).IsUnique();

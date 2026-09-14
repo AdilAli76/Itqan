@@ -2701,3 +2701,27 @@ public class CompanyInfo
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
     public Guid? UpdatedBy { get; set; }
 }
+
+/// <summary>
+/// توكن التجديد — يُحفظ بدل بناؤه من مطالبات التوكن القديم.
+///
+/// عندما ينتهي Access Token، الواجهة تطلب واحداً جديداً باستخدام Refresh Token.
+/// يبقى صالحاً أطول من Access Token (مثل 90 يوم)، فحتى لو مرّ وقتٌ طويل،
+/// طالما Refresh Token لم ينتهِ، يمكن تجديد الجلسة.
+/// </summary>
+public class RefreshToken
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid UserId { get; set; }
+    public string Token { get; set; } = "";
+    public DateTime ExpiresAt { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime? RevokedAt { get; set; }
+
+    public bool IsExpired => DateTime.UtcNow > ExpiresAt;
+    public bool IsRevoked => RevokedAt.HasValue;
+    public bool IsValid => !IsExpired && !IsRevoked;
+}
+
+/// <summary>طلب تجديد الجلسة — يحتوي على Refresh Token</summary>
+public record RefreshTokenRequest(string RefreshToken);

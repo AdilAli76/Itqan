@@ -39,7 +39,9 @@ public record LoginResponse(
     bool MustChangePassword,
     /// مالك المنصة أو مهندس توزيع — يُعاد توجيهه فور الدخول إلى /platform
     /// بدلاً من لوحة المنظمة العادية.
-    bool IsPlatformAdmin);
+    bool IsPlatformAdmin,
+    /// توكن التجديد — يُحفظ في الواجهة وينُقل عند انتهاء Access Token
+    string RefreshToken);
 
 [ApiController]
 [Route("api/auth")]
@@ -87,7 +89,10 @@ public class AuthController : ControllerBase
             return Unauthorized(new { message = "بيانات الدخول غير صحيحة" });
         }
 
-        var token = IssueToken(user, request.RememberMe);
+        // إصدار Access Token قصير (8 ساعات) + Refresh Token طويل (90 يوم)
+        var accessToken = IssueAccessToken(user);
+        var refreshTokenEntity = await IssueRefreshToken(user);
+        var refreshToken = refreshTokenEntity.Token;
 
         // لوح الفرع يُقرأ بلا سياق عزل: المستخدم لم يُصادَق بعد في هذه
         // اللحظة، وقراءة صفّ فرعه هو بمعرّفه المعلوم لا تُسرّب شيئاً.
@@ -99,14 +104,15 @@ public class AuthController : ControllerBase
             : "default";
 
         return new LoginResponse(
-            token,
+            accessToken,
             user.Role,
             user.OrganizationId,
             user.BranchId,
             user.FullName,
             branchPalette,
             user.MustChangePassword,
-            user.IsPlatformAdmin
+            user.IsPlatformAdmin,
+            refreshToken
         );
 
     }
@@ -250,6 +256,63 @@ public class AuthController : ControllerBase
     /// مرّة تُضاف دعوى، فيفقد من جدّد جلسته دعوىً يملكها من دخل للتوّ —
     /// ويظهر ذلك كصلاحيةٍ تختفي بعد ثماني ساعات بلا سبب.</para>
     /// </summary>
+    /// <summary>
+    /// يُصدر Access Token قصير (8 ساعات) — لا يعتمد على Refresh Token
+    /// </summary>
+    private string IssueAccessToken(AppUser user)
+    {
+        var claims = new List<Claim>
+        {
+            new(JwtRegisteredClaimNames.Sub, user.Id.ToString()),
+            new("organization_id", user.OrganizationId.ToString()),
+            new(ClaimTypes.Role, user.Role),
+            new(ClaimTypes.Name, user.FullName),
+            new("role", user.Role),
+        };
+        if (user.BranchId.HasValue)
+        {
+            claims.Add(new Claim("branch_id", user.BranchId.Value.ToString()));
+        }
+        if (user.IsPlatformAdmin)
+        {
+            claims.Add(new Claim("is_platform_admin", "True"));
+            claims.Add(new Claim("platform_role", user.PlatformRole ?? PlatformRoles.Owner));
+            if (!string.IsNullOrWhiteSpace(user.ResellerLicense))
+            {
+                claims.Add(new Claim("reseller_license", user.ResellerLicense));
+            }
+        }
+
+        var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_config["Jwt:Key"]!));
+        var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
+        var jwt = new JwtSecurityToken(
+            issuer: _config["Jwt:Issuer"],
+            audience: _config["Jwt:Audience"],
+            claims: claims,
+            expires: DateTime.UtcNow.AddHours(8),
+            signingCredentials: creds
+        );
+        return new JwtSecurityTokenHandler().WriteToken(jwt);
+    }
+
+    /// <summary>
+    /// يُنشئ ويحفظ Refresh Token طويل (90 يوم) في قاعدة البيانات
+    /// </summary>
+    private async Task<RefreshToken> IssueRefreshToken(AppUser user)
+    {
+        var refreshToken = new RefreshToken
+        {
+            UserId = user.Id,
+            Token = Guid.NewGuid().ToString("N") + Guid.NewGuid().ToString("N"),
+            ExpiresAt = DateTime.UtcNow.AddDays(90),
+        };
+
+        _db.RefreshTokens.Add(refreshToken);
+        await _db.SaveChangesAsync();
+
+        return refreshToken;
+    }
+
     private string IssueToken(AppUser user, bool remember = false)
     {
         var claims = new List<Claim>
@@ -329,10 +392,48 @@ public class AuthController : ControllerBase
     /// دعاوى القديم كان يُخلّد صلاحيةً سُحبت وحساباً عُطِّل — فيمدّد الموقوفُ
     /// جلسته إلى الأبد بضغطة كل ثماني ساعات.</para>
     /// </summary>
-    [Microsoft.AspNetCore.Authorization.Authorize]
+    /// <summary>
+    /// تجديد الجلسة باستخدام Refresh Token
+    ///
+    /// الواجهة تحتفظ بـ Refresh Token وتُرسله في الـ header أو body عند انتهاء Access Token
+    /// بدلاً من الاعتماد على Access Token القديم الذي انتهت صلاحيته.
+    /// </summary>
     [HttpPost("refresh")]
-    public async Task<ActionResult<LoginResponse>> Refresh()
+    public async Task<ActionResult<LoginResponse>> Refresh([FromBody] RefreshTokenRequest request)
     {
+        // البحث عن Refresh Token في قاعدة البيانات
+        var refreshToken = await _db.RefreshTokens
+            .FirstOrDefaultAsync(rt => rt.Token == request.RefreshToken && !rt.IsRevoked && rt.ExpiresAt > DateTime.UtcNow);
+
+        if (refreshToken is null)
+            return Unauthorized(new { message = "Refresh token غير صالح أو انتهت صلاحيته" });
+
+        var user = await _db.AppUsers.FirstOrDefaultAsync(u => u.Id == refreshToken.UserId && u.IsActive);
+        if (user is null)
+            return Unauthorized();
+
+        var branchPalette = user.BranchId.HasValue
+            ? await _db.Branches
+                .Where(b => b.Id == user.BranchId.Value)
+                .Select(b => b.ThemePalette)
+                .FirstOrDefaultAsync() ?? "default"
+            : "default";
+
+        // إصدار Access Token جديد
+        var accessToken = IssueAccessToken(user);
+
+        return new LoginResponse(
+            accessToken,
+            user.Role, user.OrganizationId, user.BranchId,
+            user.FullName, branchPalette, user.MustChangePassword, user.IsPlatformAdmin,
+            request.RefreshToken);
+    }
+
+    [Microsoft.AspNetCore.Authorization.Authorize]
+    [HttpPost("refresh-legacy")]
+    public async Task<ActionResult<LoginResponse>> RefreshLegacy()
+    {
+        // الإصدار القديم — للعودة للخلف التوافقية
         var raw = User.FindFirstValue(JwtRegisteredClaimNames.Sub)
                   ?? User.FindFirstValue(ClaimTypes.NameIdentifier);
         if (!Guid.TryParse(raw, out var userId)) return Unauthorized();
@@ -347,10 +448,12 @@ public class AuthController : ControllerBase
                 .FirstOrDefaultAsync() ?? "default"
             : "default";
 
+        var refreshTokenEntity = await IssueRefreshToken(user);
         return new LoginResponse(
-            IssueToken(user, User.FindFirstValue("remember") == "1"),
+            IssueAccessToken(user),
             user.Role, user.OrganizationId, user.BranchId,
-            user.FullName, branchPalette, user.MustChangePassword, user.IsPlatformAdmin);
+            user.FullName, branchPalette, user.MustChangePassword, user.IsPlatformAdmin,
+            refreshTokenEntity.Token);
     }
 
 }
