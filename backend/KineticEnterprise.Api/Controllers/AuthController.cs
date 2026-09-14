@@ -456,4 +456,32 @@ public class AuthController : ControllerBase
             refreshTokenEntity.Token);
     }
 
+    /// <summary>
+    /// تسجيل الخروج — إلغاء Refresh Token لإنهاء الجلسة نهائياً
+    ///
+    /// الواجهة تُرسل الـ Refresh Token، والخادم يُسجّل RevokedAt لمنع إعادة استخدامه.
+    /// </summary>
+    [HttpPost("logout")]
+    public async Task<IActionResult> Logout([FromBody] LogoutRequest request)
+    {
+        try
+        {
+            if (string.IsNullOrEmpty(request.RefreshToken))
+                return BadRequest(new { message = "Refresh token مطلوب" });
+
+            var token = await _db.RefreshTokens.FirstOrDefaultAsync(rt => rt.Token == request.RefreshToken);
+            if (token != null)
+            {
+                token.RevokedAt = DateTime.UtcNow;
+                await _db.SaveChangesAsync();
+            }
+
+            return Ok(new { message = "تم تسجيل الخروج بنجاح" });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = $"خطأ: {ex.Message}" });
+        }
+    }
+
 }

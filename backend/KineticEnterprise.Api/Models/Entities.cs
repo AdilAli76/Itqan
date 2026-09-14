@@ -2725,3 +2725,6 @@ public class RefreshToken
 
 /// <summary>طلب تجديد الجلسة — يحتوي على Refresh Token</summary>
 public record RefreshTokenRequest(string RefreshToken);
+
+/// <summary>طلب تسجيل الخروج — إلغاء Refresh Token</summary>
+public record LogoutRequest(string RefreshToken);

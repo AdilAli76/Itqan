@@ -61,14 +61,23 @@ class _CustomerFormDialogState extends ConsumerState<CustomerFormDialog> {
   Future<void> _loadCategories() async {
     try {
       final response = await ApiClient.instance.dio.get('/customer-categories');
-      setState(() {
-        _categories = (response.data as List).cast<Map<String, dynamic>>();
-      });
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('خطأ تحميل الفئات: $e')));
+      if (!mounted) return;
+
+      final data = response.data;
+      if (data is List) {
+        setState(() {
+          _categories = data.cast<Map<String, dynamic>>();
+        });
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('صيغة الفئات غير صحيحة')),
+        );
       }
+    } on Exception catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('فشل تحميل الفئات: $e')),
+      );
     }
   }
 
