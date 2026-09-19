@@ -53,13 +53,11 @@ public static class PlatformOwnerBootstrap
         }
 
         var options = new DbContextOptionsBuilder<AppDbContext>()
-            .UseSqlServer(connectionString)
+            .UseSqlite(connectionString)
             .UseSnakeCaseNamingConvention()
             .Options;
 
         await using var db = new AppDbContext(options);
-        var connection = db.Database.GetDbConnection();
-        await connection.OpenAsync();
 
         // المنظمة تُختار عبر حساب قائم فيها: organizations محمي بسياسة أمان
         // تحجب كل الصفوف قبل ضبط SESSION_CONTEXT، وapp_users غير محمي.
@@ -74,12 +72,6 @@ public static class PlatformOwnerBootstrap
         }
 
         var orgId = reference.OrganizationId;
-        await using (var cmd = connection.CreateCommand())
-        {
-            cmd.CommandText = "EXEC sp_set_session_context @key=N'organization_id', @value=@orgId;";
-            cmd.Parameters.Add(new SqlParameter("@orgId", orgId));
-            await cmd.ExecuteNonQueryAsync();
-        }
 
         var branches = await db.Branches.Where(b => b.IsActive).OrderBy(b => b.Name).ToListAsync();
         if (branches.Count == 0)
@@ -197,7 +189,7 @@ public static class PlatformOwnerBootstrap
         }
 
         var options = new DbContextOptionsBuilder<AppDbContext>()
-            .UseSqlServer(connectionString)
+            .UseSqlite(connectionString)
             .UseSnakeCaseNamingConvention()
             .Options;
 
@@ -297,7 +289,7 @@ public static class PlatformOwnerBootstrap
         }
 
         var options = new DbContextOptionsBuilder<AppDbContext>()
-            .UseSqlServer(connectionString)
+            .UseSqlite(connectionString)
             .UseSnakeCaseNamingConvention()
             .Options;
 

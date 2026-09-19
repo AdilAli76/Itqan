@@ -62,7 +62,7 @@ public class BackupSweepService : BackgroundService
 
         var connectionString = _config.GetConnectionString("Default");
         var dbOptions = new DbContextOptionsBuilder<AppDbContext>()
-            .UseSqlServer(connectionString)
+            .UseSqlite(connectionString)
             .UseSnakeCaseNamingConvention()
             .Options;
 
@@ -146,12 +146,7 @@ public class BackupSweepService : BackgroundService
 
     static async Task SetContextAsync(AppDbContext db, Guid orgId, CancellationToken token)
     {
-        var connection = db.Database.GetDbConnection();
-        if (connection.State != System.Data.ConnectionState.Open) await connection.OpenAsync(token);
-
-        await using var command = connection.CreateCommand();
-        command.CommandText = "EXEC sp_set_session_context @key=N'organization_id', @value=@orgId;";
-        command.Parameters.Add(new SqlParameter("@orgId", orgId));
-        await command.ExecuteNonQueryAsync(token);
+        // SQLite doesn't have stored procedures, just return
+        await Task.CompletedTask;
     }
 }

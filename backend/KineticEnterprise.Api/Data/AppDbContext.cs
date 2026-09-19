@@ -77,6 +77,17 @@ public class AppDbContext : DbContext
     public DbSet<InventoryAlert> InventoryAlerts => Set<InventoryAlert>();
     public DbSet<InventoryValuation> InventoryValuations => Set<InventoryValuation>();
 
+    // ── v2.0.5: نظام المرتبات والفئات والمشتريات المرنة ─────────────
+    public DbSet<CustomerCategoryField> CustomerCategoryFields => Set<CustomerCategoryField>();
+    public DbSet<CustomerAccount> CustomerAccounts => Set<CustomerAccount>();
+    public DbSet<SalaryRecord> SalaryRecords => Set<SalaryRecord>();
+    public DbSet<SalaryDetail> SalaryDetails => Set<SalaryDetail>();
+    public DbSet<CustomerLoan> CustomerLoans => Set<CustomerLoan>();
+    public DbSet<LoanPayment> LoanPayments => Set<LoanPayment>();
+    public DbSet<PurchaseType> PurchaseTypes => Set<PurchaseType>();
+    public DbSet<DirectDelivery> DirectDeliveries => Set<DirectDelivery>();
+    public DbSet<SystemSetting> SystemSettings => Set<SystemSetting>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         // أسماء الجداول تطابق DATABASE_SCHEMA_SQLSERVER.sql بالضبط حتى لا
@@ -169,6 +180,40 @@ public class AppDbContext : DbContext
         modelBuilder.Entity<InventoryAlertRule>().ToTable("inventory_alert_rules");
         modelBuilder.Entity<InventoryAlert>().ToTable("inventory_alerts");
         modelBuilder.Entity<InventoryValuation>().ToTable("inventory_valuations");
+
+        // ── v2.0.5: المرتبات والفئات والمشتريات المرنة ─────────────────
+        modelBuilder.Entity<CustomerCategoryField>().ToTable("customer_category_fields");
+        modelBuilder.Entity<CustomerCategoryField>().HasIndex(f => f.CategoryId);
+
+        modelBuilder.Entity<CustomerAccount>().ToTable("customer_accounts");
+        modelBuilder.Entity<CustomerAccount>().HasIndex(a => a.CustomerId);
+        modelBuilder.Entity<CustomerAccount>().HasIndex(a => a.AccountLedgerId);
+
+        modelBuilder.Entity<SalaryRecord>().ToTable("salary_records");
+        modelBuilder.Entity<SalaryRecord>().HasIndex(s => s.CustomerAccountId);
+        modelBuilder.Entity<SalaryRecord>().HasIndex(s => new { s.Year, s.Month });
+
+        modelBuilder.Entity<SalaryDetail>().ToTable("salary_details");
+        modelBuilder.Entity<SalaryDetail>().HasIndex(d => d.SalaryRecordId);
+
+        modelBuilder.Entity<CustomerLoan>().ToTable("customer_loans");
+        modelBuilder.Entity<CustomerLoan>().HasIndex(l => l.CustomerAccountId);
+        modelBuilder.Entity<CustomerLoan>().HasIndex(l => l.Status);
+
+        modelBuilder.Entity<LoanPayment>().ToTable("loan_payments");
+        modelBuilder.Entity<LoanPayment>().HasIndex(p => p.CustomerLoanId);
+        modelBuilder.Entity<LoanPayment>().HasIndex(p => p.PaymentDate);
+
+        modelBuilder.Entity<PurchaseType>().ToTable("purchase_types");
+        modelBuilder.Entity<PurchaseType>().HasIndex(t => t.OrganizationId);
+
+        modelBuilder.Entity<DirectDelivery>().ToTable("direct_deliveries");
+        modelBuilder.Entity<DirectDelivery>().HasIndex(d => d.PurchaseId);
+        modelBuilder.Entity<DirectDelivery>().HasIndex(d => d.CustomerId);
+        modelBuilder.Entity<DirectDelivery>().HasIndex(d => d.DeliveryStatus);
+
+        modelBuilder.Entity<SystemSetting>().ToTable("system_settings");
+        modelBuilder.Entity<SystemSetting>().HasIndex(s => new { s.OrganizationId, s.SettingKey }).IsUnique();
 
         modelBuilder.Entity<Invoice>()
             .HasMany(i => i.Items)

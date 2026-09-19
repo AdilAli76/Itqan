@@ -137,7 +137,7 @@ public class ExpirySweepService : BackgroundService
     private async Task RunOnceAsync(CancellationToken token)
     {
         var options = new DbContextOptionsBuilder<AppDbContext>()
-            .UseSqlServer(_config.GetConnectionString("Default"))
+            .UseSqlite(_config.GetConnectionString("Default"))
             .UseSnakeCaseNamingConvention()
             .Options;
 
@@ -153,18 +153,6 @@ public class ExpirySweepService : BackgroundService
         var today = DateTime.UtcNow;
         foreach (var orgId in orgIds)
         {
-            var connection = db.Database.GetDbConnection();
-            if (connection.State != System.Data.ConnectionState.Open)
-            {
-                await connection.OpenAsync(token);
-            }
-            await using (var cmd = connection.CreateCommand())
-            {
-                cmd.CommandText = "EXEC sp_set_session_context @key=N'organization_id', @value=@orgId;";
-                cmd.Parameters.Add(new SqlParameter("@orgId", orgId));
-                await cmd.ExecuteNonQueryAsync(token);
-            }
-
             var result = await ExpirySweeper.SweepAsync(db, today);
             if (result.NotificationsCreated > 0)
             {

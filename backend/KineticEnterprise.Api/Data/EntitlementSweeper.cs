@@ -108,7 +108,7 @@ public class EntitlementSweepService : BackgroundService
     {
         var connectionString = _config.GetConnectionString("Default");
         var options = new DbContextOptionsBuilder<AppDbContext>()
-            .UseSqlServer(connectionString)
+            .UseSqlite(connectionString)
             .UseSnakeCaseNamingConvention()
             .Options;
 
@@ -124,18 +124,6 @@ public class EntitlementSweepService : BackgroundService
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
         foreach (var orgId in orgIds)
         {
-            var connection = db.Database.GetDbConnection();
-            if (connection.State != System.Data.ConnectionState.Open)
-            {
-                await connection.OpenAsync(token);
-            }
-            await using (var cmd = connection.CreateCommand())
-            {
-                cmd.CommandText = "EXEC sp_set_session_context @key=N'organization_id', @value=@orgId;";
-                cmd.Parameters.Add(new SqlParameter("@orgId", orgId));
-                await cmd.ExecuteNonQueryAsync(token);
-            }
-
             var result = await EntitlementSweeper.SweepAsync(db, today);
             if (result.CustomersAffected > 0)
             {

@@ -6,6 +6,7 @@ class AppConstants {
   /// «احتياطي» لأن كل منظمة تعرض اسمها هي (White-Labeling، راجع
   /// branding_provider). وهذا ما يظهر قبل تحميل هويّتها وفي شاشة الدخول.
   static const String appNameFallback = 'إتقان ERP';
+  static const String appVersion = '2.0.9';
   static const Locale locale = Locale('ar');
   static const TextDirection direction = TextDirection.rtl;
 

@@ -4,6 +4,8 @@ import '../../core/shell/open_tabs_provider.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text_styles.dart';
 import '../../core/theme/branding_provider.dart';
+import 'package:go_router/go_router.dart';
+import '../../core/shell/shell_scope.dart';
 import 'nav_items.dart';
 import 'animations.dart';
 import '../../core/auth/permissions.dart';
@@ -36,7 +38,11 @@ class _AppSidebarState extends ConsumerState<AppSidebar> {
   // يقرآن الدعوى كلٌّ على حدة، فيفترقان أوّل مرّة يتغيّر أحدهما.
 
   void _open(NavItem item) {
-    ref.read(openTabsProvider.notifier).open(item.route, title: item.label, icon: item.icon);
+    if (ShellScope.isActive(context)) {
+      ref.read(openTabsProvider.notifier).open(item.route, title: item.label, icon: item.icon);
+    } else {
+      context.go('/app?route=${Uri.encodeComponent(item.route)}');
+    }
     // على الموبايل هذا الشريط داخل Drawer قابل للسحب — يجب إغلاقه يدوياً
     // لأن فتح تبويب لم يعد يُغيّر المسار (go_router) فلا يُغلَق تلقائياً.
     Scaffold.maybeOf(context)?.closeDrawer();
@@ -153,6 +159,35 @@ class _AppSidebarState extends ConsumerState<AppSidebar> {
                   ),
                 );
               }).toList(),
+            ),
+          ),
+          Divider(height: 1, color: AppColors.border),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: Material(
+              color: Colors.transparent,
+              child: InkWell(
+                borderRadius: BorderRadius.circular(8),
+                onTap: () async {
+                  await performLogout(ref);
+                  if (context.mounted) context.go('/login');
+                },
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  child: Row(
+                    children: [
+                      Icon(Icons.logout, size: 20, color: AppColors.danger),
+                      const SizedBox(width: 12),
+                      Text(
+                        'تسجيل الخروج',
+                        style: AppTextStyles.bodyMd(color: AppColors.danger).copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
             ),
           ),
         ],

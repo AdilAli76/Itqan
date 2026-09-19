@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/shell/open_tabs_provider.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text_styles.dart';
+import '../../core/constants/app_constants.dart';
 import 'nav_items.dart';
 import '../../core/auth/permissions.dart';
 import '../../core/theme/branding_provider.dart';
@@ -117,6 +118,15 @@ class _AppNavbarState extends ConsumerState<AppNavbar> {
                     ),
                   );
                 }).toList(),
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: Center(
+              child: Text(
+                'v${AppConstants.appVersion}',
+                style: AppTextStyles.caption(color: AppColors.textSecondary),
               ),
             ),
           ),

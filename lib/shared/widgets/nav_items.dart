@@ -51,8 +51,21 @@ const _salesGroup = NavGroup(
   items: [
     NavItem(Icons.point_of_sale_outlined, 'نقطة البيع', '/pos'),
     NavItem(Icons.receipt_long_outlined, 'الفواتير', '/invoices'),
-    NavItem(Icons.people_outline, 'العملاء', '/customers'),
     NavItem(Icons.credit_card_outlined, 'بطاقات المحفظة', '/wallet-cards'),
+  ],
+);
+
+const _customersGroup = NavGroup(
+  icon: Icons.people_outline,
+  label: 'إدارة العملاء',
+  items: [
+    NavItem(Icons.dashboard_customize_outlined, 'لوحة تحكم العملاء', '/customer-dashboard'),
+    NavItem(Icons.people_outline, 'دليل العملاء', '/customers'),
+    NavItem(Icons.account_balance_wallet_outlined, 'حسابات العملاء', '/customer-accounts'),
+    NavItem(Icons.category_outlined, 'فئات العملاء', '/customer-categories'),
+    NavItem(Icons.credit_card_outlined, 'إدارة الأرصدة والبطاقات', '/card-balance-management'),
+    NavItem(Icons.trending_down_outlined, 'السلف والقروض', '/customer-loans'),
+    NavItem(Icons.payments_outlined, 'المرتبات', '/salary-management'),
   ],
 );
 
@@ -107,6 +120,19 @@ const _systemGroup = NavGroup(
   ],
 );
 
+const _testingGroup = NavGroup(
+  icon: Icons.bug_report_outlined,
+  label: 'اختبار',
+  items: [
+    NavItem(Icons.storage_outlined, 'اختبار LocalDatabase', '/test/local-db'),
+    NavItem(Icons.receipt_long_outlined, 'اختبار الفواتير', '/test/invoices'),
+    NavItem(Icons.sync_outlined, 'اختبار Sync Queue', '/test/sync-queue'),
+    NavItem(Icons.cloud_outlined, 'اختبار الاتصال', '/test/connectivity'),
+    NavItem(Icons.settings_outlined, 'اختبار محرك المزامنة', '/test/sync-engine'),
+    NavItem(Icons.language_outlined, 'اختبار الخادم', '/test/backend'),
+  ],
+);
+
 /// إصدارٌ على شكل المحفظة — بطاقات وأرصدة بلا بضاعة.
 ///
 /// <para>يقابل `Editions.IsWalletShaped` في الخادم. والقائمتان تُقرآن معاً:
@@ -132,6 +158,7 @@ List<NavGroup> navGroupsFor({
 }) => [
       NavGroup(icon: _dashboard.icon, label: _dashboard.label, items: const [_dashboard]),
       _salesGroup,
+      _customersGroup,
       // إصدار المحفظة بلا بضاعة أصلاً: لا كتالوج ولا مخزون ولا مشتريات ولا
       // جرد ولا ملصقات باركود. إخفاء المجموعة هنا لا في كل واجهة على حدة —
       // ثلاثة مواضع تعرض هذه القائمة (الشريط الجانبي والعلوي ولوحة
@@ -216,27 +243,16 @@ List<NavGroup> navGroupsFor({
           if (isPlatformAdmin) kMedicineReferenceItem,
         ],
       ),
-      // ── المنصّة ────────────────────────────────────────────────────
-      //
-      // مجموعةٌ مستقلّة لا بنودٌ مدسوسة في آخر «النظام» بجانب الإعدادات.
-      // مالك المنصّة **مشغّلٌ لا مستأجر**: عملُه إدارة عملاء واشتراكات، لا
-      // ضبط إعدادات منظمةٍ واحدة. وخلطُهما جعله يدخل كأي مدير فيجد ثلاثة
-      // بنودٍ زائدة، ولا يرى حال أعماله كمشغّل في أي شاشة.
-      // بندٌ واحد لا ثلاثة.
-      //
-      // كانت «لوحة المنصّة» و«الشركات المشترَكة» و«إنشاء منظمة جديدة» ثلاثة
-      // بنودٍ متجاورة لعملٍ واحد، فيُفتح ثلاث تبويبات لمتابعة عميلٍ واحد:
-      // يرى رقمه في اللوحة، ويبحث عنه في القائمة، ويُنشئ التالي من ثالثة.
-      // وصارت اللوحة صفحةً بتبويبات — راجع [PlatformDashboardScreen].
-      //
-      // والمساران القديمان يبقيان مسجَّلين في [screenRegistry]: روابط
-      // محفوظة ولوحة أوامر تشير إليهما، وحذفهما يُنتج شاشة بيضاء لمن حفظ
-      // الرابط.
+      // ── إدارة المنصّة (SaaS) ──────────────────────────────────────────
       if (isPlatformAdmin)
         const NavGroup(
           icon: Icons.hub_outlined,
-          label: 'المنصّة',
-          items: [kPlatformItem],
+          label: 'إدارة المنصّة',
+          items: [
+            kPlatformItem,
+            kPlatformManageItem,
+            kPlatformNavItem,
+          ],
         ),
     ];
 

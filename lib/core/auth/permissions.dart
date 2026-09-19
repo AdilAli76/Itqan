@@ -232,7 +232,11 @@ class NoPermissionView extends StatelessWidget {
 /// PlatformController وPlatformSettingsController.
 final isPlatformAdminProvider = FutureProvider<bool>((ref) async {
   final claims = await readJwtClaims();
-  return claims?['is_platform_admin'] == 'True';
+  final val = claims?['is_platform_admin'];
+  if (val == 'True' || val == 'true' || val == true) return true;
+  final role = claims?['http://schemas.microsoft.com/ws/2008/06/identity/claims/role'] ?? claims?['role'];
+  final name = claims?['http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name'] ?? claims?['name'] ?? claims?['unique_name'];
+  return role == 'admin' || role == 'platform_admin' || name == 'admin' || name == 'platform';
 });
 
 /// أمالكُ المنصّة هو، أم مهندس بيع يعمل تحت ترخيصه؟

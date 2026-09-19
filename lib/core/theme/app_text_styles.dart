@@ -34,11 +34,17 @@ class AppTextStyles {
   static TextStyle headlineMd({Color? color}) =>
       _base(size: 20, weight: FontWeight.w600, height: 1.3, color: color ?? AppColors.textPrimary);
 
+  static TextStyle headlineSm({Color? color}) =>
+      _base(size: 18, weight: FontWeight.w600, height: 1.3, color: color ?? AppColors.textPrimary);
+
   static TextStyle bodyLg({Color? color}) =>
       _base(size: 16, weight: FontWeight.w400, height: 1.5, color: color ?? AppColors.textPrimary);
 
   static TextStyle bodyMd({Color? color}) =>
       _base(size: 14, weight: FontWeight.w400, height: 1.45, color: color ?? AppColors.textSecondary);
+
+  static TextStyle bodySm({Color? color}) =>
+      _base(size: 13, weight: FontWeight.w400, height: 1.4, color: color ?? AppColors.textSecondary);
 
   static TextStyle labelMd({Color? color}) =>
       _base(size: 13, weight: FontWeight.w500, height: 1.3, color: color ?? AppColors.textSecondary);

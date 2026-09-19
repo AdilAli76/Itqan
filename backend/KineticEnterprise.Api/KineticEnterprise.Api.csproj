@@ -9,6 +9,7 @@
 
   <ItemGroup>
     <PackageReference Include="ClosedXML" Version="0.105.1" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="8.0.7" />
     <!-- قراءة بنى WebAuthn الثنائية (attestationObject ومفاتيح COSE).
          حزمةٌ مُدارة من المنصّة نفسها بلا اعتمادية أصلية — راجع WebAuthn.cs. -->
     <PackageReference Include="System.Formats.Cbor" Version="8.0.0" />

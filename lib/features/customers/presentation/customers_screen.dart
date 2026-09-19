@@ -113,6 +113,7 @@ class _CustomersScreenState extends ConsumerState<CustomersScreen> {
               columns: const [
                 AppColumn('الاسم'),
                 AppColumn('الهاتف'),
+                AppColumn('الفئة'),
                 AppColumn('البريد الإلكتروني'),
                 AppColumn('باركود البطاقة'),
                 AppColumn('رصيد المحفظة'),
@@ -136,9 +137,24 @@ class _CustomersScreenState extends ConsumerState<CustomersScreen> {
 
   List<Widget> _customerRow(BuildContext context, Map<String, dynamic> c) {
     final balance = (c['walletBalance'] as num?)?.toDouble() ?? 0;
+    final categoryName = c['categoryName'] as String?;
     return [
       Text(c['fullName'] as String? ?? ''),
       Text(c['phone'] as String? ?? '-'),
+      categoryName != null && categoryName.isNotEmpty
+          ? Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: AppColors.infoBg,
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(color: AppColors.info.withOpacity(0.3)),
+              ),
+              child: Text(
+                categoryName,
+                style: AppTextStyles.caption(color: AppColors.info).copyWith(fontWeight: FontWeight.w600),
+              ),
+            )
+          : const Text('-'),
       Text(c['email'] as String? ?? '-'),
       Text(c['cardBarcode'] as String? ?? '-'),
       CurrencyBadge(amount: balance),
@@ -446,6 +462,11 @@ class _CustomerFormDialogState extends State<_CustomerFormDialog> {
                   },
                 ),
                 const SizedBox(height: 12),
+                _CategoryPicker(
+                  value: _categoryId,
+                  onChanged: (v) => setState(() => _categoryId = v),
+                ),
+                const SizedBox(height: 12),
                 TextFormField(
                   controller: _cardController,
                   decoration: const InputDecoration(
@@ -516,11 +537,6 @@ class _CustomerFormDialogState extends State<_CustomerFormDialog> {
                   _SponsorPicker(
                     value: _sponsorId,
                     onChanged: (v) => setState(() => _sponsorId = v),
-                  ),
-                  const SizedBox(height: 12),
-                  _CategoryPicker(
-                    value: _categoryId,
-                    onChanged: (v) => setState(() => _categoryId = v),
                   ),
                   const SizedBox(height: 12),
                   TextFormField(
@@ -651,7 +667,7 @@ class _CustomerFormDialogState extends State<_CustomerFormDialog> {
       'entitlementCeiling': _isEntitlement ? double.parse(_ceilingController.text) : 0,
       'entitlementExpiresOn':
           _isEntitlement && _expiresOn != null ? DateFormat('yyyy-MM-dd').format(_expiresOn!) : null,
-      'categoryId': _isEntitlement ? _categoryId : null,
+      'categoryId': _categoryId,
       // فارغٌ ← null لا صفر: الصفر إيقافٌ صريح للمرتَّب، وإرسالُه بدل
       // الفارغ يوقف مرتَّب كل من فُتحت بطاقته وحُفظت بلا تغيير.
       'entitlementOverride': _isEntitlement && _overrideController.text.trim().isNotEmpty

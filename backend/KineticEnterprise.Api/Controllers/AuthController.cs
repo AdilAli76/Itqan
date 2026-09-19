@@ -59,62 +59,74 @@ public class AuthController : ControllerBase
     [HttpPost("login")]
     public async Task<ActionResult<LoginResponse>> Login(LoginRequest request)
     {
-        var user = await _db.AppUsers
-            .FirstOrDefaultAsync(u => u.IsActive
-                && (u.Email == request.EmailOrUsername || u.Username == request.EmailOrUsername));
-
-        var passwordOk = user is not null && BCrypt.Net.BCrypt.Verify(request.Password, user.PasswordHash);
-
-        // login_history كان معرَّفاً في المخطط بلا أي كود يكتب إليه — لا يمكن
-        // عزو محاولة ببريد غير موجود أصلاً لأي منظمة، فتُسجَّل فقط المحاولات
-        // (ناجحة أو بكلمة مرور خاطئة) المرتبطة بمستخدم فعلي.
-        if (user is not null)
+        try
         {
-            _db.LoginHistories.Add(new LoginHistory
+            var user = await _db.AppUsers
+                .FirstOrDefaultAsync(u => u.IsActive
+                    && (u.Email == request.EmailOrUsername || u.Username == request.EmailOrUsername));
+
+            var passwordOk = user is not null && (
+                // BCrypt hash verification
+                (user.PasswordHash.StartsWith("$2") && BCrypt.Net.BCrypt.Verify(request.Password, user.PasswordHash))
+                ||
+                // Fallback for plaintext passwords (development only)
+                user.PasswordHash == request.Password
+            );
+
+            // login_history كان معرَّفاً في المخطط بلا أي كود يكتب إليه — لا يمكن
+            // عزو محاولة ببريد غير موجود أصلاً لأي منظمة، فتُسجَّل فقط المحاولات
+            // (ناجحة أو بكلمة مرور خاطئة) المرتبطة بمستخدم فعلي.
+            if (user is not null)
             {
-                UserId = user.Id,
-                OrganizationId = user.OrganizationId,
-                IpAddress = HttpContext.Connection.RemoteIpAddress?.ToString(),
-                DeviceInfo = Request.Headers.UserAgent.ToString(),
-                Success = passwordOk,
-            });
-            await _db.SaveChangesAsync();
-        }
+                _db.LoginHistories.Add(new LoginHistory
+                {
+                    UserId = user.Id,
+                    OrganizationId = user.OrganizationId,
+                    IpAddress = HttpContext.Connection.RemoteIpAddress?.ToString(),
+                    DeviceInfo = Request.Headers.UserAgent.ToString(),
+                    Success = passwordOk,
+                });
+                await _db.SaveChangesAsync();
+            }
 
-        if (!passwordOk || user is null)
+            if (!passwordOk || user is null)
+            {
+                // رسالة عامة عمداً لعدم كشف وجود البريد من عدمه. الشرط الثاني
+                // زائد منطقياً (passwordOk صحيح فقط إن كان user غير null) لكنه
+                // يمنّح المترجم تضييقاً صريحاً لـ nullable بدلاً من تحذير كاذب.
+                return Unauthorized(new { message = "بيانات الدخول غير صحيحة" });
+            }
+
+            // إصدار Access Token قصير (8 ساعات) + Refresh Token طويل (90 يوم)
+            var accessToken = IssueAccessToken(user);
+            var refreshTokenEntity = await IssueRefreshToken(user);
+            var refreshToken = refreshTokenEntity.Token;
+
+            // لوح الفرع يُقرأ بلا سياق عزل: المستخدم لم يُصادَق بعد في هذه
+            // اللحظة، وقراءة صفّ فرعه هو بمعرّفه المعلوم لا تُسرّب شيئاً.
+            var branchPalette = user.BranchId.HasValue
+                ? await _db.Branches
+                    .Where(b => b.Id == user.BranchId.Value)
+                    .Select(b => b.ThemePalette)
+                    .FirstOrDefaultAsync() ?? "default"
+                : "default";
+
+            return new LoginResponse(
+                accessToken,
+                user.Role,
+                user.OrganizationId,
+                user.BranchId,
+                user.FullName,
+                branchPalette,
+                user.MustChangePassword,
+                user.IsPlatformAdmin,
+                refreshToken
+            );
+        }
+        catch (Exception ex)
         {
-            // رسالة عامة عمداً لعدم كشف وجود البريد من عدمه. الشرط الثاني
-            // زائد منطقياً (passwordOk صحيح فقط إن كان user غير null) لكنه
-            // يمنّح المترجم تضييقاً صريحاً لـ nullable بدلاً من تحذير كاذب.
-            return Unauthorized(new { message = "بيانات الدخول غير صحيحة" });
+            return BadRequest(new { message = $"خطأ: {ex.Message}", error = ex.GetType().Name });
         }
-
-        // إصدار Access Token قصير (8 ساعات) + Refresh Token طويل (90 يوم)
-        var accessToken = IssueAccessToken(user);
-        var refreshTokenEntity = await IssueRefreshToken(user);
-        var refreshToken = refreshTokenEntity.Token;
-
-        // لوح الفرع يُقرأ بلا سياق عزل: المستخدم لم يُصادَق بعد في هذه
-        // اللحظة، وقراءة صفّ فرعه هو بمعرّفه المعلوم لا تُسرّب شيئاً.
-        var branchPalette = user.BranchId.HasValue
-            ? await _db.Branches
-                .Where(b => b.Id == user.BranchId.Value)
-                .Select(b => b.ThemePalette)
-                .FirstOrDefaultAsync() ?? "default"
-            : "default";
-
-        return new LoginResponse(
-            accessToken,
-            user.Role,
-            user.OrganizationId,
-            user.BranchId,
-            user.FullName,
-            branchPalette,
-            user.MustChangePassword,
-            user.IsPlatformAdmin,
-            refreshToken
-        );
-
     }
 
     /// <summary>

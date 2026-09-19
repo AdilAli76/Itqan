@@ -660,6 +660,64 @@ namespace KineticEnterprise.Api.Migrations
                     b.ToTable("customers", (string)null);
                 });
 
+            modelBuilder.Entity("KineticEnterprise.Api.Models.CustomerAccount", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("id");
+
+                    b.Property<Guid?>("AccountLedgerId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("account_ledger_id");
+
+                    b.Property<string>("AccountNumber")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)")
+                        .HasColumnName("account_number");
+
+                    b.Property<decimal>("Balance")
+                        .HasColumnType("decimal(18,2)")
+                        .HasColumnName("balance");
+
+                    b.Property<string>("BankName")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)")
+                        .HasColumnName("bank_name");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("created_at");
+
+                    b.Property<decimal>("CreditLimit")
+                        .HasColumnType("decimal(18,2)")
+                        .HasColumnName("credit_limit");
+
+                    b.Property<Guid>("CustomerId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("customer_id");
+
+                    b.Property<string>("IBAN")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)")
+                        .HasColumnName("iban");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit")
+                        .HasColumnName("is_active");
+
+                    b.HasKey("Id")
+                        .HasName("pk_customer_accounts");
+
+                    b.HasIndex("AccountLedgerId")
+                        .HasDatabaseName("ix_customer_accounts_account_ledger_id");
+
+                    b.HasIndex("CustomerId")
+                        .HasDatabaseName("ix_customer_accounts_customer_id");
+
+                    b.ToTable("customer_accounts", (string)null);
+                });
+
             modelBuilder.Entity("KineticEnterprise.Api.Models.CustomerAdvance", b =>
                 {
                     b.Property<Guid>("Id")
@@ -792,6 +850,130 @@ namespace KineticEnterprise.Api.Migrations
                     b.ToTable("customer_categories", (string)null);
                 });
 
+            modelBuilder.Entity("KineticEnterprise.Api.Models.CustomerCategoryField", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("CategoryId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("category_id");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("created_at");
+
+                    b.Property<int>("DisplayOrder")
+                        .HasColumnType("int")
+                        .HasColumnName("display_order");
+
+                    b.Property<string>("FieldLabel")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)")
+                        .HasColumnName("field_label");
+
+                    b.Property<string>("FieldName")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)")
+                        .HasColumnName("field_name");
+
+                    b.Property<string>("FieldType")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)")
+                        .HasColumnName("field_type");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit")
+                        .HasColumnName("is_active");
+
+                    b.Property<bool>("IsRequired")
+                        .HasColumnType("bit")
+                        .HasColumnName("is_required");
+
+                    b.HasKey("Id")
+                        .HasName("pk_customer_category_fields");
+
+                    b.HasIndex("CategoryId")
+                        .HasDatabaseName("ix_customer_category_fields_category_id");
+
+                    b.ToTable("customer_category_fields", (string)null);
+                });
+
+            modelBuilder.Entity("KineticEnterprise.Api.Models.CustomerLoan", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("id");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid>("CustomerAccountId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("customer_account_id");
+
+                    b.Property<DateTime>("DueDate")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("due_date");
+
+                    b.Property<int>("InstallmentCount")
+                        .HasColumnType("int")
+                        .HasColumnName("installment_count");
+
+                    b.Property<decimal>("InterestRate")
+                        .HasColumnType("decimal(18,2)")
+                        .HasColumnName("interest_rate");
+
+                    b.Property<decimal>("LoanAmount")
+                        .HasColumnType("decimal(18,2)")
+                        .HasColumnName("loan_amount");
+
+                    b.Property<DateTime>("LoanDate")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("loan_date");
+
+                    b.Property<decimal>("MonthlyInstallment")
+                        .HasColumnType("decimal(18,2)")
+                        .HasColumnName("monthly_installment");
+
+                    b.Property<string>("Notes")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)")
+                        .HasColumnName("notes");
+
+                    b.Property<decimal>("PaidAmount")
+                        .HasColumnType("decimal(18,2)")
+                        .HasColumnName("paid_amount");
+
+                    b.Property<int>("PaidInstallments")
+                        .HasColumnType("int")
+                        .HasColumnName("paid_installments");
+
+                    b.Property<decimal>("RemainingAmount")
+                        .HasColumnType("decimal(18,2)")
+                        .HasColumnName("remaining_amount");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(450)")
+                        .HasColumnName("status");
+
+                    b.HasKey("Id")
+                        .HasName("pk_customer_loans");
+
+                    b.HasIndex("CustomerAccountId")
+                        .HasDatabaseName("ix_customer_loans_customer_account_id");
+
+                    b.HasIndex("Status")
+                        .HasDatabaseName("ix_customer_loans_status");
+
+                    b.ToTable("customer_loans", (string)null);
+                });
+
             modelBuilder.Entity("KineticEnterprise.Api.Models.CustomerPinAttempt", b =>
                 {
                     b.Property<Guid>("Id")
@@ -918,6 +1100,66 @@ namespace KineticEnterprise.Api.Migrations
                         .HasName("pk_debt_reminders");
 
                     b.ToTable("debt_reminders", (string)null);
+                });
+
+            modelBuilder.Entity("KineticEnterprise.Api.Models.DirectDelivery", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("id");
+
+                    b.Property<decimal>("Amount")
+                        .HasColumnType("decimal(18,2)")
+                        .HasColumnName("amount");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid?>("CustomerId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("customer_id");
+
+                    b.Property<DateTime>("DeliveryDate")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("delivery_date");
+
+                    b.Property<string>("DeliveryStatus")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(450)")
+                        .HasColumnName("delivery_status");
+
+                    b.Property<string>("Notes")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)")
+                        .HasColumnName("notes");
+
+                    b.Property<Guid>("PurchaseId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("purchase_id");
+
+                    b.Property<DateTime?>("ReceivedDate")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("received_date");
+
+                    b.Property<Guid?>("SupplierId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("supplier_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_direct_deliveries");
+
+                    b.HasIndex("CustomerId")
+                        .HasDatabaseName("ix_direct_deliveries_customer_id");
+
+                    b.HasIndex("DeliveryStatus")
+                        .HasDatabaseName("ix_direct_deliveries_delivery_status");
+
+                    b.HasIndex("PurchaseId")
+                        .HasDatabaseName("ix_direct_deliveries_purchase_id");
+
+                    b.ToTable("direct_deliveries", (string)null);
                 });
 
             modelBuilder.Entity("KineticEnterprise.Api.Models.Expense", b =>
@@ -1319,6 +1561,10 @@ namespace KineticEnterprise.Api.Migrations
                         .HasColumnType("uniqueidentifier")
                         .HasColumnName("customer_id");
 
+                    b.Property<Guid?>("DirectDeliveryId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("direct_delivery_id");
+
                     b.Property<decimal>("DiscountAmount")
                         .HasColumnType("decimal(18,2)")
                         .HasColumnName("discount_amount");
@@ -1381,6 +1627,9 @@ namespace KineticEnterprise.Api.Migrations
                         .IsUnique()
                         .HasDatabaseName("ix_invoices_client_request_id")
                         .HasFilter("[client_request_id] IS NOT NULL");
+
+                    b.HasIndex("DirectDeliveryId")
+                        .HasDatabaseName("ix_invoices_direct_delivery_id");
 
                     b.ToTable("invoices", (string)null);
                 });
@@ -1667,6 +1916,52 @@ namespace KineticEnterprise.Api.Migrations
                         .HasName("pk_licenses");
 
                     b.ToTable("licenses", (string)null);
+                });
+
+            modelBuilder.Entity("KineticEnterprise.Api.Models.LoanPayment", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("id");
+
+                    b.Property<decimal>("Amount")
+                        .HasColumnType("decimal(18,2)")
+                        .HasColumnName("amount");
+
+                    b.Property<Guid>("CustomerLoanId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("customer_loan_id");
+
+                    b.Property<string>("Notes")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)")
+                        .HasColumnName("notes");
+
+                    b.Property<DateTime>("PaymentDate")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("payment_date");
+
+                    b.Property<string>("PaymentMethod")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)")
+                        .HasColumnName("payment_method");
+
+                    b.Property<string>("Reference")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)")
+                        .HasColumnName("reference");
+
+                    b.HasKey("Id")
+                        .HasName("pk_loan_payments");
+
+                    b.HasIndex("CustomerLoanId")
+                        .HasDatabaseName("ix_loan_payments_customer_loan_id");
+
+                    b.HasIndex("PaymentDate")
+                        .HasDatabaseName("ix_loan_payments_payment_date");
+
+                    b.ToTable("loan_payments", (string)null);
                 });
 
             modelBuilder.Entity("KineticEnterprise.Api.Models.LoginHistory", b =>
@@ -2641,6 +2936,53 @@ namespace KineticEnterprise.Api.Migrations
                     b.ToTable("purchase_receipt_items", (string)null);
                 });
 
+            modelBuilder.Entity("KineticEnterprise.Api.Models.PurchaseType", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("id");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)")
+                        .HasColumnName("description");
+
+                    b.Property<int>("DisplayOrder")
+                        .HasColumnType("int")
+                        .HasColumnName("display_order");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit")
+                        .HasColumnName("is_active");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("organization_id");
+
+                    b.Property<string>("Route")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)")
+                        .HasColumnName("route");
+
+                    b.Property<string>("TypeName")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)")
+                        .HasColumnName("type_name");
+
+                    b.HasKey("Id")
+                        .HasName("pk_purchase_types");
+
+                    b.HasIndex("OrganizationId")
+                        .HasDatabaseName("ix_purchase_types_organization_id");
+
+                    b.ToTable("purchase_types", (string)null);
+                });
+
             modelBuilder.Entity("KineticEnterprise.Api.Models.RefreshToken", b =>
                 {
                     b.Property<Guid>("Id")
@@ -2696,6 +3038,109 @@ namespace KineticEnterprise.Api.Migrations
                         .HasName("pk_role_permissions");
 
                     b.ToTable("role_permissions", (string)null);
+                });
+
+            modelBuilder.Entity("KineticEnterprise.Api.Models.SalaryDetail", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("id");
+
+                    b.Property<decimal>("Amount")
+                        .HasColumnType("decimal(18,2)")
+                        .HasColumnName("amount");
+
+                    b.Property<string>("ItemName")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)")
+                        .HasColumnName("item_name");
+
+                    b.Property<string>("ItemType")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)")
+                        .HasColumnName("item_type");
+
+                    b.Property<Guid>("SalaryRecordId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("salary_record_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_salary_details");
+
+                    b.HasIndex("SalaryRecordId")
+                        .HasDatabaseName("ix_salary_details_salary_record_id");
+
+                    b.ToTable("salary_details", (string)null);
+                });
+
+            modelBuilder.Entity("KineticEnterprise.Api.Models.SalaryRecord", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("id");
+
+                    b.Property<decimal>("Allowances")
+                        .HasColumnType("decimal(18,2)")
+                        .HasColumnName("allowances");
+
+                    b.Property<decimal>("BasicSalary")
+                        .HasColumnType("decimal(18,2)")
+                        .HasColumnName("basic_salary");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid>("CustomerAccountId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("customer_account_id");
+
+                    b.Property<decimal>("Deductions")
+                        .HasColumnType("decimal(18,2)")
+                        .HasColumnName("deductions");
+
+                    b.Property<int>("Month")
+                        .HasColumnType("int")
+                        .HasColumnName("month");
+
+                    b.Property<decimal>("NetSalary")
+                        .HasColumnType("decimal(18,2)")
+                        .HasColumnName("net_salary");
+
+                    b.Property<string>("Notes")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)")
+                        .HasColumnName("notes");
+
+                    b.Property<decimal>("PaidAmount")
+                        .HasColumnType("decimal(18,2)")
+                        .HasColumnName("paid_amount");
+
+                    b.Property<DateTime>("PaymentDate")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("payment_date");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)")
+                        .HasColumnName("status");
+
+                    b.Property<int>("Year")
+                        .HasColumnType("int")
+                        .HasColumnName("year");
+
+                    b.HasKey("Id")
+                        .HasName("pk_salary_records");
+
+                    b.HasIndex("CustomerAccountId")
+                        .HasDatabaseName("ix_salary_records_customer_account_id");
+
+                    b.HasIndex("Year", "Month")
+                        .HasDatabaseName("ix_salary_records_year_month");
+
+                    b.ToTable("salary_records", (string)null);
                 });
 
             modelBuilder.Entity("KineticEnterprise.Api.Models.Sponsor", b =>
@@ -3299,6 +3744,51 @@ namespace KineticEnterprise.Api.Migrations
                     b.ToTable("supplier_payments", (string)null);
                 });
 
+            modelBuilder.Entity("KineticEnterprise.Api.Models.SystemSetting", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("id");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)")
+                        .HasColumnName("description");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("organization_id");
+
+                    b.Property<string>("SettingKey")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(450)")
+                        .HasColumnName("setting_key");
+
+                    b.Property<string>("SettingType")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)")
+                        .HasColumnName("setting_type");
+
+                    b.Property<string>("SettingValue")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)")
+                        .HasColumnName("setting_value");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id")
+                        .HasName("pk_system_settings");
+
+                    b.HasIndex("OrganizationId", "SettingKey")
+                        .IsUnique()
+                        .HasDatabaseName("ix_system_settings_organization_id_setting_key");
+
+                    b.ToTable("system_settings", (string)null);
+                });
+
             modelBuilder.Entity("KineticEnterprise.Api.Models.UserPasskey", b =>
                 {
                     b.Property<Guid>("Id")
@@ -3428,6 +3918,42 @@ namespace KineticEnterprise.Api.Migrations
                     b.Navigation("Batch");
                 });
 
+            modelBuilder.Entity("KineticEnterprise.Api.Models.CustomerAccount", b =>
+                {
+                    b.HasOne("KineticEnterprise.Api.Models.AppUser", "Customer")
+                        .WithMany()
+                        .HasForeignKey("CustomerId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_customer_accounts_app_users_customer_id");
+
+                    b.Navigation("Customer");
+                });
+
+            modelBuilder.Entity("KineticEnterprise.Api.Models.CustomerCategoryField", b =>
+                {
+                    b.HasOne("KineticEnterprise.Api.Models.CustomerCategory", "Category")
+                        .WithMany()
+                        .HasForeignKey("CategoryId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_customer_category_fields_customer_categories_category_id");
+
+                    b.Navigation("Category");
+                });
+
+            modelBuilder.Entity("KineticEnterprise.Api.Models.CustomerLoan", b =>
+                {
+                    b.HasOne("KineticEnterprise.Api.Models.CustomerAccount", "CustomerAccount")
+                        .WithMany("Loans")
+                        .HasForeignKey("CustomerAccountId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_customer_loans_customer_accounts_customer_account_id");
+
+                    b.Navigation("CustomerAccount");
+                });
+
             modelBuilder.Entity("KineticEnterprise.Api.Models.InventoryAlert", b =>
                 {
                     b.HasOne("KineticEnterprise.Api.Models.Product", "Product")
@@ -3458,6 +3984,14 @@ namespace KineticEnterprise.Api.Migrations
                         .HasConstraintName("fk_inventory_valuations_products_product_id");
 
                     b.Navigation("Product");
+                });
+
+            modelBuilder.Entity("KineticEnterprise.Api.Models.Invoice", b =>
+                {
+                    b.HasOne("KineticEnterprise.Api.Models.DirectDelivery", null)
+                        .WithMany("Invoices")
+                        .HasForeignKey("DirectDeliveryId")
+                        .HasConstraintName("fk_invoices_direct_deliveries_direct_delivery_id");
                 });
 
             modelBuilder.Entity("KineticEnterprise.Api.Models.InvoiceItem", b =>
@@ -3498,6 +4032,18 @@ namespace KineticEnterprise.Api.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
                         .HasConstraintName("fk_journal_entry_lines_journal_entries_journal_entry_id");
+                });
+
+            modelBuilder.Entity("KineticEnterprise.Api.Models.LoanPayment", b =>
+                {
+                    b.HasOne("KineticEnterprise.Api.Models.CustomerLoan", "CustomerLoan")
+                        .WithMany("Payments")
+                        .HasForeignKey("CustomerLoanId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_loan_payments_customer_loans_customer_loan_id");
+
+                    b.Navigation("CustomerLoan");
                 });
 
             modelBuilder.Entity("KineticEnterprise.Api.Models.ProductBatch", b =>
@@ -3551,6 +4097,42 @@ namespace KineticEnterprise.Api.Migrations
                         .HasConstraintName("fk_purchase_receipt_items_purchase_receipts_purchase_receipt_id");
                 });
 
+            modelBuilder.Entity("KineticEnterprise.Api.Models.PurchaseType", b =>
+                {
+                    b.HasOne("KineticEnterprise.Api.Models.Organization", "Organization")
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_purchase_types_organizations_organization_id");
+
+                    b.Navigation("Organization");
+                });
+
+            modelBuilder.Entity("KineticEnterprise.Api.Models.SalaryDetail", b =>
+                {
+                    b.HasOne("KineticEnterprise.Api.Models.SalaryRecord", "SalaryRecord")
+                        .WithMany("Details")
+                        .HasForeignKey("SalaryRecordId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_salary_details_salary_records_salary_record_id");
+
+                    b.Navigation("SalaryRecord");
+                });
+
+            modelBuilder.Entity("KineticEnterprise.Api.Models.SalaryRecord", b =>
+                {
+                    b.HasOne("KineticEnterprise.Api.Models.CustomerAccount", "CustomerAccount")
+                        .WithMany("SalaryRecords")
+                        .HasForeignKey("CustomerAccountId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_salary_records_customer_accounts_customer_account_id");
+
+                    b.Navigation("CustomerAccount");
+                });
+
             modelBuilder.Entity("KineticEnterprise.Api.Models.StockCountItem", b =>
                 {
                     b.HasOne("KineticEnterprise.Api.Models.StockCount", null)
@@ -3589,6 +4171,35 @@ namespace KineticEnterprise.Api.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
                         .HasConstraintName("fk_supplier_invoice_lines_supplier_invoices_supplier_invoice_id");
+                });
+
+            modelBuilder.Entity("KineticEnterprise.Api.Models.SystemSetting", b =>
+                {
+                    b.HasOne("KineticEnterprise.Api.Models.Organization", "Organization")
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_system_settings_organizations_organization_id");
+
+                    b.Navigation("Organization");
+                });
+
+            modelBuilder.Entity("KineticEnterprise.Api.Models.CustomerAccount", b =>
+                {
+                    b.Navigation("Loans");
+
+                    b.Navigation("SalaryRecords");
+                });
+
+            modelBuilder.Entity("KineticEnterprise.Api.Models.CustomerLoan", b =>
+                {
+                    b.Navigation("Payments");
+                });
+
+            modelBuilder.Entity("KineticEnterprise.Api.Models.DirectDelivery", b =>
+                {
+                    b.Navigation("Invoices");
                 });
 
             modelBuilder.Entity("KineticEnterprise.Api.Models.Invoice", b =>
@@ -3630,6 +4241,11 @@ namespace KineticEnterprise.Api.Migrations
             modelBuilder.Entity("KineticEnterprise.Api.Models.PurchaseReceipt", b =>
                 {
                     b.Navigation("Items");
+                });
+
+            modelBuilder.Entity("KineticEnterprise.Api.Models.SalaryRecord", b =>
+                {
+                    b.Navigation("Details");
                 });
 
             modelBuilder.Entity("KineticEnterprise.Api.Models.StockCount", b =>

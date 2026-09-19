@@ -51,9 +51,9 @@ GoRouter buildAppRouter() {
       // مرادفٌ أقصر يُملى على الهاتف: «سلاش كلاينت» أسهل من «ماي داش
       // أكاونت». ويُضاف ولا يُستبدَل — رابطٌ وُزّع على العملاء لا يبطل.
       GoRoute(path: '/client', builder: (context, state) => const CustomerPortalScreen()),
-      // بوابة إدارة المنصة المستقلة (مالك المنصة ومهندسو البيع)
-      GoRoute(path: '/platform', builder: (context, state) => const PlatformDashboardScreen()),
-      GoRoute(path: '/platform-portal', builder: (context, state) => const PlatformDashboardScreen()),
+      // بوابة إدارة المنصة (تفتح داخل قشرة التطبيق لضمان عمل التبويبات والخروج والتنقل)
+      GoRoute(path: '/platform', redirect: (context, state) => '/app?route=/platform'),
+      GoRoute(path: '/platform-portal', redirect: (context, state) => '/app?route=/platform'),
       // بوابة التسجيل الذاتي في النسخة التجريبية (14 يوماً)
       GoRoute(
         path: '/trial',

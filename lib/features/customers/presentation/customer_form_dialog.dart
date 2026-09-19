@@ -113,13 +113,15 @@ class _CustomerFormDialogState extends ConsumerState<CustomerFormDialog> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('البيانات الأساسية', style: AppTextStyles.bodyLg()),
+            // ─── البيانات الأساسية ───
+            Text('البيانات الأساسية', style: AppTextStyles.headlineMd()),
             const SizedBox(height: 12),
             TextField(
               controller: _nameController,
               decoration: const InputDecoration(
                 labelText: 'الاسم الكامل *',
                 hintText: 'أحمد محمد علي',
+                prefixIcon: Icon(Icons.person),
               ),
               enabled: !_busy,
             ),
@@ -132,6 +134,7 @@ class _CustomerFormDialogState extends ConsumerState<CustomerFormDialog> {
                     decoration: const InputDecoration(
                       labelText: 'رقم الهاتف',
                       hintText: '218912345678',
+                      prefixIcon: Icon(Icons.phone),
                     ),
                     enabled: !_busy,
                   ),
@@ -143,6 +146,7 @@ class _CustomerFormDialogState extends ConsumerState<CustomerFormDialog> {
                     decoration: const InputDecoration(
                       labelText: 'البريد الإلكتروني',
                       hintText: 'email@example.com',
+                      prefixIcon: Icon(Icons.email),
                     ),
                     enabled: !_busy,
                   ),
@@ -155,18 +159,22 @@ class _CustomerFormDialogState extends ConsumerState<CustomerFormDialog> {
               decoration: const InputDecoration(
                 labelText: 'ملاحظات',
                 hintText: 'معلومات إضافية عن العميل',
+                prefixIcon: Icon(Icons.note),
               ),
               maxLines: 2,
               enabled: !_busy,
             ),
             const SizedBox(height: 24),
-            Text('الفئة والنموذج', style: AppTextStyles.headlineMd()),
+
+            // ─── الفئة والنموذج ───
+            Text('الفئة والنموذج الحسابي', style: AppTextStyles.headlineMd()),
             const SizedBox(height: 12),
             DropdownButtonFormField<String?>(
               initialValue: _selectedCategoryId,
               decoration: const InputDecoration(
                 labelText: 'فئة العميل',
                 hintText: 'اختر فئة (اختياري)',
+                prefixIcon: Icon(Icons.category),
               ),
               items: [
                 const DropdownMenuItem(value: null, child: Text('بلا فئة')),
@@ -177,20 +185,28 @@ class _CustomerFormDialogState extends ConsumerState<CustomerFormDialog> {
               ],
               onChanged: _busy ? null : (v) => setState(() => _selectedCategoryId = v),
             ),
-            const SizedBox(height: 12),
-            SegmentedButton<String>(
-              segments: const [
-                ButtonSegment(value: 'prepaid', label: Text('رصيد مدفوع')),
-                ButtonSegment(value: 'entitlement', label: Text('استحقاق')),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                Expanded(
+                  child: SegmentedButton<String>(
+                    segments: const [
+                      ButtonSegment(value: 'prepaid', label: Text('رصيد مدفوع')),
+                      ButtonSegment(value: 'entitlement', label: Text('استحقاق')),
+                    ],
+                    selected: {_accountModel},
+                    onSelectionChanged: _busy
+                        ? null
+                        : (newSelection) => setState(() => _accountModel = newSelection.first),
+                  ),
+                ),
               ],
-              selected: {_accountModel},
-              onSelectionChanged: _busy
-                  ? null
-                  : (newSelection) => setState(() => _accountModel = newSelection.first),
             ),
             const SizedBox(height: 24),
+
+            // ─── خيارات الرصيد ───
             if (_accountModel == 'prepaid') ...[
-              Text('خيارات الرصيد', style: AppTextStyles.headlineMd()),
+              Text('إعدادات الرصيد والائتمان', style: AppTextStyles.headlineMd()),
               const SizedBox(height: 12),
               Row(
                 children: [
@@ -200,6 +216,7 @@ class _CustomerFormDialogState extends ConsumerState<CustomerFormDialog> {
                       keyboardType: TextInputType.number,
                       decoration: const InputDecoration(
                         labelText: 'سقف الائتمان',
+                        prefixIcon: Icon(Icons.money),
                       ),
                       enabled: !_busy,
                     ),
@@ -211,6 +228,7 @@ class _CustomerFormDialogState extends ConsumerState<CustomerFormDialog> {
                       keyboardType: TextInputType.number,
                       decoration: const InputDecoration(
                         labelText: 'أيام السداد',
+                        prefixIcon: Icon(Icons.calendar_today),
                       ),
                       enabled: !_busy,
                     ),
@@ -218,13 +236,14 @@ class _CustomerFormDialogState extends ConsumerState<CustomerFormDialog> {
                 ],
               ),
             ] else ...[
-              Text('خيارات الاستحقاق', style: AppTextStyles.headlineMd()),
+              Text('إعدادات الاستحقاق', style: AppTextStyles.headlineMd()),
               const SizedBox(height: 12),
               TextField(
                 controller: _entitlementCeilingController,
                 keyboardType: TextInputType.number,
                 decoration: const InputDecoration(
                   labelText: 'سقف الاستحقاق',
+                  prefixIcon: Icon(Icons.trending_up),
                 ),
                 enabled: !_busy,
               ),

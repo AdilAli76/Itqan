@@ -72,8 +72,30 @@ class _AppShellState extends ConsumerState<AppShell> {
           orElse: () => kNavItems.first,
         );
         ref.read(openTabsProvider.notifier).open(item.route, title: item.label, icon: item.icon);
+      } else if (widget.initialRoute != '/dashboard') {
+        final item = kNavItems.firstWhere(
+          (i) => i.route == widget.initialRoute,
+          orElse: () => kNavItems.first,
+        );
+        ref.read(openTabsProvider.notifier).open(item.route, title: item.label, icon: item.icon);
       }
     });
+  }
+
+  @override
+  void didUpdateWidget(AppShell oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // مراقبة تغييرات initialRoute (deep linking) — عند تغيير URL مباشرة
+    if (oldWidget.initialRoute != widget.initialRoute && mounted) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        final item = kNavItems.firstWhere(
+          (i) => i.route == widget.initialRoute,
+          orElse: () => kNavItems.first,
+        );
+        ref.read(openTabsProvider.notifier).open(item.route, title: item.label, icon: item.icon);
+      });
+    }
   }
 
   @override

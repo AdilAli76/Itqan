@@ -2728,3 +2728,208 @@ public record RefreshTokenRequest(string RefreshToken);
 
 /// <summary>طلب تسجيل الخروج — إلغاء Refresh Token</summary>
 public record LogoutRequest(string RefreshToken);
+
+// ═══════════════════════════════════════════════════════════════
+// 🎯 v2.0.5: نظام المرتبات والفئات والمشتريات المرنة
+// ═══════════════════════════════════════════════════════════════
+
+/// <summary>
+/// حقول مخصصة لفئة العملاء — تسمح بإضافة حقول ديناميكية
+/// مثل: رقم الموظف، رقم الموظف الحكومي، درجة، إلخ
+/// </summary>
+public class CustomerCategoryField
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid CategoryId { get; set; }
+    public string FieldName { get; set; } = "";      // اسم الحقل
+    public string FieldLabel { get; set; } = "";     // العنوان المعروض
+    public string FieldType { get; set; } = "";      // text, number, date, select
+    public bool IsRequired { get; set; }
+    public bool IsActive { get; set; } = true;
+    public int DisplayOrder { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+
+    public CustomerCategory? Category { get; set; }
+}
+
+/// <summary>
+/// حساب العميل — ربط بين العميل والمرتبات والسلف
+/// كل عميل يمكن أن يكون له حساب للمرتبات
+/// </summary>
+public class CustomerAccount
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid CustomerId { get; set; }
+    public Guid? AccountLedgerId { get; set; }       // حساب بنكي/محاسبي
+    public string AccountNumber { get; set; } = "";
+    public string BankName { get; set; } = "";
+    public string IBAN { get; set; } = "";
+    public decimal Balance { get; set; }             // الرصيد الحالي
+    public decimal CreditLimit { get; set; }         // سقف الائتمان
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public bool IsActive { get; set; } = true;
+
+    public AppUser? Customer { get; set; }
+    public ICollection<SalaryRecord> SalaryRecords { get; set; } = new List<SalaryRecord>();
+    public ICollection<CustomerLoan> Loans { get; set; } = new List<CustomerLoan>();
+}
+
+/// <summary>
+/// سجل المرتب — المرتب الشهري للعميل
+/// </summary>
+public class SalaryRecord
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid CustomerAccountId { get; set; }
+    public int Year { get; set; }
+    public int Month { get; set; }
+    public decimal BasicSalary { get; set; }        // الراتب الأساسي
+    public decimal Allowances { get; set; }         // بدلات
+    public decimal Deductions { get; set; }         // خصومات
+    public decimal NetSalary { get; set; }          // الراتب الصافي
+    public decimal PaidAmount { get; set; }         // المبلغ المدفوع
+    public DateTime PaymentDate { get; set; }
+    public string Status { get; set; } = "pending"; // pending, paid, partial
+    public string Notes { get; set; } = "";
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+
+    public CustomerAccount? CustomerAccount { get; set; }
+    public ICollection<SalaryDetail> Details { get; set; } = new List<SalaryDetail>();
+}
+
+/// <summary>
+/// تفاصيل المرتب — بنود المرتب (راتب، بدلات، إلخ)
+/// </summary>
+public class SalaryDetail
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid SalaryRecordId { get; set; }
+    public string ItemType { get; set; } = "";      // basic, allowance, deduction
+    public string ItemName { get; set; } = "";
+    public decimal Amount { get; set; }
+
+    public SalaryRecord? SalaryRecord { get; set; }
+}
+
+/// <summary>
+/// السلف — قروض العملاء المرتبطة بحساباتهم
+/// </summary>
+public class CustomerLoan
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid CustomerAccountId { get; set; }
+    public decimal LoanAmount { get; set; }         // مبلغ القرض
+    public decimal PaidAmount { get; set; }         // المبلغ المسدد
+    public decimal RemainingAmount { get; set; }    // المتبقي
+    public int InstallmentCount { get; set; }       // عدد الأقساط
+    public int PaidInstallments { get; set; }       // الأقساط المسددة
+    public decimal MonthlyInstallment { get; set; }
+    public decimal InterestRate { get; set; }       // سعر الفائدة %
+    public DateTime LoanDate { get; set; }
+    public DateTime DueDate { get; set; }
+    public string Status { get; set; } = "active";  // active, completed, overdue
+    public string Notes { get; set; } = "";
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+
+    public CustomerAccount? CustomerAccount { get; set; }
+    public ICollection<LoanPayment> Payments { get; set; } = new List<LoanPayment>();
+}
+
+/// <summary>
+/// دفعات السلف — سداد الأقساط
+/// </summary>
+public class LoanPayment
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid CustomerLoanId { get; set; }
+    public decimal Amount { get; set; }
+    public DateTime PaymentDate { get; set; }
+    public string PaymentMethod { get; set; } = ""; // cash, transfer, check
+    public string Reference { get; set; } = "";     // رقم الشيك أو التحويل
+    public string Notes { get; set; } = "";
+
+    public CustomerLoan? CustomerLoan { get; set; }
+}
+
+/// <summary>
+/// أنواع المشتريات — نوع تسليم البضاعة
+/// </summary>
+public class PurchaseType
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid OrganizationId { get; set; }
+    public string TypeName { get; set; } = "";      // Traditional, Direct, Hybrid
+    public string Description { get; set; } = "";
+    public string Route { get; set; } = "";         // المسار: supplier->warehouse->sale أو supplier->customer
+    public bool IsActive { get; set; } = true;
+    public int DisplayOrder { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+
+    public Organization? Organization { get; set; }
+}
+
+/// <summary>
+/// التسليمات المباشرة — بضاعة من المورد مباشرة للعميل
+/// </summary>
+public class DirectDelivery
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid PurchaseId { get; set; }
+    public Guid? CustomerId { get; set; }           // العميل النهائي
+    public Guid? SupplierId { get; set; }           // المورد
+    public decimal Amount { get; set; }
+    public string DeliveryStatus { get; set; } = "pending";  // pending, delivered, received
+    public DateTime DeliveryDate { get; set; }
+    public DateTime? ReceivedDate { get; set; }
+    public string Notes { get; set; } = "";
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+
+    public ICollection<Invoice>? Invoices { get; set; }
+}
+
+/// <summary>
+/// إعدادات النظام المتقدمة للعمليات المرنة
+/// </summary>
+public class SystemSetting
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid OrganizationId { get; set; }
+    public string SettingKey { get; set; } = "";
+    public string SettingValue { get; set; } = "";
+    public string SettingType { get; set; } = "";   // boolean, string, number, json
+    public string Description { get; set; } = "";
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+
+    public Organization? Organization { get; set; }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 📋 API Request/Response Records
+// ═══════════════════════════════════════════════════════════════
+
+public record CreateSalaryRequest(
+    Guid CustomerAccountId,
+    int Month,
+    int Year,
+    decimal BasicSalary,
+    decimal Allowances,
+    decimal Deductions,
+    string Notes = ""
+);
+
+public record CreateLoanRequest(
+    Guid CustomerAccountId,
+    decimal LoanAmount,
+    int InstallmentCount,
+    decimal InterestRate,
+    DateTime DueDate,
+    string Notes = ""
+);
+
+public record DirectDeliveryRequest(
+    Guid PurchaseId,
+    Guid? CustomerId,
+    Guid? SupplierId,
+    DateTime DeliveryDate,
+    string Notes = ""
+);

@@ -102,6 +102,14 @@ class _ServerSetupScreenState extends State<ServerSetupScreen> {
                         : const Text('اتّصال'),
                   ),
                 ),
+                const SizedBox(height: 12),
+                SizedBox(
+                  height: 52,
+                  child: FilledButton.tonal(
+                    onPressed: _busy ? null : _useLocalDatabase,
+                    child: const Text('استخدام قاعدة البيانات المحلية'),
+                  ),
+                ),
               ],
             ),
           ),
@@ -172,5 +180,29 @@ class _ServerSetupScreenState extends State<ServerSetupScreen> {
         'شهادة الخادم غير موثوقة. للتركيب المحلّي استعمل http:// صراحةً.',
       _ => 'تعذّر الوصول إلى $url. تحقّق من الاتصال ومن كتابة العنوان.',
     };
+  }
+
+  /// استخدم قاعدة البيانات المحلية بدون فحص الاتصال بالخادم البعيد
+  Future<void> _useLocalDatabase() async {
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+
+    try {
+      // استخدم عنوان محلي مباشر — لا فحص اتصال، تفتح التطبيق فوراً
+      // يمكن تشغيل الـ Backend محلياً أو عبر localhost:5000
+      await ApiClient.setServer('http://localhost:5000');
+      if (!mounted) return;
+      if (widget.onDone != null) {
+        widget.onDone!();
+      } else {
+        Navigator.of(context).pop(true);
+      }
+    } catch (e) {
+      setState(() => _error = 'تعذّر تفعيل الوضع المحلي: $e');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 }

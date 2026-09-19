@@ -6,6 +6,12 @@ import '../../features/branches/presentation/branch_identity_screen.dart';
 import '../../features/inventory/presentation/inventory_screen.dart';
 import '../../features/purchasing/presentation/purchase_orders_screen.dart';
 import '../../features/customers/presentation/customers_screen.dart';
+import '../../features/customers/presentation/customer_dashboard.dart';
+import '../../features/customers/presentation/customer_accounts_screen.dart';
+import '../../features/customers/presentation/customer_loans_screen.dart';
+import '../../features/customers/presentation/salary_management_screen.dart';
+import '../../features/customers/presentation/card_balance_management_screen.dart';
+import '../../features/customers/presentation/customer_categories_screen.dart';
 import '../../features/wallet_cards/presentation/wallet_cards_screen.dart';
 import '../../features/invoices/presentation/invoices_screen.dart';
 import '../../features/notifications/presentation/notifications_screen.dart';
@@ -31,6 +37,12 @@ import '../../features/platform/presentation/create_organization_screen.dart';
 import '../../features/pos/presentation/wallet_pos_screen.dart';
 import '../../features/platform/presentation/platform_organizations_screen.dart';
 import '../../features/platform/presentation/platform_dashboard_screen.dart';
+import '../../features/testing/local_db_test_screen.dart';
+import '../../features/testing/invoices_test_screen.dart';
+import '../../features/testing/sync_queue_test_screen.dart';
+import '../../features/testing/connectivity_test_screen.dart';
+import '../../features/testing/sync_engine_test_screen.dart';
+import '../../features/testing/backend_integration_test_screen.dart';
 
 /// يقابل تماماً قائمة GoRoute السابقة في app_router.dart — لكن بدل أن يستبدل
 /// كل مسار الصفحة كلها، يبني الودجت التي يعرضها AppShell داخل تبويب. أي
@@ -52,6 +64,18 @@ Widget buildScreenForRoute(String route) {
       return const PurchaseOrdersScreen();
     case '/customers':
       return const CustomersScreen();
+    case '/customer-dashboard':
+      return const CustomerDashboard();
+    case '/customer-accounts':
+      return const CustomerAccountsScreen();
+    case '/customer-loans':
+      return const CustomerLoansScreen();
+    case '/salary-management':
+      return const SalaryManagementScreen();
+    case '/card-balance-management':
+      return const CardBalanceManagementScreen();
+    case '/customer-categories':
+      return const CustomerCategoriesScreen();
     case '/wallet-cards':
       return const WalletCardsScreen();
     case '/invoices':
@@ -108,6 +132,18 @@ Widget buildScreenForRoute(String route) {
       return const _PlatformOnly(child: PlatformOrganizationsScreen());
     case '/platform/organizations/new':
       return const _PlatformOnly(child: CreateOrganizationScreen());
+    case '/test/local-db':
+      return const LocalDbTestScreen();
+    case '/test/invoices':
+      return const InvoicesTestScreen();
+    case '/test/sync-queue':
+      return const SyncQueueTestScreen();
+    case '/test/connectivity':
+      return const ConnectivityTestScreen();
+    case '/test/sync-engine':
+      return const SyncEngineTestScreen();
+    case '/test/backend':
+      return const BackendIntegrationTestScreen();
     default:
       return const SizedBox.shrink();
   }

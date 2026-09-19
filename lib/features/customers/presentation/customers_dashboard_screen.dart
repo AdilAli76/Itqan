@@ -72,52 +72,46 @@ class _StatsCards extends StatelessWidget {
     final totalLoyaltyPoints = stats['totalLoyaltyPoints'] as int? ?? 0;
     final activeToday = stats['activeToday'] as int? ?? 0;
 
-    return Column(
-      children: [
-        Row(
-          children: [
-            Expanded(
-              child: _StatCard(
-                title: 'إجمالي العملاء',
-                value: NumberFormat('#,##0', 'en').format(totalCustomers),
-                icon: Icons.people_outline,
-                color: const Color(0xFF0B2540),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: _StatCard(
-                title: 'رصيد المحفظة',
-                value: NumberFormat('#,##0.00', 'en').format(totalWalletBalance),
-                icon: Icons.account_balance_wallet_outlined,
-                color: AppColors.success,
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 12),
-        Row(
-          children: [
-            Expanded(
-              child: _StatCard(
-                title: 'نقاط الولاء',
-                value: NumberFormat('#,##0', 'en').format(totalLoyaltyPoints),
-                icon: Icons.star_outline,
-                color: AppColors.warning,
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: _StatCard(
-                title: 'نشطين اليوم',
-                value: NumberFormat('#,##0', 'en').format(activeToday),
-                icon: Icons.trending_up_outlined,
-                color: AppColors.info,
-              ),
-            ),
-          ],
-        ),
-      ],
+    final width = MediaQuery.of(context).size.width;
+    final isDesktop = width > 1024;
+    final isTablet = width > 768;
+    final crossAxisCount = isDesktop ? 4 : (isTablet ? 2 : 1);
+
+    final cards = [
+      _StatCard(
+        title: 'إجمالي العملاء',
+        value: NumberFormat('#,##0', 'en').format(totalCustomers),
+        icon: Icons.people_outline,
+        color: const Color(0xFF0B2540),
+      ),
+      _StatCard(
+        title: 'رصيد المحفظة',
+        value: NumberFormat('#,##0.00', 'en').format(totalWalletBalance),
+        icon: Icons.account_balance_wallet_outlined,
+        color: AppColors.success,
+      ),
+      _StatCard(
+        title: 'نقاط الولاء',
+        value: NumberFormat('#,##0', 'en').format(totalLoyaltyPoints),
+        icon: Icons.star_outline,
+        color: AppColors.warning,
+      ),
+      _StatCard(
+        title: 'نشطين اليوم',
+        value: NumberFormat('#,##0', 'en').format(activeToday),
+        icon: Icons.trending_up_outlined,
+        color: AppColors.info,
+      ),
+    ];
+
+    return GridView.count(
+      crossAxisCount: crossAxisCount,
+      mainAxisSpacing: 12,
+      crossAxisSpacing: 12,
+      childAspectRatio: 1.2,
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      children: cards,
     );
   }
 }
@@ -184,61 +178,68 @@ class _CategoriesChart extends StatelessWidget {
     });
 
     return AppSurface(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('توزيع الأعضاء حسب الفئات', style: AppTextStyles.bodyLg()),
-          const SizedBox(height: 16),
-          ...categories.map((cat) {
-            final count = cat['customerCount'] as int? ?? 0;
-            final percentage = totalMembers > 0 ? (count / totalMembers * 100) : 0;
-            final amount = (cat['periodTotal'] as num?)?.toDouble() ?? 0;
-            final barWidth = maxAmount > 0 ? (amount / maxAmount * 250) : 0;
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final availableWidth = constraints.maxWidth - 32;
+          final barMaxWidth = availableWidth * 0.6;
 
-            return Padding(
-              padding: const EdgeInsets.only(bottom: 12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('توزيع الأعضاء حسب الفئات', style: AppTextStyles.bodyLg()),
+              const SizedBox(height: 16),
+              ...categories.map((cat) {
+                final count = cat['customerCount'] as int? ?? 0;
+                final percentage = totalMembers > 0 ? (count / totalMembers * 100) : 0;
+                final amount = (cat['periodTotal'] as num?)?.toDouble() ?? 0;
+                final barWidth = maxAmount > 0 ? (amount / maxAmount * barMaxWidth) : 0;
+
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Expanded(
-                        child: Text(
-                          cat['name'] as String? ?? '',
-                          style: AppTextStyles.bodyMd(),
-                          overflow: TextOverflow.ellipsis,
-                        ),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Expanded(
+                            child: Text(
+                              cat['name'] as String? ?? '',
+                              style: AppTextStyles.bodyMd(),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          Text(
+                            '$count (${percentage.toStringAsFixed(1)}%)',
+                            style: AppTextStyles.caption(),
+                          ),
+                        ],
                       ),
-                      Text(
-                        '$count (${percentage.toStringAsFixed(1)}%)',
-                        style: AppTextStyles.caption(),
+                      const SizedBox(height: 4),
+                      Row(
+                        children: [
+                          Container(
+                            width: barWidth.toDouble(),
+                            height: 24,
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF0B2540),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            NumberFormat('#,##0.00', 'en').format(amount),
+                            style: AppTextStyles.caption(),
+                          ),
+                        ],
                       ),
                     ],
                   ),
-                  const SizedBox(height: 4),
-                  Row(
-                    children: [
-                      Container(
-                        width: barWidth.toDouble(),
-                        height: 24,
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF0B2540),
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        NumberFormat('#,##0.00', 'en').format(amount),
-                        style: AppTextStyles.caption(),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            );
-          }),
-        ],
+                );
+              }).toList(),
+            ],
+          );
+        },
       ),
     );
   }
@@ -249,24 +250,21 @@ class _StatsSkeleton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      children: [
-        Row(
-          children: [
-            Expanded(child: AppSurface(child: SizedBox(height: 80, child: Container()))),
-            const SizedBox(width: 12),
-            Expanded(child: AppSurface(child: SizedBox(height: 80, child: Container()))),
-          ],
-        ),
-        const SizedBox(height: 12),
-        Row(
-          children: [
-            Expanded(child: AppSurface(child: SizedBox(height: 80, child: Container()))),
-            const SizedBox(width: 12),
-            Expanded(child: AppSurface(child: SizedBox(height: 80, child: Container()))),
-          ],
-        ),
-      ],
+    final width = MediaQuery.of(context).size.width;
+    final isDesktop = width > 1024;
+    final isTablet = width > 768;
+    final crossAxisCount = isDesktop ? 4 : (isTablet ? 2 : 1);
+
+    return GridView.count(
+      crossAxisCount: crossAxisCount,
+      mainAxisSpacing: 12,
+      crossAxisSpacing: 12,
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      children: List.generate(
+        4,
+        (index) => AppSurface(child: SizedBox(height: 80, child: Container())),
+      ),
     );
   }
 }

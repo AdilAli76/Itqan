@@ -7,6 +7,7 @@ import '../shell/shell_scope.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_text_styles.dart';
 import '../theme/branding_provider.dart';
+import '../constants/app_constants.dart';
 import 'breakpoints.dart';
 import '../../shared/widgets/app_navbar.dart';
 import '../../shared/widgets/app_sidebar.dart';
@@ -110,13 +111,18 @@ class AdaptiveScaffold extends ConsumerWidget {
                 ),
               ),
             ),
-          if (insideShell && isDesktop) ...[
+          if (isDesktop) ...[
             if (actions != null && actions!.isNotEmpty) ...[
               const SizedBox(width: 16),
               SizedBox(height: 24, child: VerticalDivider(width: 1, color: AppColors.border)),
               const SizedBox(width: 16),
             ] else
               const SizedBox(width: 16),
+            Text(
+              'v${AppConstants.appVersion}',
+              style: AppTextStyles.caption(color: AppColors.textSecondary),
+            ),
+            const SizedBox(width: 12),
             const _ThemeToggle(),
             const SizedBox(width: 8),
             const _HeaderAccountArea(),
@@ -250,27 +256,8 @@ class _HeaderAccountArea extends ConsumerWidget {
         return Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            if (role != null) ...[
+            if (role != null)
               Text(_roleLabels[role] ?? role, style: AppTextStyles.bodyMd(color: AppColors.textSecondary)),
-              const SizedBox(width: 8),
-            ],
-            // «غيّر كلمة مروري» بجوار الخروج لا في شاشة الإعدادات: شاشة
-            // الإعدادات مقصورة على المديرين، وتغيير المرء كلمته حقٌّ لكل
-            // حساب لا صلاحيةٌ تُمنح — والكاشير هو أوّل من يحتاجه بعد كلمةٍ
-            // أُمليت عليه هاتفياً.
-            IconButton(
-              onPressed: () => context.go('/change-password'),
-              icon: const Icon(Icons.password_outlined, size: 20),
-              tooltip: 'تغيير كلمة المرور',
-            ),
-            IconButton(
-              onPressed: () async {
-                await performLogout(ref);
-                if (context.mounted) context.go('/login');
-              },
-              icon: const Icon(Icons.logout, size: 20),
-              tooltip: 'تسجيل الخروج',
-            ),
           ],
         );
       },

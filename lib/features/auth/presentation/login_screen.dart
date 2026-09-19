@@ -89,10 +89,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         context.go('/change-password?forced=1');
         return;
       }
-      if (response != null && response.data['isPlatformAdmin'] == true) {
-        context.go('/platform');
-        return;
-      }
       context.go('/app');
     } catch (_) {
       setState(() => _error = 'بيانات الدخول غير صحيحة، أو تعذّر الاتصال بالسيرفر');

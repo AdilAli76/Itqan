@@ -1,0 +1,37 @@
+🚀 دليل نشر Itqan Web على الخادم
+
+الدومين: https://erp.droob-albayan.ly/app
+النسخة: 1.0.0
+
+📊 معلومات الملفات:
+- حجم البناء: 37 MB
+- المجلد: build/web/
+- ملفات رئيسية: index.html, flutter.js, .htaccess, canvaskit/
+
+🔧 خطوات النشر:
+
+1. استخدم FileZilla أو WinSCP
+   - المضيف: droob-albayan.ly
+   - انتقل: /var/www/html/app/
+
+2. رفع جميع ملفات build/web/:
+   ✓ index.html
+   ✓ flutter.js
+   ✓ flutter_bootstrap.js
+   ✓ .htaccess
+   ✓ canvaskit/ (مجلد كامل)
+   ✓ assets/ (مجلد كامل)
+
+3. تعيين الصلاحيات:
+   chmod 755 /var/www/html/app/
+
+4. اختبر:
+   https://erp.droob-albayan.ly/app
+
+ملاحظات مهمة:
+✓ ملف .htaccess موجود للتوجيه الصحيح
+✓ يفعّل gzip compression
+✓ يضيف CORS headers
+✓ يتحكم بـ Cache
+
+موفق بالنشر! 🚀
